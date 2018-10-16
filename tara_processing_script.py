@@ -9,8 +9,9 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 import numpy as np
-import datetime
+from datetime import datetime
 import random
+import matplotlib.gridspec as gridspec
 
 def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df, time_date_str=None):
     print('Generating stacked bar data submission')
@@ -350,140 +351,14 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # we can also hack the code for this from SP
 
     # read in the SymPortal relative abundance output
-    # smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df = process_div_df(path_to_tab_delim_count_DIV)
+    smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df_div = process_div_df(path_to_tab_delim_count_DIV)
 
     # now read in a process the type df too.
-    # TODO PROCESS TYPE
 
-    sp_output_df_type = pd.read_csv(path_to_tab_delim_count_type, sep='\t', lineterminator='\n', skiprows=[0, 1, 2, 3, 5],
-                               header=None)
+    colour_dict_type, sp_output_df_type, sorted_type_prof_names_by_local_abund, max_n_cols_type, max_n_rows_type, num_leg_cells_type,  = process_type_df(path_to_tab_delim_count_type)
 
-    # get a list of tups that are the seq names and the abundances zipped together
-    type_profile_to_abund_tup_list = [(name, int(abund)) for name, abund in
-                                      zip(sp_output_df_type.iloc[1][2:].values.tolist(),
-                                          sp_output_df_type.iloc[0][2:].values.tolist())]
-
-    # convert the names that are numbers into int strings rather than float strings.
-    int_temp_list = []
-    for name_abund_tup in type_profile_to_abund_tup_list:
-        try:
-            int_temp_list.append((str(int(name_abund_tup[0])), int(name_abund_tup[1])))
-        except:
-            int_temp_list.append((name_abund_tup[0], int(name_abund_tup[1])))
-    type_profile_to_abund_tup_list = int_temp_list
-
-    # need to drop the rows that contain the sequence accession and species descriptions
-    for i, row_name in enumerate(sp_output_df_type.iloc[:, 0]):
-        if 'Sequence accession' in row_name:
-            # then we want to drop all rows from here until the end
-            index_to_drop_from = i
-            break
-
-    sp_output_df_type = sp_output_df_type.iloc[:index_to_drop_from]
-
-    # now drop the sample name columns
-    sp_output_df_type.drop(columns=1, inplace=True)
-
-    # make headers
-    sp_output_df_type.columns = ['sample_id'] + [a[0] for a in type_profile_to_abund_tup_list]
-
-    # now drop the local abund row and promote the its2_type_prof names to columns headers.
-    sp_output_df_type.drop(index=[0, 1], inplace=True)
-
-    sp_output_df_type = sp_output_df_type.set_index(keys='sample_id', drop=True).astype('float')
-    # we should plot sample by sample and its2 type by its2 type in the order of the output
-
-    # the problem with doing he convert_to_pastel is that the colours become very similar
-    # colour_palette = convert_to_pastel(get_colour_list())
-    # Rather, I will attempt to generate a quick set of colours that are pastel and have a minimum distance
-    # rule for any colours that are generated from each other.
-    # let's do this for 50 colours to start with and see how long it takes.
-    # turns out it is very quick. Easily quick enough to do dynamically.
-    # When working with pastel colours (i.e. mixing with 255,255,255 it is probably best to work with a smaller dist cutoff
-
-    colour_palette_pas = ['#%02x%02x%02x' % rgb_tup for rgb_tup in
-                          create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=1000, num_cols=50,
-                                             time_out_iterations=10000)]
-
-    # # The below 3d scatter produces a 3d scatter plot to examine the spread of the colours created
-    # from mpl_toolkits.mplot3d import Axes3D
-    # colour_palette = create_colour_list(sq_dist_cutoff=5000)
-    # hex_pal = ['#%02x%02x%02x' % rgb_tup for rgb_tup in colour_palette]
-    # colcoords = [list(a) for a in zip(*colour_palette)]
-    # print(colcoords)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # ax.scatter(colcoords[0], colcoords[1], colcoords[2], c=hex_pal, marker='o')
-
-    # colour_palette = get_colour_list()
-    grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
-
-    # we will use the col headers as the its2 type profile order for plotting but we
-    # we should colour according to the abundance of the its2 type profiles
-    # as we don't want to run out of colours by the time we get to profiles that are very abundant.
-    # The sorted_type_prof_names_by_local_abund object has the names of the its2 type profile in order of abundance
-    # we will use the index order as the order of samples to plot
-
-    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
-    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
-    sorted_type_prof_names_by_local_abund = [a[0] for a in
-                                             sorted(type_profile_to_abund_tup_list, key=lambda x: x[1], reverse=True)]
-
-    max_n_cols = 5
-    max_n_rows = 10
-    num_leg_cells = max_n_cols * max_n_rows
-
-    colour_dict = {}
-    for i in range(len(sorted_type_prof_names_by_local_abund)):
-        if i < num_leg_cells:
-            colour_dict[sorted_type_prof_names_by_local_abund[i]] = colour_palette_pas[i]
-        else:
-            grey_index = i % len(grey_palette)
-            colour_dict[sorted_type_prof_names_by_local_abund[i]] = grey_palette[grey_index]
-    #TODO end
-
-
-    # In theory the output should already be somewhat ordered in that the samples should be in order of similarity.
-    # However, these have the artifical clade ordering so for the plotting it will probably be better to get a new
-    # order for the samples that is not constrained to the order of the clades. For this we should order as usual
-    # according to the most common majority sequences and then within this grouping we should order according to the
-    # the abundance of these sequences within the samples.
-    # We should plot the sequences most abundant across all samples first.
-    # In terms of colour I think its easiest if we go with the high contrast colours list of 269 for the minus black
-    # and white if they are in there for the most abundant sequencs.
-    # if we have more than this number of sequences in the dataset then we should simply work ourway through a grey
-    # palette for the remainder of the sequences.
-    # when doing the plotting using the matplotlib library I want to try a new approach of creating the rectangle
-    # patches individually and holding them in a list before adding them all to the plot at once. Previously we had
-    # been generating the plot one sequence at a time. This can take a considerable amount of time when we get above
-    # ~50-150 sequences depending on the number of samples.
-
-    colour_palette = get_colour_list()
-    grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
-
-    # get a list of the sequences in order of their abundance and use this list to create the colour dict
-    # the abundances can be got by simply summing up the columns making sure to ommit the last columns
-    abundance_dict = {}
-    for col in list(sp_output_df_div):
-        abundance_dict[col] = sum(sp_output_df_div[col])
-
-    # get the names of the sequences sorted according to their totalled abundance
-    ordered_list_of_seqs = [x[0] for x in sorted(abundance_dict.items(), key=lambda x: x[1], reverse=True)]
-
-    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
-    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
-    # If we aer only going to have a legend that is cols x rows as shown below, then we should only use
-    # that many colours in the plotting.
-    max_n_cols = 8
-    max_n_rows = 7
-    num_leg_cells = max_n_cols * max_n_rows
-    colour_dict = {}
-    for i in range(len(ordered_list_of_seqs)):
-        if i < num_leg_cells:
-            colour_dict[ordered_list_of_seqs[i]] = colour_palette[i]
-        else:
-            grey_index = i % len(grey_palette)
-            colour_dict[ordered_list_of_seqs[i]] = grey_palette[grey_index]
+    colour_dict_div, max_n_cols_div, max_n_rows_div, num_leg_cells_div, ordered_list_of_seqs = get_div_colour_dict_and_ordered_list_of_seqs(
+        sp_output_df_div)
 
     # the ordered_list_of_seqs can also be used for the plotting order
 
@@ -494,7 +369,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # sample_order_list. It is very useful to have the ITS2 type profile output figure and the seq figure
     # in the same sample order for direct comparison
 
-    #TODO get the ordered_sample_list simply from the index order of the df.
+
     ordered_sample_list = sp_output_df_div.index.values.tolist()
     # let's reorder the columns and rows of the sp_output_df according to the sequence sample and sequence
     # order so that plotting the data is easier
@@ -512,46 +387,283 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # It turns out that the colour parameters are ignored from the individual patches when using
 
 
-
-    # n_samples = len(sp_output_df.index.values.tolist())
-    # smp_per_plot = 50
-    # # number of subplots will be one per smp_per_plot
-    # # and if tehre are remainers be sure to add an extra plot for this
-    # if (n_samples % smp_per_plot) != 0:
-    #     n_subplots = int(n_samples / smp_per_plot) + 1
-    # else:
-    #     n_subplots = int(n_samples / smp_per_plot)
-
+    # https://matplotlib.org/users/gridspec.html
     fig = plt.figure(figsize=(14, 10))
     # the bottom row will be for the legend
-    gs = plt.GridSpec(4, 9, figure=fig)
+    # the second to last will just be invisible to give a space between the legend and the other plots
+    gs = plt.GridSpec(5, 3, figure=fig, height_ratios=[1,1,1,0.2,1])
+    # within each of the GrdiSpec subplots we will make a subplotspec which is three plots on one row
     ax_list = []
+    grid_spec_subplot_list = []
+    for row_ind in range(3):
+        for col_ind in range(3):
+            temp_grid_spec_subplot = gridspec.GridSpecFromSubplotSpec(1,3,subplot_spec=gs[row_ind,col_ind])
+            grid_spec_subplot_list.append(temp_grid_spec_subplot)
+            for i in range(3):
+                #NB this might be a 2d array, lets see.
+                ax = plt.Subplot(fig, temp_grid_spec_subplot[i])
+                ax_list.append(ax)
+                fig.add_subplot(ax)
 
+    # now do the invisible row that will give us the space we want
+    ax_space = plt.subplot(gs[3, :])
+    remove_axes_but_allow_labels(ax_space)
+    # now split up the final row to put the legend in. One for DIVs and one for TYPEs
+    temp_grid_spec_subplot_leg = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[4, :])
+    leg_axes = []
+    for i in range(2):
+        ax = plt.Subplot(fig, temp_grid_spec_subplot_leg[i])
+        leg_axes.append(ax)
+        fig.add_subplot(ax)
 
-    for i in range(27):
-        grid_x_placement_coord = i%9
-        grid_y_placement_coord = int(i/9)
-        ax_list.append(plt.subplot(gs[grid_y_placement_coord, grid_x_placement_coord]))
-
-    #finally the ax for the legend
-    legend_ax = plt.subplot(gs[3, :])
-
-    # ax0 = plt.subplot(gs[0])
-    # ax1 = plt.subplot(gs[1])
-    # ax2 = plt.subplot(gs[2])
-    # ax3 = plt.subplot(gs[3])
-    # ax4 = plt.subplot(gs[4])
-    # ax5 = plt.subplot(gs[5])
-
-    # # depth of image is 3 inches per subplot
-    # # we have to work out how to access the axarr
-    # # we add  1 to the n_subplots here for the legend at the bottom
-    # f, axarr = plt.subplots(n_subplots + 1, 1, figsize=(10, 3 * n_subplots))
 
     # we will leave one subplot empty for making the legend in at the end
+    plot_data_axes(ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
+                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type)
+
+    # PLOT DIV LEGEND
+    plot_div_legend(colour_dict_div, leg_axes, max_n_cols_div, max_n_rows_div, num_leg_cells_div, ordered_list_of_seqs)
+
+    # PLOT TYPE LEGEND
+    plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_type, num_leg_cells_type,
+                     sorted_type_prof_names_by_local_abund)
+
+    # add the labels and text here so that we don't have to debug through all of the plotting each time
+    add_labels(ax_list, leg_axes)
+
+    date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
+
+    # plt.tight_layout()
+    fig_output_base = '{}/{}'.format(os.getcwd(), date_time_str)
+    sys.stdout.write('\nsaving as .svg\n')
+    plt.savefig('{}_tara_init_results_coral_bar_plot.svg'.format(fig_output_base))
+    sys.stdout.write('\nsaving as .png\n')
+    plt.savefig('{}_tara_init_results_coral_bar_plot.png'.format(fig_output_base))
+    # plt.show()
+    return
+
+
+def add_labels(ax_list, leg_axes):
+    ax_list[1].set_title('ISLAND06')
+    ax_list[4].set_title('ISLAND10')
+    ax_list[7].set_title('ISLAND15')
+
+    ax_list[0].set_ylabel('SITE 1', fontsize='x-large')
+    ax_list[9].set_ylabel('SITE 2', fontsize='x-large')
+    ax_list[18].set_ylabel('SITE 3', fontsize='x-large')
+
+    ax_list[18].set_xlabel('porites', fontsize='medium')
+    ax_list[19].set_xlabel('pocillopora', fontsize='medium')
+    ax_list[20].set_xlabel('millepora', fontsize='medium')
+
+    ax_list[21].set_xlabel('porites', fontsize='medium')
+    ax_list[22].set_xlabel('pocillopora', fontsize='medium')
+    ax_list[23].set_xlabel('millepora', fontsize='medium')
+
+    ax_list[24].set_xlabel('porites', fontsize='medium')
+    ax_list[25].set_xlabel('pocillopora', fontsize='medium')
+    ax_list[26].set_xlabel('millepora', fontsize='medium')
+
+    leg_axes[0].set_xlabel('sequence')
+    leg_axes[1].set_xlabel('ITS2 type profile')
+
+
+def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_type, num_leg_cells_type,
+                     sorted_type_prof_names_by_local_abund):
+    # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
+    # all in favour... Ok.
+    # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
+    # the one we currenty have. So.. we will add a subplot when we initially create the figure. We will make the axis
+    # 100 by 100 just to make our coordinate easy to work with. We can get rid of all of the axes lines and ticks
+    # The type names are generally quite long so we will cut the type legends down to 4 x 8
+    # we should start plotting in the top left working right and then down
+    # until we have completed 100 sequences.
+    # Y axis coordinates
+    # we will allow a buffer of 0.5 of the legend box's height between each legend box.
+    # as such the coordinates of each y will be in increments of 100 / (1.5 * num rows)
+    # the depth of the Rectangle for the legend box will be 2/3 * the above.
+    y_coord_increments = 100 / (max_n_rows_type)
+    leg_box_depth = 2 / 3 * y_coord_increments
+    # X axis coordinates
+    # for the x axis we will work in sets of three columns were the first col will be for the box
+    # and the second and third cols will be for the text
+    # as such the x coordinates will be in increments of 100 / (3 * numcols) starting with 0
+    # the width of the legend Rectangle will be the above number * 1/6 (I am making this smaller for the types).
+    x_coord_increments = 100 / max_n_cols_type
+    leg_box_width = x_coord_increments / 6
+    # go column by column
+    # we can now calculate the actual number of columns and rows we are going to need.
+    if len(sorted_type_prof_names_by_local_abund) < num_leg_cells_type:
+        if len(sorted_type_prof_names_by_local_abund) % max_n_cols_type != 0:
+            n_rows_type = int(len(sorted_type_prof_names_by_local_abund) / max_n_cols_type) + 1
+        else:
+            n_rows_type = int(len(sorted_type_prof_names_by_local_abund) / max_n_cols_type)
+        last_row_len = len(sorted_type_prof_names_by_local_abund) % max_n_cols_type
+    else:
+        n_rows_type = max_n_rows_type
+        last_row_len = max_n_cols_type
+    its2_profile_count = 0
+    # Once we know the number of rows, we can also adjust the y axis limits
+    leg_axes[1].set_xlim(0, 100)
+    # axarr[-1].set_ylim(0, 100)
+    leg_axes[1].set_ylim(0, ((n_rows_type - 1) * y_coord_increments) + leg_box_depth)
+    leg_axes[1].invert_yaxis()
+    # If there are more sequences than there are rows x cols then we need to make sure that we are only going
+    # to plot the first row x cols number of sequences.
+    sys.stdout.write(
+        '\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows_type * max_n_cols_type)))
+    label_max_length = 10
+    for row_increment in range(min(n_rows_type, max_n_rows_type)):
+        # if not in the last row then do a full set of columns
+        if row_increment + 1 != n_rows_type:
+            for col_increment in range(max_n_cols_type):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                leg_axes[1].add_patch(Rectangle((leg_box_x, leg_box_y),
+                                                width=leg_box_width, height=leg_box_depth,
+                                                color=colour_dict_type[
+                                                    sorted_type_prof_names_by_local_abund[its2_profile_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                # lets limit the name to 15 characters and '...'
+                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > label_max_length:
+                    text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count][
+                                      :label_max_length] + '...'
+                else:
+                    text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count]
+                leg_axes[1].text(text_x, text_y, text_for_legend,
+                                 verticalalignment='center',
+                                 fontsize=8)
+
+                # increase the sequence count
+                its2_profile_count += 1
+        # else just do up to the number of last_row_cols
+        else:
+            for col_increment in range(last_row_len):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                leg_axes[1].add_patch(Rectangle((leg_box_x, leg_box_y),
+                                                width=leg_box_width, height=leg_box_depth,
+                                                color=colour_dict_type[
+                                                    sorted_type_prof_names_by_local_abund[its2_profile_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                # lets limit the name to 15 characters and '...'
+                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > label_max_length:
+                    text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count][
+                                      :label_max_length] + '...'
+                else:
+                    text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count]
+                leg_axes[1].text(text_x, text_y, text_for_legend,
+                                 verticalalignment='center',
+                                 fontsize=8)
+
+                # Increase the sequences count
+                its2_profile_count += 1
+    remove_axes_but_allow_labels(leg_axes[1])
+
+
+def plot_div_legend(colour_dict_div, leg_axes, max_n_cols_div, max_n_rows_div, num_leg_cells_div, ordered_list_of_seqs):
+    # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
+    # all in favour... Ok.
+    # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
+    # the one we currenty have. So.. we will add a subplot when we initially create the figure. We will make the axis
+    # 100 by 100 just to make our coordinate easy to work with. We can get rid of all of the axes lines and ticks
+    # lets aim to plot a 10 by 10 legend max
+    # we should start plotting in the top left working right and then down
+    # until we have completed 100 sequences.
+    # Y axis coordinates
+    # we will allow a buffer of 0.5 of the legend box's height between each legend box.
+    # as such the coordinates of each y will be in increments of 100 / (1.5 * num rows)
+    # the depth of the Rectangle for the legend box will be 2/3 * the above.
+    y_coord_increments = 100 / (max_n_rows_div)
+    leg_box_depth = 2 / 3 * y_coord_increments
+    # X axis coordinates
+    # for the x axis we will work in sets of three columns were the first col will be for the box
+    # and the second and third cols will be for the text
+    # as such the x coordinates will be in increments of 100 / (3 * numcols) starting with 0
+    # the width of the legend Rectangle will be the above number * 1/3.
+    x_coord_increments = 100 / max_n_cols_div
+    leg_box_width = x_coord_increments / 3
+    # go column by column
+    # we can now calculate the actual number of columns and rows we are going to need.
+    if len(ordered_list_of_seqs) < num_leg_cells_div:
+        if len(ordered_list_of_seqs) % max_n_cols_div != 0:
+            n_rows_div = int(len(ordered_list_of_seqs) / max_n_cols_div) + 1
+        else:
+            n_rows_div = int(len(ordered_list_of_seqs) / max_n_cols_div)
+        last_row_len = len(ordered_list_of_seqs) % max_n_cols_div
+    else:
+        n_rows_div = max_n_rows_div
+        last_row_len = max_n_cols_div
+    sequence_count = 0
+    # Once we know the number of rows, we can also adjust the y axis limits
+    leg_axes[0].set_xlim(0, 100)
+    # axarr[-1].set_ylim(0, 100)
+    leg_axes[0].set_ylim(0, ((n_rows_div - 1) * y_coord_increments) + leg_box_depth)
+    leg_axes[0].invert_yaxis()
+    # If there are more sequences than there are rows x cols then we need to make sure that we are only going
+    # to plot the first row x cols number of sequences.
+    sys.stdout.write(
+        '\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows_div * max_n_cols_div)))
+    for row_increment in range(min(n_rows_div, max_n_rows_div)):
+        # if not in the last row then do a full set of columns
+        if row_increment + 1 != n_rows_div:
+            for col_increment in range(max_n_cols_div):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                leg_axes[0].add_patch(Rectangle((leg_box_x, leg_box_y),
+                                                width=leg_box_width, height=leg_box_depth,
+                                                color=colour_dict_div[ordered_list_of_seqs[sequence_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                leg_axes[0].text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
+                                 fontsize=8)
+
+                # increase the sequence count
+                sequence_count += 1
+        # else just do up to the number of last_row_cols
+        else:
+            for col_increment in range(last_row_len):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                leg_axes[0].add_patch(Rectangle((leg_box_x, leg_box_y),
+                                                width=leg_box_width, height=leg_box_depth,
+                                                color=colour_dict_div[ordered_list_of_seqs[sequence_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                leg_axes[0].text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
+                                 fontsize=8)
+
+                # Increase the sequences count
+                sequence_count += 1
+    remove_axes_but_allow_labels(leg_axes[0])
+    # leg_axes[0].spines[].set_visible(False)
+    # leg_axes[0].get_xaxis().set_visible(False)
+    # leg_axes[0].get_yaxis().set_visible(False)
+
+def remove_axes_but_allow_labels(ax):
+    ax.set_frame_on(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+def plot_data_axes(ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
+                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type):
     ax_count = 0
-    for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
-        for site in ['SITE01', 'SITE02', 'SITE03']:
+    for site in ['SITE01', 'SITE02', 'SITE03']:
+        for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
             for spp in ['PORITES', 'POCILLOPORA', 'MILLEPORA']:
                 ax = ax_list[ax_count]
                 patches_list = []
@@ -568,17 +680,20 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
                     (info_df['location'] == location) &
                     (info_df['site'] == site) &
                     (info_df['spp_water'] == spp)
-                ].index.values.tolist()
+                    ].index.values.tolist()
 
                 # temporarily remove CO0002044, CO0002041
                 # from the above list
                 if 'CO0002044' or 'CO0002041' in sample_names_of_set:
-                    sample_names_of_set = [name for name in sample_names_of_set if name not in ['CO0002044', 'CO0002041']]
+                    sample_names_of_set = [name for name in sample_names_of_set if
+                                           name not in ['CO0002044', 'CO0002041']]
 
                 # convert these to sample IDs
                 # The sample names in symportal are actually the full file names version rather than
                 # the shorter versions in the info_df. As such we should we will have to do a conversion here
-                full_sample_names = ['_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in sample_names_of_set]
+                full_sample_names = [
+                    '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in
+                    sample_names_of_set]
                 smple_ids_of_set = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names]
 
                 # now we want to plot in the order of the ordered_sample_list
@@ -587,168 +702,198 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
                 num_smp_in_this_subplot = len(ordered_smple_ids_of_set)
                 x_tick_label_list = []
                 for smple_id_to_plot in ordered_smple_ids_of_set:
-
-                    # PLOT DIVs
+                    # General plotting
                     sys.stdout.write('\rPlotting sample: {}'.format(smple_id_to_plot))
                     x_tick_label_list.append(smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0])
                     # for each sample we will start at 0 for the y and then add the height of each bar to this
-                    bottom = 0
-                    # for each sequence, create a rect patch
-                    # the rect will be 1 in width and centered about the ind value.
-                    for seq in list(sp_output_df_div):
-                        # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
-                        rel_abund = sp_output_df_div.loc[smple_id_to_plot, seq]
-                        if rel_abund > 0:
-                            patches_list.append(Rectangle((ind - 0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
-                            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
-                            colour_list.append(colour_dict[seq])
-                            bottom += rel_abund
+
+                    # PLOT DIVs
+                    plot_div_over_type(colour_dict_div, colour_list, ind, patches_list, smple_id_to_plot,
+                                       sp_output_df_div)
+
+                    # PLOT type
+                    plot_type_under_div(colour_dict_type, colour_list, ind, patches_list, smple_id_to_plot,
+                                        sp_output_df_type)
                     ind += 1
 
-                # We can try making a custom colour map
-                # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
-                this_cmap = ListedColormap(colour_list)
-
-                # here we should have a list of Rectangle patches
-                # now create the PatchCollection object from the patches_list
-                patches_collection = PatchCollection(patches_list, cmap=this_cmap)
-                patches_collection.set_array(np.arange(len(patches_list)))
-
-                # if n_subplots is only 1 then we can refer directly to the axarr object
-                # else we will need ot reference the correct set of axes with i
-                # Add the pathces to the axes
-                ax.add_collection(patches_collection)
-                ax.autoscale_view()
-                ax.figure.canvas.draw()
-
-                # also format the axes.
-                # make it so that the x axes is constant length that will be the num of samples per subplot
-                # we will hard wire this for the time being
-                smp_per_plot = 10
-                ax.set_xlim(0 - 0.5, smp_per_plot - 0.5)
-                ax.set_ylim(0, 1)
-                ax.set_xticks(range(num_smp_in_this_subplot))
-                ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
-                ax.get_yaxis().set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.spines['top'].set_visible(False)
-                ax.spines['left'].set_visible(False)
-
-                # as well as getting rid of the top and right axis splines
-                # I'd also like to restrict the bottom spine to where there are samples plotted but also
-                # maintain the width of the samples
-                # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
-                # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
-                ax.spines['bottom'].set_visible(False)
-                ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
+                paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot, patches_list,
+                                                x_tick_label_list)
 
                 ax_count += 1
 
-    # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
-    # all in favour... Ok.
-    # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
-    # the one we currenty have. So.. we will add a subplot when we initially create the figure. We will make the axis
-    # 100 by 100 just to make our coordinate easy to work with. We can get rid of all of the axes lines and ticks
 
-    # lets aim to plot a 10 by 10 legend max
-    # we should start plotting in the top left working right and then down
-    # until we have completed 100 sequences.
+def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot, patches_list, x_tick_label_list):
+    # We can try making a custom colour map
+    # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
+    this_cmap = ListedColormap(colour_list)
+    # here we should have a list of Rectangle patches
+    # now create the PatchCollection object from the patches_list
+    patches_collection = PatchCollection(patches_list, cmap=this_cmap)
+    patches_collection.set_array(np.arange(len(patches_list)))
+    # if n_subplots is only 1 then we can refer directly to the axarr object
+    # else we will need ot reference the correct set of axes with i
+    # Add the pathces to the axes
+    ax.add_collection(patches_collection)
+    ax.autoscale_view()
+    ax.figure.canvas.draw()
+    # also format the axes.
+    # make it so that the x axes is constant length that will be the num of samples per subplot
+    # we will hard wire this for the time being
+    smp_per_plot = 10
+    ax.set_xlim(0 - 0.5, smp_per_plot - 0.5)
+    ax.set_ylim(-0.2, 1)
+    # ax.set_xticks(range(num_smp_in_this_subplot))
+    # ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
 
-    # Y axis coordinates
-    # we will allow a buffer of 0.5 of the legend box's height between each legend box.
-    # as such the coordinates of each y will be in increments of 100 / (1.5 * num rows)
-    # the depth of the Rectangle for the legend box will be 2/3 * the above.
-    y_coord_increments = 100 / (max_n_rows)
-    leg_box_depth = 2 / 3 * y_coord_increments
+    remove_axes_but_allow_labels(ax)
+    # ax.get_yaxis().set_visible(False)
+    # ax.get_xaxis().set_visible(False)
+    # ax.spines['right'].set_visible(False)
+    # ax.spines['top'].set_visible(False)
+    # ax.spines['left'].set_visible(False)
+    # as well as getting rid of the top and right axis splines
+    # I'd also like to restrict the bottom spine to where there are samples plotted but also
+    # maintain the width of the samples
+    # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
+    # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
+    # ax.spines['bottom'].set_visible(False)
+    ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
 
-    # X axis coordinates
-    # for the x axis we will work in sets of three columns were the first col will be for the box
-    # and the second and third cols will be for the text
-    # as such the x coordinates will be in increments of 100 / (3 * numcols) starting with 0
-    # the width of the legend Rectangle will be the above number * 1/3.
-    x_coord_increments = 100 / max_n_cols
-    leg_box_width = x_coord_increments / 3
 
-    # go column by column
-    # we can now calculate the actual number of columns and rows we are going to need.
-    if len(ordered_list_of_seqs) < num_leg_cells:
-        if len(ordered_list_of_seqs) % max_n_cols != 0:
-            n_rows = int(len(ordered_list_of_seqs) / max_n_cols) + 1
+def plot_div_over_type(colour_dict_div, colour_list, ind, patches_list, smple_id_to_plot, sp_output_df_div):
+    bottom_div = 0
+    # for each sequence, create a rect patch
+    # the rect will be 1 in width and centered about the ind value.
+    for seq in list(sp_output_df_div):
+        # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+        rel_abund_div = sp_output_df_div.loc[smple_id_to_plot, seq]
+        if rel_abund_div > 0:
+            patches_list.append(Rectangle((ind - 0.5, bottom_div), 1, rel_abund_div, color=colour_dict_div[seq]))
+            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+            colour_list.append(colour_dict_div[seq])
+            bottom_div += rel_abund_div
+
+
+def plot_type_under_div(colour_dict_type, colour_list, ind, patches_list, smple_id_to_plot, sp_output_df_type):
+    # the idea of the type is to put it as a reflection below the y=0 line
+    # as such we should just want to make everything negative
+    bottom_type = 0
+    # for each sequence, create a rect patch
+    # the rect will be 1 in width and centered about the ind value.
+    # we want to plot the rects so that they add to 1. As such we want to divide
+    # each value by the total for that sample.
+    tot_for_sample = sp_output_df_type.loc[smple_id_to_plot].sum()
+    for its2_profile in list(sp_output_df_type):
+        rel_abund = sp_output_df_type.loc[smple_id_to_plot, its2_profile]
+        if rel_abund > 0:
+            depth = -0.2 * (rel_abund / tot_for_sample)
+            patches_list.append(
+                Rectangle((ind - 0.5, bottom_type), 1, depth,
+                          color=colour_dict_type[its2_profile]))
+            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+            colour_list.append(colour_dict_type[its2_profile])
+            bottom_type += depth
+
+
+def get_div_colour_dict_and_ordered_list_of_seqs(sp_output_df_div):
+    colour_palette_div = get_colour_list()
+    grey_palette_div = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+    # get a list of the sequences in order of their abundance and use this list to create the colour dict
+    # the abundances can be got by simply summing up the columns making sure to ommit the last columns
+    abundance_dict = {}
+    for col in list(sp_output_df_div):
+        abundance_dict[col] = sum(sp_output_df_div[col])
+    # get the names of the sequences sorted according to their totalled abundance
+    ordered_list_of_seqs = [x[0] for x in sorted(abundance_dict.items(), key=lambda x: x[1], reverse=True)]
+    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
+    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
+    # If we aer only going to have a legend that is cols x rows as shown below, then we should only use
+    # that many colours in the plotting.
+    max_n_cols = 8
+    max_n_rows = 7
+    num_leg_cells = max_n_cols * max_n_rows
+    colour_dict_div = {}
+    for i in range(len(ordered_list_of_seqs)):
+        if i < num_leg_cells:
+            colour_dict_div[ordered_list_of_seqs[i]] = colour_palette_div[i]
         else:
-            n_rows = int(len(ordered_list_of_seqs) / max_n_cols)
-        last_row_len = len(ordered_list_of_seqs) % max_n_cols
-    else:
-        n_rows = max_n_rows
-        last_row_len = max_n_cols
+            grey_index = i % len(grey_palette_div)
+            colour_dict_div[ordered_list_of_seqs[i]] = grey_palette_div[grey_index]
+    return colour_dict_div, max_n_cols, max_n_rows, num_leg_cells, ordered_list_of_seqs
 
-    sequence_count = 0
 
-    # Once we know the number of rows, we can also adjust the y axis limits
-    legend_ax.set_xlim(0, 100)
-    # axarr[-1].set_ylim(0, 100)
-    legend_ax.set_ylim(0, ((n_rows - 1) * y_coord_increments) + leg_box_depth)
-    legend_ax.invert_yaxis()
-
-    # If there are more sequences than there are rows x cols then we need to make sure that we are only going
-    # to plot the first row x cols number of sequences.
-
-    sys.stdout.write('\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows * max_n_cols)))
-    for row_increment in range(min(n_rows, max_n_rows)):
-        # if not in the last row then do a full set of columns
-        if row_increment + 1 != n_rows:
-            for col_increment in range(max_n_cols):
-                # add the legend Rectangle
-                leg_box_x = col_increment * x_coord_increments
-                leg_box_y = row_increment * y_coord_increments
-                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
-                                              width=leg_box_width, height=leg_box_depth,
-                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
-
-                # add the text
-                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
-                text_y = leg_box_y + (0.5 * leg_box_depth)
-                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
-                               fontsize=8)
-
-                # increase the sequence count
-                sequence_count += 1
-        # else just do up to the number of last_row_cols
+def process_type_df(path_to_tab_delim_count_type):
+    sp_output_df_type = pd.read_csv(path_to_tab_delim_count_type, sep='\t', lineterminator='\n',
+                                    skiprows=[0, 1, 2, 3, 5],
+                                    header=None)
+    # get a list of tups that are the seq names and the abundances zipped together
+    type_profile_to_abund_tup_list = [(name, int(abund)) for name, abund in
+                                      zip(sp_output_df_type.iloc[1][2:].values.tolist(),
+                                          sp_output_df_type.iloc[0][2:].values.tolist())]
+    # convert the names that are numbers into int strings rather than float strings.
+    int_temp_list = []
+    for name_abund_tup in type_profile_to_abund_tup_list:
+        try:
+            int_temp_list.append((str(int(name_abund_tup[0])), int(name_abund_tup[1])))
+        except:
+            int_temp_list.append((name_abund_tup[0], int(name_abund_tup[1])))
+    type_profile_to_abund_tup_list = int_temp_list
+    # need to drop the rows that contain the sequence accession and species descriptions
+    for i, row_name in enumerate(sp_output_df_type.iloc[:, 0]):
+        if 'Sequence accession' in row_name:
+            # then we want to drop all rows from here until the end
+            index_to_drop_from = i
+            break
+    sp_output_df_type = sp_output_df_type.iloc[:index_to_drop_from]
+    # now drop the sample name columns
+    sp_output_df_type.drop(columns=1, inplace=True)
+    # make headers
+    sp_output_df_type.columns = ['sample_id'] + [a[0] for a in type_profile_to_abund_tup_list]
+    # now drop the local abund row and promote the its2_type_prof names to columns headers.
+    sp_output_df_type.drop(index=[0, 1], inplace=True)
+    sp_output_df_type = sp_output_df_type.set_index(keys='sample_id', drop=True).astype('float')
+    # we should plot sample by sample and its2 type by its2 type in the order of the output
+    # the problem with doing he convert_to_pastel is that the colours become very similar
+    # colour_palette = convert_to_pastel(get_colour_list())
+    # Rather, I will attempt to generate a quick set of colours that are pastel and have a minimum distance
+    # rule for any colours that are generated from each other.
+    # let's do this for 50 colours to start with and see how long it takes.
+    # turns out it is very quick. Easily quick enough to do dynamically.
+    # When working with pastel colours (i.e. mixing with 255,255,255 it is probably best to work with a smaller dist cutoff
+    colour_palette_pas = ['#%02x%02x%02x' % rgb_tup for rgb_tup in
+                          create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=1000, num_cols=50,
+                                             time_out_iterations=10000)]
+    # # The below 3d scatter produces a 3d scatter plot to examine the spread of the colours created
+    # from mpl_toolkits.mplot3d import Axes3D
+    # colour_palette = create_colour_list(sq_dist_cutoff=5000)
+    # hex_pal = ['#%02x%02x%02x' % rgb_tup for rgb_tup in colour_palette]
+    # colcoords = [list(a) for a in zip(*colour_palette)]
+    # print(colcoords)
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111, projection='3d')
+    # ax.scatter(colcoords[0], colcoords[1], colcoords[2], c=hex_pal, marker='o')
+    # colour_palette = get_colour_list()
+    grey_palette_type = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+    # we will use the col headers as the its2 type profile order for plotting but we
+    # we should colour according to the abundance of the its2 type profiles
+    # as we don't want to run out of colours by the time we get to profiles that are very abundant.
+    # The sorted_type_prof_names_by_local_abund object has the names of the its2 type profile in order of abundance
+    # we will use the index order as the order of samples to plot
+    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
+    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
+    sorted_type_prof_names_by_local_abund = [a[0] for a in
+                                             sorted(type_profile_to_abund_tup_list, key=lambda x: x[1], reverse=True)]
+    max_n_cols = 4
+    max_n_rows = 7
+    num_leg_cells = max_n_cols * max_n_rows
+    colour_dict_type = {}
+    for i in range(len(sorted_type_prof_names_by_local_abund)):
+        if i < num_leg_cells:
+            colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = colour_palette_pas[i]
         else:
-            for col_increment in range(last_row_len):
-                # add the legend Rectangle
-                leg_box_x = col_increment * x_coord_increments
-                leg_box_y = row_increment * y_coord_increments
-                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
-                                              width=leg_box_width, height=leg_box_depth,
-                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
-
-                # add the text
-                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
-                text_y = leg_box_y + (0.5 * leg_box_depth)
-                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
-                               fontsize=8)
-
-                # Increase the sequences count
-                sequence_count += 1
-
-    legend_ax.set_frame_on(False)
-    legend_ax.get_xaxis().set_visible(False)
-    legend_ax.get_yaxis().set_visible(False)
-
-    if time_date_str:
-        date_time_str = time_date_str
-    else:
-        date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
-
-    plt.tight_layout()
-    fig_output_base = '{0}/{1}'.format(output_directory, date_time_str)
-    sys.stdout.write('\nsaving as .svg\n')
-    plt.savefig('{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base))
-    sys.stdout.write('\nsaving as .png\n')
-    plt.savefig('{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base))
-    # plt.show()
-    return '{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base), \
-           '{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base)
+            grey_index = i % len(grey_palette_type)
+            colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = grey_palette_type[grey_index]
+    return colour_dict_type, sp_output_df_type, sorted_type_prof_names_by_local_abund, max_n_cols, max_n_rows, num_leg_cells
 
 
 def process_div_df(path_to_tab_delim_count_DIV):
@@ -797,7 +942,7 @@ def figure_making_corals():
 
     path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
 
-    path_to_tab_delim_rel_count_type = ''
+    path_to_tab_delim_rel_count_type = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.profiles.relative.txt'
 
     output_directory = '/home/humebc/projects/tara/initial_its2_processing'
 
