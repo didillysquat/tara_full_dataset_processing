@@ -12,6 +12,242 @@ import numpy as np
 from datetime import datetime
 import random
 import matplotlib.gridspec as gridspec
+from matplotlib import ticker
+import statistics
+
+
+def generate_qc_summary_figure():
+    info_df = generate_info_df_for_samples()
+    # TODO switch off the 2044 and 2041 exclusion when they have been run
+    info_df.drop(['CO0002044', 'CO0002041'], axis=0, inplace=True)
+
+    # we want to read in the table that contains both the coral and non-coral sequences so that we can
+    # plot the csw and the surface water samples along side the corals
+    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.absolute.txt'
+
+    # read in the SymPortal output
+    sp_output_df = pd.read_csv(path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone, sep='\t', lineterminator='\n')
+
+    sp_output_df = sp_output_df.iloc[:-4]
+    # get rid of the bottom
+
+    # generate a new index from the sample names
+
+
+    new_index = [smple_name.split('_')[0] for smple_name in sp_output_df['sample_name'].values.tolist()]
+    sp_output_df.index = new_index
+
+
+
+
+    # The SP output contains the QC info columns between the DIVs and the no_name ITS2 columns.
+    # lets put the QC info columns into a seperate df.
+    QC_info_df = sp_output_df[['sample_name', 'raw_contigs', 'post_qc_absolute_seqs', 'post_qc_unique_seqs',
+                               'post_taxa_id_absolute_symbiodinium_seqs', 'post_taxa_id_unique_symbiodinium_seqs',
+                               'post_taxa_id_absolute_non_symbiodinium_seqs',
+                               'post_taxa_id_unique_non_symbiodinium_seqs',
+                               'size_screening_violation_absolute', 'size_screening_violation_unique',
+                               'post_med_absolute', 'post_med_unique']]
+
+    f, axarr = plt.subplots(3, 1, figsize=(6, 4))
+    # counter to reference which set of axes we are plotting on
+    axarr_index = 0
+    # y_axis_labels = ['raw_contigs', 'post_qc', 'Symbiodinium', 'non-Symbiodinium', 'post-MED', 'post-MED / pre-MED']
+    x_axis_labels = ['raw_contigs', 'non-Symbiodiniaceae', 'Symbiodiniaceae']
+
+    for sub_plot_type in [('raw_contigs',),
+                          ('post_taxa_id_absolute_non_symbiodinium_seqs', 'post_taxa_id_unique_non_symbiodinium_seqs'),
+                          ('post_taxa_id_absolute_symbiodinium_seqs', 'post_taxa_id_unique_symbiodinium_seqs')]:
+
+        # The grids were confusing when there were two axes
+        # axarr[axarr_index].grid(b=True, which='major', axis='y')
+        # for each of the sub plots we will want to grab the absolute and unique counts and plot these
+        # for each of the sample types.
+        # go environment type by environment type
+
+        # we will create some x axis indicies to arranage where we will be ploting
+        # we can be smart with these later on and create some nice spacing layouts but for the time
+        # being lets just get things plotted. Let's have one idices for each sample type and work
+        # relatively from there.
+        ind = range(4)
+        ind_index = 0
+
+
+        if sub_plot_type[0] != 'raw_contigs':
+            ax2 = axarr[axarr_index].twinx()
+            ax2.set_yscale('symlog')
+
+            axarr[axarr_index].set_yscale('symlog')
+        else:
+            axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+            axarr[axarr_index].set_yscale('symlog')
+
+
+
+
+
+        # we will convert the sed_close and sed_far to simply sed
+        env_types_list = ['CORAL', 'CSW', 'SURFACE', 'PLANKTON']
+
+        for env_type in env_types_list:
+
+            if sub_plot_type[0] == 'raw_contigs':
+                # here we will plot just the raw_contigs
+                # get a sub df of the main df according to the env_type
+                # get subset of the main dfs that contain only the coral samples
+                if env_type == 'CORAL':
+                    env_info_df = info_df[(info_df['spp_water'] == 'PORITES') | (info_df['spp_water'] == 'MILLEPORA') | (info_df['spp_water'] == 'POCILLOPORA')]
+                else:
+                    env_info_df = info_df[info_df['spp_water'] == env_type]
+                env_QC_info_df = QC_info_df.loc[env_info_df.index.values.tolist()]
+                sys.stdout.write('\nGenerating plotting info for {} samples in subplot type {}\n'
+                                 .format(env_type, sub_plot_type))
+                # the data we are going to be plotting is so simple that rather than collecting it and then
+                # plotting it we may as well just go straight to plotting it from the df
+
+                # PLOT ABSOLUTE
+                # first plot the actual datapoints
+                # x will be the indices, y will be the actual value
+                y_values = list(env_QC_info_df.loc[:, sub_plot_type[0]])
+                x_values = [ind[ind_index] for y in y_values]
+                axarr[axarr_index].scatter(x_values, y_values, marker='.', s=1, c='b')
+
+                # now plot the mean and error bars
+                # I know there is a mean and SD function on a pandas series but it is throwing out all sorts of
+                # erros so lest stick with what we know
+                std = statistics.stdev(y_values)
+                mean = statistics.mean(y_values)
+
+                axarr[axarr_index].scatter(x=ind[ind_index] + 0.125, y=mean, marker='s', s=8, c='b')
+                # axarr[axarr_index].errorbar(x=ind[ind_index] + 0.125, y=mean, yerr=std, fmt='none', c='b')
+
+                if env_type == 'PLANKTON':
+                    axarr[axarr_index].spines['left'].set_color(c='blue')
+                    # axarr[axarr_index].set_ylabel('total sequences', color='b')
+                    axarr[axarr_index].tick_params('y', colors='b')
+                    axarr[axarr_index].spines['right'].set_visible(False)
+                    # axarr[axarr_index].spines['bottom'].set_visible(False)
+                    axarr[axarr_index].spines['top'].set_visible(False)
+
+                    # set the ticks
+                    # axarr[axarr_index].set_xticks([a + 0.1875 for a in range(6)], minor=False)
+                    # axarr[axarr_index].set_xticklabels(env_types_list)
+                    axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                    # set the xaxis title
+                    axarr[axarr_index].set_xlabel('raw_contigs')
+                    axarr[axarr_index].set_ylim(10000, 100000)
+
+
+                    # axarr[axarr_index].set_ylim((0, 1200000))
+
+                ind_index += 1
+            elif sub_plot_type[0] != 'med_ratio':
+                # get a sub df of the main df according to the env_type
+                # get subset of the main dfs that contain only the coral samples
+                if env_type == 'CORAL':
+                    env_info_df = info_df[(info_df['spp_water'] == 'PORITES') | (info_df['spp_water'] == 'MILLEPORA') | (info_df['spp_water'] == 'POCILLOPORA')]
+                else:
+                    env_info_df = info_df[info_df['spp_water'] == env_type]
+                env_QC_info_df = QC_info_df.loc[env_info_df.index.values.tolist()]
+                sys.stdout.write('\nGenerating plotting info for {} samples in subplot type {}\n'
+                                 .format(env_type, sub_plot_type))
+                # the data we are going to be plotting is so simple that rather than collecting it and then
+                # plotting it we may as well just go straight to plotting it from the df
+
+                # PLOT ABSOLUTE
+                # first plot the actual datapoints
+                # x will be the indices, y will be the actual value
+                y_values = list(env_QC_info_df.loc[:, sub_plot_type[0]])
+                x_values = [ind[ind_index] for y in y_values]
+                axarr[axarr_index].scatter(x_values, y_values, marker='.', s=1, c='b')
+
+                # now plot the mean and error bars
+                # I know there is a mean and SD function on a pandas series but it is throwing out all sorts of
+                # erros so lest stick with what we know
+                std = statistics.stdev(y_values)
+                mean = statistics.mean(y_values)
+                axarr[axarr_index].scatter(x=ind[ind_index] + 0.125, y=mean, marker='s', s=8, c='b')
+                # axarr[axarr_index].errorbar(x=ind[ind_index] + 0.125, y=mean, yerr=std, fmt='none', c='b')
+
+                # if env_type == 'CORAL':
+                #     axarr[axarr_index].set_ylabel('', color='b')
+                #     axarr[axarr_index].tick_params('y', colors='b')
+
+
+                # PLOT UNIQUE
+                # first plot the actual datapoints
+                # x will be the indices, y will be the actual value
+
+                y_values = list(env_QC_info_df.loc[:, sub_plot_type[1]])
+                x_values = [ind[ind_index] + 0.250 for y in y_values]
+                ax2.scatter(x_values, y_values, marker='.', s=1, c='r')
+
+                # now plot the mean and error bars
+                std = statistics.stdev(y_values)
+                mean = statistics.mean(y_values)
+
+                ax2.scatter(x=ind[ind_index] + 0.375, y=mean, marker='o', s=8, c='r')
+                # ax2.errorbar(x=ind[ind_index] + 0.375, y=mean, yerr=std, fmt='none', c='r')
+
+                if env_type == 'PLANKTON':
+                    if sub_plot_type[0] == 'post_taxa_id_absolute_symbiodinium_seqs':
+                        axarr[axarr_index].spines['left'].set_color(c='blue')
+                        ax2.spines['left'].set_color(c='blue')
+                        axarr[axarr_index].tick_params('y', colors='b')
+
+                        axarr[axarr_index].set_ylim(0, 100000)
+                        ax2.set_ylim(0, 1000)
+                        axarr[axarr_index].spines['right'].set_color(c='red')
+                        ax2.spines['right'].set_color(c='red')
+
+                        ax2.tick_params('y', colors='r')
+
+                        axarr[axarr_index].spines['top'].set_visible(False)
+                        ax2.spines['top'].set_visible(False)
+
+                        axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False,
+                                                       labelbottom=False)
+                        ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+                    else:
+                        # the legend work for non-symbiodiniaceae
+                        axarr[axarr_index].set_ylabel('total sequences', color='b')
+                        axarr[axarr_index].spines['left'].set_color(c='blue')
+                        ax2.spines['left'].set_color(c='blue')
+                        axarr[axarr_index].tick_params('y', colors='b')
+
+                        axarr[axarr_index].set_ylim(0, 100000)
+                        ax2.set_ylim(0, 1000)
+                        axarr[axarr_index].spines['right'].set_color(c='red')
+                        ax2.spines['right'].set_color(c='red')
+                        ax2.set_ylabel('distinct sequences', color='r')
+                        ax2.tick_params('y', colors='r')
+
+                        axarr[axarr_index].spines['top'].set_visible(False)
+                        ax2.spines['top'].set_visible(False)
+
+
+                        axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                        ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+
+
+
+                ind_index += 1
+
+        axarr_index += 1
+    apples = 'asdf'
+    f.text(0.01, 0.55, 'absolute number of ITS2 sequences\n(log10)', va='center', ha='center', rotation='vertical', color='b')
+    f.text(1 - 0.01, 0.40, 'unique number of ITS2 sequences\n(log10)', ha='center', va='center', rotation='vertical', color='r')
+    # f.text(0.07, 0.18, 'ratio', va='center', rotation='vertical', color='b')
+    # f.text(1 - 0.05, 0.18, 'ratio', va='center', rotation='vertical', color='r')
+
+
+    plt.tight_layout()
+    f.savefig('diversity_stats_no_MED.svg')
+    f.savefig('diversity_stats_no_MED.png')
+    f.show()
+    return
 
 def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df, time_date_str=None):
     print('Generating stacked bar data submission')
@@ -370,11 +606,13 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # in the same sample order for direct comparison
 
 
-    ordered_sample_list = sp_output_df_div.index.values.tolist()
+    ordered_sample_list = sp_output_df_type.index.values.tolist()
     # let's reorder the columns and rows of the sp_output_df according to the sequence sample and sequence
     # order so that plotting the data is easier
+
     sp_output_df_div = sp_output_df_div[ordered_list_of_seqs]
-    sp_output_df_div = sp_output_df_div.reindex(ordered_sample_list)
+    # we need to get rid of this slicing so that we don't cut out the csw and surface samples
+    # sp_output_df_div = sp_output_df_div.reindex(ordered_sample_list)
 
     # At this stage we are ready to plot
     # The three following links show how we should be able to construct a list of matplotlib
@@ -389,20 +627,35 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
 
     # https://matplotlib.org/users/gridspec.html
     fig = plt.figure(figsize=(14, 10))
+
     # the bottom row will be for the legend
     # the second to last will just be invisible to give a space between the legend and the other plots
-    gs = plt.GridSpec(5, 3, figure=fig, height_ratios=[1,1,1,0.2,1])
+    # we also want to include a gridspec plot after each of the main three. These will hold the csw and surface
+    # samples
+    gs = plt.GridSpec(5, 6, figure=fig, height_ratios=[1,1,1,0.2,1], width_ratios=[1,0.2,1,0.2,1,0.2])
     # within each of the GrdiSpec subplots we will make a subplotspec which is three plots on one row
+
     ax_list = []
+    extra_ax_list = []
     grid_spec_subplot_list = []
     for row_ind in range(3):
-        for col_ind in range(3):
+        for col_ind in range(0, 6, 2):
+            # put in the main data 3 plots
             temp_grid_spec_subplot = gridspec.GridSpecFromSubplotSpec(1,3,subplot_spec=gs[row_ind,col_ind])
             grid_spec_subplot_list.append(temp_grid_spec_subplot)
             for i in range(3):
                 #NB this might be a 2d array, lets see.
                 ax = plt.Subplot(fig, temp_grid_spec_subplot[i])
                 ax_list.append(ax)
+                fig.add_subplot(ax)
+            # now put in the csw and surface plots which will be 1,2
+            temp_grid_spec_subplot = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[row_ind, col_ind + 1])
+            grid_spec_subplot_list.append(temp_grid_spec_subplot)
+            for i in range(2):
+                # NB this might be a 2d array, lets see.
+                ax = plt.Subplot(fig, temp_grid_spec_subplot[i])
+                # we will not add
+                extra_ax_list.append(ax)
                 fig.add_subplot(ax)
 
     # now do the invisible row that will give us the space we want
@@ -418,7 +671,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
 
 
     # we will leave one subplot empty for making the legend in at the end
-    plot_data_axes(ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
+    plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
                    smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type)
 
     # PLOT DIV LEGEND
@@ -429,7 +682,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
                      sorted_type_prof_names_by_local_abund)
 
     # add the labels and text here so that we don't have to debug through all of the plotting each time
-    add_labels(ax_list, leg_axes)
+    add_labels(ax_list, leg_axes, extra_ax_list)
 
     date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
 
@@ -443,7 +696,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     return
 
 
-def add_labels(ax_list, leg_axes):
+def add_labels(ax_list, leg_axes, extra_ax_list):
     ax_list[1].set_title('ISLAND06')
     ax_list[4].set_title('ISLAND10')
     ax_list[7].set_title('ISLAND15')
@@ -466,6 +719,13 @@ def add_labels(ax_list, leg_axes):
 
     leg_axes[0].set_xlabel('sequence')
     leg_axes[1].set_xlabel('ITS2 type profile')
+
+    extra_ax_list[12].set_xlabel('CSW', horizontalalignment='center', rotation='vertical')
+    extra_ax_list[13].set_xlabel('surface', horizontalalignment='center', rotation='vertical')
+    extra_ax_list[14].set_xlabel('CSW', horizontalalignment='center', rotation='vertical')
+    extra_ax_list[15].set_xlabel('surface', horizontalalignment='center', rotation='vertical')
+    extra_ax_list[16].set_xlabel('CSW', horizontalalignment='center', rotation='vertical')
+    extra_ax_list[17].set_xlabel('surface', horizontalalignment='center', rotation='vertical')
 
 
 def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_type, num_leg_cells_type,
@@ -659,9 +919,10 @@ def remove_axes_but_allow_labels(ax):
     ax.set_xticks([])
     ax.set_yticks([])
 
-def plot_data_axes(ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
+def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
                    smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type):
     ax_count = 0
+    extra_ax_count = 0
     for site in ['SITE01', 'SITE02', 'SITE03']:
         for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
             for spp in ['PORITES', 'POCILLOPORA', 'MILLEPORA']:
@@ -716,13 +977,94 @@ def plot_data_axes(ax_list, colour_dict_div, colour_dict_type, info_df, ordered_
                                         sp_output_df_type)
                     ind += 1
 
-                paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot, patches_list,
-                                                x_tick_label_list)
+
+
+
+
+                paint_rect_to_axes_div_and_type(ax=ax, colour_list=colour_list, num_smp_in_this_subplot=num_smp_in_this_subplot, patches_list=patches_list,
+                                                x_tick_label_list=x_tick_label_list, max_num_smpls_in_subplot=10)
 
                 ax_count += 1
 
+            # PLOT csw and surface
 
-def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot, patches_list, x_tick_label_list):
+            # first identify which the csw sample is
+            csw_samples = info_df.loc[
+                (info_df['location'] == location) &
+                (info_df['site'] == site) &
+                (info_df['spp_water'] == 'CSW')
+                ].index.values.tolist()
+
+            # convert these to sample IDs
+            # The sample names in symportal are actually the full file names version rather than
+            # the shorter versions in the info_df. As such we should we will have to do a conversion here
+            full_sample_names_csw = [
+                '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for
+                smp_name in csw_samples]
+            smple_ids_of_set_csw = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names_csw]
+
+            colour_list = []
+            ind = 0
+            patches_list = []
+            for smple_id_to_plot in smple_ids_of_set_csw:
+                bottom_div = 0
+                # for each sequence, create a rect patch
+                # the rect will be 1 in width and centered about the ind value.
+                for seq in list(sp_output_df_div):
+                    # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+                    rel_abund_div = sp_output_df_div.loc[smple_id_to_plot, seq]
+                    if rel_abund_div > 0:
+                        patches_list.append(
+                            Rectangle((ind - 0.5, bottom_div), 1, rel_abund_div, color=colour_dict_div[seq]))
+                        # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+                        colour_list.append(colour_dict_div[seq])
+                        bottom_div += rel_abund_div
+                ind += 1
+
+            paint_rect_to_axes_div_and_type(ax=extra_ax_list[extra_ax_count], colour_list=colour_list,
+                                            num_smp_in_this_subplot=2,
+                                            patches_list=patches_list, max_num_smpls_in_subplot=2)
+            extra_ax_count += 1
+
+
+            # now get the surface sample
+            surface_sample = info_df.loc[
+                (info_df['location'] == location) &
+                (info_df['site'] == site) &
+                (info_df['spp_water'] == 'SURFACE')
+                ].index.values.tolist()[0]
+
+            # convert these to sample IDs
+            # The sample names in symportal are actually the full file names version rather than
+            # the shorter versions in the info_df. As such we should we will have to do a conversion here
+            full_sample_name_surface = '_'.join(
+                info_df.loc[surface_sample]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3])
+
+            smple_id_of_surface_sample = smp_name_to_smp_id_dict[full_sample_name_surface]
+
+            colour_list = []
+            bottom_div = 0
+            ind = 0
+            patches_list = []
+            # for each sequence, create a rect patch
+            # the rect will be 1 in width and centered about the ind value.
+            for seq in list(sp_output_df_div):
+                # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+                rel_abund_div = sp_output_df_div.loc[smple_id_of_surface_sample, seq]
+                if rel_abund_div > 0:
+                    patches_list.append(
+                        Rectangle((ind - 0.5, bottom_div), 1, rel_abund_div, color=colour_dict_div[seq]))
+                    # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+                    colour_list.append(colour_dict_div[seq])
+                    bottom_div += rel_abund_div
+
+
+            paint_rect_to_axes_div_and_type(ax=extra_ax_list[extra_ax_count], colour_list=colour_list,
+                                            num_smp_in_this_subplot=1,
+                                            patches_list=patches_list, max_num_smpls_in_subplot=2)
+            extra_ax_count += 1
+
+def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  patches_list, x_tick_label_list=None, max_num_smpls_in_subplot=10):
     # We can try making a custom colour map
     # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
     this_cmap = ListedColormap(colour_list)
@@ -737,10 +1079,8 @@ def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot, pa
     ax.autoscale_view()
     ax.figure.canvas.draw()
     # also format the axes.
-    # make it so that the x axes is constant length that will be the num of samples per subplot
-    # we will hard wire this for the time being
-    smp_per_plot = 10
-    ax.set_xlim(0 - 0.5, smp_per_plot - 0.5)
+    # make it so that the x axes is constant length
+    ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
     ax.set_ylim(-0.2, 1)
     # ax.set_xticks(range(num_smp_in_this_subplot))
     # ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
@@ -940,13 +1280,17 @@ def figure_making_corals():
 
     info_df = generate_info_df_for_samples()
 
-    path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
+
+    # we want to read in the table that contains both the coral and non-coral sequences so that we can
+    # plot the csw and the surface water samples along side the corals
+    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.relative.txt'
+    # path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
 
     path_to_tab_delim_rel_count_type = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.profiles.relative.txt'
 
     output_directory = '/home/humebc/projects/tara/initial_its2_processing'
 
-    generate_stacked_bar_data_submission(path_to_tab_delim_rel_count_DIV, path_to_tab_delim_rel_count_type, output_directory, info_df, time_date_str=None)
+    generate_stacked_bar_data_submission(path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone, path_to_tab_delim_rel_count_type, output_directory, info_df, time_date_str=None)
 
     return
 
@@ -1322,4 +1666,4 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
 
     return new_colours
 
-figure_making_corals()
+generate_qc_summary_figure()
