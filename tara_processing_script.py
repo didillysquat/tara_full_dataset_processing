@@ -14,7 +14,193 @@ import random
 import matplotlib.gridspec as gridspec
 from matplotlib import ticker
 import statistics
+import subprocess
+from collections import defaultdict
 
+def non_symbiodiniaceae_taxonomy_work():
+    # the aim of this metod will be to see what we actually have in the non-Symbidiniaceae sequences
+    # I have changed SymPortal so that it now puts out the throwaway non-symbiodiniaceae sequences
+    # on a sample by sample basis. This should allow us to go through and look at the taxonomy
+    # of whats in them.
+
+    # I think the basic principle will be to do the surface and csw samples in the same layout as the corals but
+    # maybe with piecharts or stacks
+
+    # and then to do the OA samples seperately.
+
+    info_df = generate_info_df_for_samples()
+
+    # lets write out the blast directory instructions in the cwd
+    # write out the blast locaiton instructions to the current dir.
+    # blastnPath = '/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/bin/blastn'
+    ntDBDir = '/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/'
+
+    # Print out the .ncbirc file in the cwd that shows blast were to find the DBs in question
+    ncbirc = ['[BLAST]', 'BLASTDB={}'.format(ntDBDir)]
+    with open('{}/.ncbirc'.format(os.getcwd()), 'w') as f:
+        for line in ncbirc:
+            f.write('{}\n'.format(line))
+
+    # have a list that will hold sequences that have been called symbiodinium just so that we can see
+    # if they are mis annotates
+    symbiodinium_list = []
+
+    # a dictionary that will hold the total for the binomials
+    master_taxa_abund_dict = defaultdict(int)
+
+    # also a dict that will hold the sample dicts
+    taxa_abund_dict_holder_dict = {}
+
+    # first do the 6 OA samples
+    # get sample_names that fit the requirements
+    sample_names_of_set = info_df.loc[info_df['spp_water'] == 'PLANKTON'].index.values.tolist()
+
+    # need to conver these short names to the full length names that will be written out in the
+    # throw_away directory
+    full_sample_names = [
+        '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for
+        smp_name in
+        sample_names_of_set]
+
+    for sample_name in full_sample_names:
+        blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list)
+
+    for site in ['SITE01', 'SITE02', 'SITE03']:
+        for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
+            for spp in ['CSW', 'SURFACE', 'PLANKTON']:
+
+                # for each set of location, site and spp, we basically want to get a list of the samples
+                # that meet the set criteria, we then want to plot samples according to the ordered_sample_list
+                # order which will be in IDs. As such we will have to convert the sample_name in the info_df
+                # to a sample ID using the smp_name_to_smp_id_dict.
+
+                # get sample_names that fit the requirements
+                sample_names_of_set = info_df.loc[
+                    (info_df['location'] == location) &
+                    (info_df['site'] == site) &
+                    (info_df['spp_water'] == spp)
+                    ].index.values.tolist()
+
+                # need to conver these short names to the full length names that will be written out in the
+                # throw_away directory
+                full_sample_names = [
+                    '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in
+                    sample_names_of_set]
+
+                for sample_name in full_sample_names:
+                    blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list)
+
+
+
+    # here we should pickle the totally sweet dictionaries that we have made
+    pickle.dump(taxa_abund_dict_holder_dict, open('taxa_abund_dict_holder_dict.pickle', 'wb'))
+    pickle.dump(master_taxa_abund_dict, open('master_taxa_abund_dict.pickle', 'wb'))
+
+
+    return
+
+
+def blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list):
+    print('Blasting {}'.format(sample_name))
+    # these are now names that we can iterate through and look up the fasta and name files accordingly
+    # get the fasta
+    sample_dir = '{}/throw_awayseqs/{}'.format(os.getcwd(), sample_name)
+    path_to_fasta = '{}/{}_throw_away_seqs.fasta'.format(sample_dir, sample_name)
+    path_to_name = '{}/{}_throw_away_seqs.name'.format(sample_dir, sample_name)
+
+    with open(path_to_fasta, 'r') as f:
+        fasta_file = [line.rstrip() for line in f]
+
+    with open(path_to_name, 'r') as f:
+        name_file = [line.rstrip() for line in f]
+
+    # make a name dict that simply returns the abundance of the sequence
+    seq_name_to_abundance_dict = {line.split('\t')[0]: len(line.split('\t')[1].split(',')) for line in name_file}
+
+    # make a fasta dict of seq name to seq
+    fasta_dict = {fasta_file[i][1:] : fasta_file[i+1] for i in range(0, len(fasta_file), 2)}
+
+    # here we have the fasta_file that we are going to blast.
+    outputpath = '{}/blast.out'.format(sample_dir)
+    outputFmt = '6 qseqid sseqid staxids sscinames sblastnames evalue pident qcovs'
+    # Run the blast command
+    # we need to make sure that we are supplying the absolute paths to the inputs and outputs as
+    # we are going to be running the acutal blast command the from the cwd rather than the
+    # samples directory
+    completedProcess = subprocess.run(
+        ['blastn', '-out', outputpath, '-outfmt', outputFmt, '-query', path_to_fasta, '-db', 'nt',
+         '-max_target_seqs',
+         '10', '-num_threads', '20'])
+    # Read in the blast output file and perform the taxa counts
+    with open(outputpath, 'r') as f:
+        blast_output = [line.rstrip() for line in f]
+    # make a default dict that will be binomial to abundance
+    # for each line in the blast_output
+    # create a dict from the blast ouput where key is the sequences name and the results go in
+    blast_out_dict = defaultdict(list)
+    for line in blast_output:
+        components = line.split('\t')
+        blast_out_dict[components[0]].append(components[1:])
+    # now we can go key by key in the blast_out_dict and collect counts for what binomials we can
+    taxa_count_dict = defaultdict(int)
+    total_seqs = sum(seq_name_to_abundance_dict.values())
+    for seq_key, blast_list in blast_out_dict.items():
+        specific_binomial_found = False
+        for result_list in blast_list:
+            binomial = result_list[2]
+            if binomial != 'uncultured eukaryote' and binomial != 'N/A':
+                # then we should use this binomial
+                if binomial.split(' ')[0] in ['symbiodinium', 'Symbiodinium', 'Symbiodiniaceae', 'symbiodiniaceae', 'Cladocopium',
+                                'cladocopium', 'Fugacium', 'fugacium', 'Breviolum', 'breviolum',
+                                'Durusdinium', 'durussinium', 'Gerakladium', 'gerakladium', 'Effrenium', 'effrenium']:
+                    symbiodinium_list.extend(['>{}'.format(seq_key), fasta_dict[seq_key]])
+
+                taxa_count_dict[binomial.split(' ')[0]] += seq_name_to_abundance_dict[seq_key] / total_seqs
+                master_taxa_abund_dict[binomial.split(' ')[0]] += seq_name_to_abundance_dict[seq_key] / total_seqs
+                specific_binomial_found = True
+                break
+        # if we get here then we didn't find a binomial that wasn't uncultured eukaryote
+        if not specific_binomial_found:
+            taxa_count_dict['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
+            master_taxa_abund_dict['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
+    taxa_abund_dict_holder_dict[sample_name] = taxa_count_dict
+    apples = 'asdf'
+
+
+def figure_making_bar_plots_corals():
+    '''The aim of this will be to make a figure that splits up the samples into species, site and island
+    so that we can get a better idea about how the symbiodiniaceae changes across the locations and species.'''
+
+    # I think we should be able to hack some of the code used in the symportal repo for this.
+    # we esentially just want to re-jig the symportal plotting outputs so that we have the same plotting order of samples
+    # which are based on the types and then we can just plot subsamples of these according to the order of
+    # islands, then site then species. I think we can plot 3 levels of lines below each plot that can indicate
+    # which island, site and species they are from.
+
+    info_df = generate_info_df_for_samples()
+
+    # this dictionary will hold the details of which corals are related to the csw samples
+    # sadly I put together this list by hand so if we come to scale this up you will likely have to code the extraction
+    # of these details. Shouldn't be too much work.
+    # key is the short name of the sample eg. IW0000XXX or CO000XXXX. value is 'INDIVIDUAL1' or 'INDIVIDUAL10'
+    with open('individual_info', 'r') as f:
+        indi_info_list = [line.rstrip() for line in f]
+
+
+    indi_info = {line.split(' ')[0]:line.split(' ')[1] for line in indi_info_list}
+
+    # we want to read in the table that contains both the coral and non-coral sequences so that we can
+    # plot the csw and the surface water samples along side the corals
+    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.relative.txt'
+    # path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
+
+    path_to_tab_delim_rel_count_type = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.profiles.relative.txt'
+
+    output_directory = '/home/humebc/projects/tara/initial_its2_processing'
+
+    generate_stacked_bar_data_submission(path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone, path_to_tab_delim_rel_count_type, output_directory, info_df, individual_info=indi_info, time_date_str=None)
+
+    return
 
 def generate_qc_summary_figure():
     info_df = generate_info_df_for_samples()
@@ -49,7 +235,7 @@ def generate_qc_summary_figure():
                                'size_screening_violation_absolute', 'size_screening_violation_unique',
                                'post_med_absolute', 'post_med_unique']]
 
-    f, axarr = plt.subplots(3, 1, figsize=(6, 4))
+    f, axarr = plt.subplots(3, 1, figsize=(10, 8))
     # counter to reference which set of axes we are plotting on
     axarr_index = 0
     # y_axis_labels = ['raw_contigs', 'post_qc', 'Symbiodinium', 'non-Symbiodinium', 'post-MED', 'post-MED / pre-MED']
@@ -75,16 +261,12 @@ def generate_qc_summary_figure():
 
         if sub_plot_type[0] != 'raw_contigs':
             ax2 = axarr[axarr_index].twinx()
-            ax2.set_yscale('symlog')
+            # ax2.set_yscale('symlog')
 
-            axarr[axarr_index].set_yscale('symlog')
+            # axarr[axarr_index].set_yscale('symlog')
         else:
             axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
-            axarr[axarr_index].set_yscale('symlog')
-
-
-
-
+            # axarr[axarr_index].set_yscale('symlog')
 
         # we will convert the sed_close and sed_far to simply sed
         env_types_list = ['CORAL', 'CSW', 'SURFACE', 'PLANKTON']
@@ -191,12 +373,13 @@ def generate_qc_summary_figure():
 
                 if env_type == 'PLANKTON':
                     if sub_plot_type[0] == 'post_taxa_id_absolute_symbiodinium_seqs':
+                        # the legend work for the SYmbiodiniaceae
                         axarr[axarr_index].spines['left'].set_color(c='blue')
                         ax2.spines['left'].set_color(c='blue')
                         axarr[axarr_index].tick_params('y', colors='b')
 
-                        axarr[axarr_index].set_ylim(0, 100000)
-                        ax2.set_ylim(0, 1000)
+                        axarr[axarr_index].set_ylim(0, 25000)
+                        ax2.set_ylim(0, 400)
                         axarr[axarr_index].spines['right'].set_color(c='red')
                         ax2.spines['right'].set_color(c='red')
 
@@ -205,22 +388,25 @@ def generate_qc_summary_figure():
                         axarr[axarr_index].spines['top'].set_visible(False)
                         ax2.spines['top'].set_visible(False)
 
-                        axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False,
-                                                       labelbottom=False)
-                        ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                        # axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False,
+                        #                                labelbottom=False)
+                        # ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
+                        axarr[2].set_xticks([0.1875, 1.1875, 2.1875, 3.1875])
+                        axarr[2].set_xticklabels(env_types_list)
                         axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+
                     else:
                         # the legend work for non-symbiodiniaceae
-                        axarr[axarr_index].set_ylabel('total sequences', color='b')
+                        # axarr[axarr_index].set_ylabel('total sequences', color='b')
                         axarr[axarr_index].spines['left'].set_color(c='blue')
                         ax2.spines['left'].set_color(c='blue')
                         axarr[axarr_index].tick_params('y', colors='b')
 
-                        axarr[axarr_index].set_ylim(0, 100000)
-                        ax2.set_ylim(0, 1000)
+                        axarr[axarr_index].set_ylim(0, 25000)
+                        ax2.set_ylim(0, 400)
                         axarr[axarr_index].spines['right'].set_color(c='red')
                         ax2.spines['right'].set_color(c='red')
-                        ax2.set_ylabel('distinct sequences', color='r')
+                        # ax2.set_ylabel('distinct sequences', color='r')
                         ax2.tick_params('y', colors='r')
 
                         axarr[axarr_index].spines['top'].set_visible(False)
@@ -236,344 +422,23 @@ def generate_qc_summary_figure():
                 ind_index += 1
 
         axarr_index += 1
+
     apples = 'asdf'
-    f.text(0.01, 0.55, 'absolute number of ITS2 sequences\n(log10)', va='center', ha='center', rotation='vertical', color='b')
-    f.text(1 - 0.01, 0.40, 'unique number of ITS2 sequences\n(log10)', ha='center', va='center', rotation='vertical', color='r')
+    f.text(0.04, 0.55, 'total sequences', va='center', ha='center', rotation='vertical', color='b')
+    f.text(1 - 0.03, 0.40, 'distinct sequences', ha='center', va='center', rotation='vertical', color='r')
     # f.text(0.07, 0.18, 'ratio', va='center', rotation='vertical', color='b')
     # f.text(1 - 0.05, 0.18, 'ratio', va='center', rotation='vertical', color='r')
 
 
-    plt.tight_layout()
-    f.savefig('diversity_stats_no_MED.svg')
-    f.savefig('diversity_stats_no_MED.png')
+    # plt.tight_layout()
+    f.savefig('qc_stats.svg')
+    f.savefig('qc_stats.png')
     f.show()
     return
 
-def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df, time_date_str=None):
-    print('Generating stacked bar data submission')
-    # /Users/humebc/Documents/SymPortal_testing_repo/SymPortal_framework/outputs/non_analysis/35.DIVs.relative.txt
-
-    # Here we will generate our standard stacked bar output.
-    # We should take into account that we don't know how many samples will be coming through.
-    # I think we should aim for a standard width figure but which can get deeper if there are many samples.
-    # I.e. we should split up very large sets of samples into multiple plots to keep interpretability
-    # as high as possible.
-
-    # I think it would be cool to see the its2 type plotted below the sequences for each of the samples
-    # we can also hack the code for this from SP
-
-    # read in the SymPortal relative abundance output
-    smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df = process_div_df(path_to_tab_delim_count_DIV)
 
 
-    # In theory the output should already be somewhat ordered in that the samples should be in order of similarity.
-    # However, these have the artifical clade ordering so for the plotting it will probably be better to get a new
-    # order for the samples that is not constrained to the order of the clades. For this we should order as usual
-    # according to the most common majority sequences and then within this grouping we should order according to the
-    # the abundance of these sequences within the samples.
-    # We should plot the sequences most abundant across all samples first.
-    # In terms of colour I think its easiest if we go with the high contrast colours list of 269 for the minus black
-    # and white if they are in there for the most abundant sequencs.
-    # if we have more than this number of sequences in the dataset then we should simply work ourway through a grey
-    # palette for the remainder of the sequences.
-    # when doing the plotting using the matplotlib library I want to try a new approach of creating the rectangle
-    # patches individually and holding them in a list before adding them all to the plot at once. Previously we had
-    # been generating the plot one sequence at a time. This can take a considerable amount of time when we get above
-    # ~50-150 sequences depending on the number of samples.
-
-    colour_palette = get_colour_list()
-    grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
-
-    # get a list of the sequences in order of their abundance and use this list to create the colour dict
-    # the abundances can be got by simply summing up the columns making sure to ommit the last columns
-    abundance_dict = {}
-    for col in list(sp_output_df_div):
-        abundance_dict[col] = sum(sp_output_df_div[col])
-
-    # get the names of the sequences sorted according to their totalled abundance
-    ordered_list_of_seqs = [x[0] for x in sorted(abundance_dict.items(), key=lambda x: x[1], reverse=True)]
-
-    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
-    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
-    # If we aer only going to have a legend that is cols x rows as shown below, then we should only use
-    # that many colours in the plotting.
-    max_n_cols = 8
-    max_n_rows = 7
-    num_leg_cells = max_n_cols * max_n_rows
-    colour_dict = {}
-    for i in range(len(ordered_list_of_seqs)):
-        if i < num_leg_cells:
-            colour_dict[ordered_list_of_seqs[i]] = colour_palette[i]
-        else:
-            grey_index = i % len(grey_palette)
-            colour_dict[ordered_list_of_seqs[i]] = grey_palette[grey_index]
-
-    # the ordered_list_of_seqs can also be used for the plotting order
-
-    # we should consider doing a plot per clade but for the time being lets start by doing a single plot that will
-    # contain all of the clades
-
-    # if we are plotting this in companion with an ITS2 type profile output then we will be passed a
-    # sample_order_list. It is very useful to have the ITS2 type profile output figure and the seq figure
-    # in the same sample order for direct comparison
-
-    #TODO get the ordered_sample_list simply from the index order of the df.
-    ordered_sample_list = sp_output_df_div.index.values.tolist()
-    # let's reorder the columns and rows of the sp_output_df according to the sequence sample and sequence
-    # order so that plotting the data is easier
-    sp_output_df_div = sp_output_df_div[ordered_list_of_seqs]
-    sp_output_df_div = sp_output_df_div.reindex(ordered_sample_list)
-
-    # At this stage we are ready to plot
-    # The three following links show how we should be able to construct a list of matplotlib
-    # patches (Rectangles in this case) and add these patches to a PatchCollection before finally
-    # adding this patch collection to the ax using ax.add_collection().
-    # https://matplotlib.org/api/_as_gen/matplotlib.patches.Rectangle.html
-    # https://matplotlib.org/examples/api/patch_collection.html
-    # https://matplotlib.org/users/artists.html
-    # I hope that this will be quicker than using the bar helper sequence by sequence as we normally do
-    # It turns out that the colour parameters are ignored from the individual patches when using
-
-
-
-    # n_samples = len(sp_output_df.index.values.tolist())
-    # smp_per_plot = 50
-    # # number of subplots will be one per smp_per_plot
-    # # and if tehre are remainers be sure to add an extra plot for this
-    # if (n_samples % smp_per_plot) != 0:
-    #     n_subplots = int(n_samples / smp_per_plot) + 1
-    # else:
-    #     n_subplots = int(n_samples / smp_per_plot)
-
-    fig = plt.figure(figsize=(14, 10))
-    # the bottom row will be for the legend
-    gs = plt.GridSpec(4, 9, figure=fig)
-    ax_list = []
-
-
-    for i in range(27):
-        grid_x_placement_coord = i%9
-        grid_y_placement_coord = int(i/9)
-        ax_list.append(plt.subplot(gs[grid_y_placement_coord, grid_x_placement_coord]))
-
-    #finally the ax for the legend
-    legend_ax = plt.subplot(gs[3, :])
-
-    # ax0 = plt.subplot(gs[0])
-    # ax1 = plt.subplot(gs[1])
-    # ax2 = plt.subplot(gs[2])
-    # ax3 = plt.subplot(gs[3])
-    # ax4 = plt.subplot(gs[4])
-    # ax5 = plt.subplot(gs[5])
-
-    # # depth of image is 3 inches per subplot
-    # # we have to work out how to access the axarr
-    # # we add  1 to the n_subplots here for the legend at the bottom
-    # f, axarr = plt.subplots(n_subplots + 1, 1, figsize=(10, 3 * n_subplots))
-
-    # we will leave one subplot empty for making the legend in at the end
-    ax_count = 0
-    for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
-        for site in ['SITE01', 'SITE02', 'SITE03']:
-            for spp in ['PORITES', 'POCILLOPORA', 'MILLEPORA']:
-                ax = ax_list[ax_count]
-                patches_list = []
-                ind = 0
-                colour_list = []
-
-                # for each set of location, site and spp, we basically want to get a list of the samples
-                # that meet the set criteria, we then want to plot samples according to the ordered_sample_list
-                # order which will be in IDs. As such we will have to convert the sample_name in the info_df
-                # to a sample ID using the smp_name_to_smp_id_dict.
-
-                # get sample_names that fit the requirements
-                sample_names_of_set = info_df.loc[
-                    (info_df['location'] == location) &
-                    (info_df['site'] == site) &
-                    (info_df['spp_water'] == spp)
-                ].index.values.tolist()
-
-                # temporarily remove CO0002044, CO0002041
-                # from the above list
-                if 'CO0002044' or 'CO0002041' in sample_names_of_set:
-                    sample_names_of_set = [name for name in sample_names_of_set if name not in ['CO0002044', 'CO0002041']]
-
-                # convert these to sample IDs
-                # The sample names in symportal are actually the full file names version rather than
-                # the shorter versions in the info_df. As such we should we will have to do a conversion here
-                full_sample_names = ['_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in sample_names_of_set]
-                smple_ids_of_set = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names]
-
-                # now we want to plot in the order of the ordered_sample_list
-                ordered_smple_ids_of_set = [smpl_id for smpl_id in ordered_sample_list if smpl_id in smple_ids_of_set]
-
-                num_smp_in_this_subplot = len(ordered_smple_ids_of_set)
-                x_tick_label_list = []
-                for smple_id_to_plot in ordered_smple_ids_of_set:
-
-                    # PLOT DIVs
-                    sys.stdout.write('\rPlotting sample: {}'.format(smple_id_to_plot))
-                    x_tick_label_list.append(smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0])
-                    # for each sample we will start at 0 for the y and then add the height of each bar to this
-                    bottom = 0
-                    # for each sequence, create a rect patch
-                    # the rect will be 1 in width and centered about the ind value.
-                    for seq in list(sp_output_df_div):
-                        # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
-                        rel_abund = sp_output_df_div.loc[smple_id_to_plot, seq]
-                        if rel_abund > 0:
-                            patches_list.append(Rectangle((ind - 0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
-                            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
-                            colour_list.append(colour_dict[seq])
-                            bottom += rel_abund
-                    ind += 1
-
-                # We can try making a custom colour map
-                # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
-                this_cmap = ListedColormap(colour_list)
-
-                # here we should have a list of Rectangle patches
-                # now create the PatchCollection object from the patches_list
-                patches_collection = PatchCollection(patches_list, cmap=this_cmap)
-                patches_collection.set_array(np.arange(len(patches_list)))
-
-                # if n_subplots is only 1 then we can refer directly to the axarr object
-                # else we will need ot reference the correct set of axes with i
-                # Add the pathces to the axes
-                ax.add_collection(patches_collection)
-                ax.autoscale_view()
-                ax.figure.canvas.draw()
-
-                # also format the axes.
-                # make it so that the x axes is constant length that will be the num of samples per subplot
-                # we will hard wire this for the time being
-                smp_per_plot = 10
-                ax.set_xlim(0 - 0.5, smp_per_plot - 0.5)
-                ax.set_ylim(0, 1)
-                ax.set_xticks(range(num_smp_in_this_subplot))
-                ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
-                ax.get_yaxis().set_visible(False)
-                ax.spines['right'].set_visible(False)
-                ax.spines['top'].set_visible(False)
-                ax.spines['left'].set_visible(False)
-
-                # as well as getting rid of the top and right axis splines
-                # I'd also like to restrict the bottom spine to where there are samples plotted but also
-                # maintain the width of the samples
-                # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
-                # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
-                ax.spines['bottom'].set_visible(False)
-                ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
-
-                ax_count += 1
-
-    # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
-    # all in favour... Ok.
-    # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
-    # the one we currenty have. So.. we will add a subplot when we initially create the figure. We will make the axis
-    # 100 by 100 just to make our coordinate easy to work with. We can get rid of all of the axes lines and ticks
-
-    # lets aim to plot a 10 by 10 legend max
-    # we should start plotting in the top left working right and then down
-    # until we have completed 100 sequences.
-
-    # Y axis coordinates
-    # we will allow a buffer of 0.5 of the legend box's height between each legend box.
-    # as such the coordinates of each y will be in increments of 100 / (1.5 * num rows)
-    # the depth of the Rectangle for the legend box will be 2/3 * the above.
-    y_coord_increments = 100 / (max_n_rows)
-    leg_box_depth = 2 / 3 * y_coord_increments
-
-    # X axis coordinates
-    # for the x axis we will work in sets of three columns were the first col will be for the box
-    # and the second and third cols will be for the text
-    # as such the x coordinates will be in increments of 100 / (3 * numcols) starting with 0
-    # the width of the legend Rectangle will be the above number * 1/3.
-    x_coord_increments = 100 / max_n_cols
-    leg_box_width = x_coord_increments / 3
-
-    # go column by column
-    # we can now calculate the actual number of columns and rows we are going to need.
-    if len(ordered_list_of_seqs) < num_leg_cells:
-        if len(ordered_list_of_seqs) % max_n_cols != 0:
-            n_rows = int(len(ordered_list_of_seqs) / max_n_cols) + 1
-        else:
-            n_rows = int(len(ordered_list_of_seqs) / max_n_cols)
-        last_row_len = len(ordered_list_of_seqs) % max_n_cols
-    else:
-        n_rows = max_n_rows
-        last_row_len = max_n_cols
-
-    sequence_count = 0
-
-    # Once we know the number of rows, we can also adjust the y axis limits
-    legend_ax.set_xlim(0, 100)
-    # axarr[-1].set_ylim(0, 100)
-    legend_ax.set_ylim(0, ((n_rows - 1) * y_coord_increments) + leg_box_depth)
-    legend_ax.invert_yaxis()
-
-    # If there are more sequences than there are rows x cols then we need to make sure that we are only going
-    # to plot the first row x cols number of sequences.
-
-    sys.stdout.write('\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows * max_n_cols)))
-    for row_increment in range(min(n_rows, max_n_rows)):
-        # if not in the last row then do a full set of columns
-        if row_increment + 1 != n_rows:
-            for col_increment in range(max_n_cols):
-                # add the legend Rectangle
-                leg_box_x = col_increment * x_coord_increments
-                leg_box_y = row_increment * y_coord_increments
-                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
-                                              width=leg_box_width, height=leg_box_depth,
-                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
-
-                # add the text
-                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
-                text_y = leg_box_y + (0.5 * leg_box_depth)
-                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
-                               fontsize=8)
-
-                # increase the sequence count
-                sequence_count += 1
-        # else just do up to the number of last_row_cols
-        else:
-            for col_increment in range(last_row_len):
-                # add the legend Rectangle
-                leg_box_x = col_increment * x_coord_increments
-                leg_box_y = row_increment * y_coord_increments
-                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
-                                              width=leg_box_width, height=leg_box_depth,
-                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
-
-                # add the text
-                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
-                text_y = leg_box_y + (0.5 * leg_box_depth)
-                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
-                               fontsize=8)
-
-                # Increase the sequences count
-                sequence_count += 1
-
-    legend_ax.set_frame_on(False)
-    legend_ax.get_xaxis().set_visible(False)
-    legend_ax.get_yaxis().set_visible(False)
-
-    if time_date_str:
-        date_time_str = time_date_str
-    else:
-        date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
-
-    plt.tight_layout()
-    fig_output_base = '{0}/{1}'.format(output_directory, date_time_str)
-    sys.stdout.write('\nsaving as .svg\n')
-    plt.savefig('{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base))
-    sys.stdout.write('\nsaving as .png\n')
-    plt.savefig('{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base))
-    # plt.show()
-    return '{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base), \
-           '{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base)
-
-def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_tab_delim_count_type, output_directory, info_df, time_date_str=None):
+def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_tab_delim_count_type, output_directory, info_df, individual_info, time_date_str=None):
     print('Generating stacked bar data submission')
     # /Users/humebc/Documents/SymPortal_testing_repo/SymPortal_framework/outputs/non_analysis/35.DIVs.relative.txt
 
@@ -624,7 +489,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # I hope that this will be quicker than using the bar helper sequence by sequence as we normally do
     # It turns out that the colour parameters are ignored from the individual patches when using
 
-
+    # SETUP AXES
     # https://matplotlib.org/users/gridspec.html
     fig = plt.figure(figsize=(14, 10))
 
@@ -672,7 +537,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
 
     # we will leave one subplot empty for making the legend in at the end
     plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
-                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type)
+                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type, individual_info)
 
     # PLOT DIV LEGEND
     plot_div_legend(colour_dict_div, leg_axes, max_n_cols_div, max_n_rows_div, num_leg_cells_div, ordered_list_of_seqs)
@@ -689,9 +554,9 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     # plt.tight_layout()
     fig_output_base = '{}/{}'.format(os.getcwd(), date_time_str)
     sys.stdout.write('\nsaving as .svg\n')
-    plt.savefig('{}_tara_init_results_coral_bar_plot.svg'.format(fig_output_base))
+    plt.savefig('{}_tara_init_results_coral_bar_plot_with_csw.svg'.format(fig_output_base))
     sys.stdout.write('\nsaving as .png\n')
-    plt.savefig('{}_tara_init_results_coral_bar_plot.png'.format(fig_output_base))
+    plt.savefig('{}_tara_init_results_coral_bar_plot_with_csw.png'.format(fig_output_base))
     # plt.show()
     return
 
@@ -914,13 +779,9 @@ def plot_div_legend(colour_dict_div, leg_axes, max_n_cols_div, max_n_rows_div, n
     # leg_axes[0].get_xaxis().set_visible(False)
     # leg_axes[0].get_yaxis().set_visible(False)
 
-def remove_axes_but_allow_labels(ax):
-    ax.set_frame_on(False)
-    ax.set_xticks([])
-    ax.set_yticks([])
 
 def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
-                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type):
+                   smp_name_to_smp_id_dict, sp_output_df_div, sp_output_df_type, indi_indo):
     ax_count = 0
     extra_ax_count = 0
     for site in ['SITE01', 'SITE02', 'SITE03']:
@@ -960,9 +821,44 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                 # now we want to plot in the order of the ordered_sample_list
                 ordered_smple_ids_of_set = [smpl_id for smpl_id in ordered_sample_list if smpl_id in smple_ids_of_set]
 
+                coral_csw_x_val_tup_list=None
+                if spp == 'POCILLOPORA':
+                    # here we need to work out if any of these are csw associated samples
+                    # if so then we need to follow through and get the id of them
+                    coral_csw_id_one = None
+                    coral_csw_id_ten = None
+                    for smp_name in sample_names_of_set:
+                        if smp_name in indi_indo.keys():
+                            # use the same logic below to get the id of this sample
+                            temp_full_name = '_'.join(
+                                info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3])
+                            # then this is one of the csw associated samples
+                            if indi_indo[smp_name] == 'INDIVIDUAL1':
+                                coral_csw_id_one = smp_name_to_smp_id_dict[temp_full_name]
+                            elif indi_indo[smp_name] == 'INDIVIDUAL10':
+                                coral_csw_id_ten = smp_name_to_smp_id_dict[temp_full_name]
+
+                    # now we need to get the x values of where to draw the line to and from for the csw associated corals
+                    # we can work this out by seeing what the index of the sample ids are in the ordered_smple list
+                    # as the width we use is 1, the x values will then be the index -+ 0.5
+                    coral_csw_x_val_tup_list = []
+                    if coral_csw_id_one:
+                        if coral_csw_id_one in ordered_smple_ids_of_set:
+                            temp_index_of_sample_in_list = ordered_smple_ids_of_set.index(coral_csw_id_one)
+                            coral_csw_x_value_tup = (temp_index_of_sample_in_list -0.5, temp_index_of_sample_in_list + 0.5, 'brown')
+                            coral_csw_x_val_tup_list.append(coral_csw_x_value_tup)
+                    if coral_csw_id_ten:
+                        if coral_csw_id_ten in ordered_smple_ids_of_set:
+                            temp_index_of_sample_in_list = ordered_smple_ids_of_set.index(coral_csw_id_ten)
+                            coral_csw_x_value_tup = (temp_index_of_sample_in_list -0.5, temp_index_of_sample_in_list + 0.5, 'gray')
+                            coral_csw_x_val_tup_list.append(coral_csw_x_value_tup)
+
                 num_smp_in_this_subplot = len(ordered_smple_ids_of_set)
                 x_tick_label_list = []
+
                 for smple_id_to_plot in ordered_smple_ids_of_set:
+
+
                     # General plotting
                     sys.stdout.write('\rPlotting sample: {}'.format(smple_id_to_plot))
                     x_tick_label_list.append(smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0])
@@ -978,11 +874,12 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                     ind += 1
 
 
-
-
-
-                paint_rect_to_axes_div_and_type(ax=ax, colour_list=colour_list, num_smp_in_this_subplot=num_smp_in_this_subplot, patches_list=patches_list,
-                                                x_tick_label_list=x_tick_label_list, max_num_smpls_in_subplot=10)
+                paint_rect_to_axes_div_and_type(ax=ax, colour_list=colour_list,
+                                                num_smp_in_this_subplot=num_smp_in_this_subplot,
+                                                patches_list=patches_list,
+                                                coral_csw_x_val_tup_list=coral_csw_x_val_tup_list,
+                                                x_tick_label_list=x_tick_label_list,
+                                                max_num_smpls_in_subplot=10)
 
                 ax_count += 1
 
@@ -1003,6 +900,41 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                 smp_name in csw_samples]
             smple_ids_of_set_csw = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names_csw]
 
+            # here we need to work out which sample is which individual for the csw association to corals
+
+            coral_csw_id_one = None
+            coral_csw_id_ten = None
+            for smp_name in csw_samples:
+                if smp_name in indi_indo.keys():
+                    # use the same logic below to get the id of this sample
+                    temp_full_name = '_'.join(
+                        info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3])
+                    # then this is one of the csw associated samples
+                    if indi_indo[smp_name] == 'INDIVIDUAL1':
+                        coral_csw_id_one = smp_name_to_smp_id_dict[temp_full_name]
+                    elif indi_indo[smp_name] == 'INDIVIDUAL10':
+                        coral_csw_id_ten = smp_name_to_smp_id_dict[temp_full_name]
+
+            # now we need to get the x values of where to draw the line to and from for the csw associated corals
+            # we can work this out by seeing what the index of the sample ids are in the ordered_smple list
+            # as the width we use is 1, the x values will then be the index -+ 0.5
+            coral_csw_x_val_tup_list = []
+
+            if coral_csw_id_one and coral_csw_id_ten:
+                # then both exist
+                # check to see that they are in the order 'one' then 'ten'. if not, reverse
+                if smple_ids_of_set_csw.index(coral_csw_id_one) == 1:
+                    # then we need to reverse
+                    smple_ids_of_set_csw = list(reversed(smple_ids_of_set_csw))
+                # now add the tuples to the coral_csw_x_val_tup_list
+                for i, colour in enumerate(['brown', 'gray']):
+                    coral_csw_x_value_tup = (i - 0.5, i + 0.5, colour)
+                    coral_csw_x_val_tup_list.append(coral_csw_x_value_tup)
+
+
+            num_smp_in_this_subplot = len(ordered_smple_ids_of_set)
+            x_tick_label_list = []
+
             colour_list = []
             ind = 0
             patches_list = []
@@ -1022,7 +954,7 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                 ind += 1
 
             paint_rect_to_axes_div_and_type(ax=extra_ax_list[extra_ax_count], colour_list=colour_list,
-                                            num_smp_in_this_subplot=2,
+                                            num_smp_in_this_subplot=2, coral_csw_x_val_tup_list=coral_csw_x_val_tup_list,
                                             patches_list=patches_list, max_num_smpls_in_subplot=2)
             extra_ax_count += 1
 
@@ -1064,7 +996,16 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                                             patches_list=patches_list, max_num_smpls_in_subplot=2)
             extra_ax_count += 1
 
-def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  patches_list, x_tick_label_list=None, max_num_smpls_in_subplot=10):
+
+def remove_axes_but_allow_labels(ax):
+    ax.set_frame_on(False)
+    ax.set_xticks([])
+    ax.set_yticks([])
+
+
+
+
+def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  patches_list, coral_csw_x_val_tup_list=None, x_tick_label_list=None,  max_num_smpls_in_subplot=10):
     # We can try making a custom colour map
     # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
     this_cmap = ListedColormap(colour_list)
@@ -1086,11 +1027,7 @@ def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  p
     # ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
 
     remove_axes_but_allow_labels(ax)
-    # ax.get_yaxis().set_visible(False)
-    # ax.get_xaxis().set_visible(False)
-    # ax.spines['right'].set_visible(False)
-    # ax.spines['top'].set_visible(False)
-    # ax.spines['left'].set_visible(False)
+
     # as well as getting rid of the top and right axis splines
     # I'd also like to restrict the bottom spine to where there are samples plotted but also
     # maintain the width of the samples
@@ -1098,6 +1035,12 @@ def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  p
     # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
     # ax.spines['bottom'].set_visible(False)
     ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
+
+    # once we have added the black line we should add the grey and brown line that will associate the
+    # coral samples to the csw samples
+    if coral_csw_x_val_tup_list:
+        for coral_csw_x_value_tup in coral_csw_x_val_tup_list:
+            ax.add_line(Line2D((coral_csw_x_value_tup[0], coral_csw_x_value_tup[1]), (0, 0), linewidth=2, color=coral_csw_x_value_tup[2]))
 
 
 def plot_div_over_type(colour_dict_div, colour_list, ind, patches_list, smple_id_to_plot, sp_output_df_div):
@@ -1268,40 +1211,17 @@ def process_div_df(path_to_tab_delim_count_DIV):
     return smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df
 
 
-def figure_making_corals():
-    '''The aim of this will be to make a figure that splits up the samples into species, site and island
-    so that we can get a better idea about how the symbiodiniaceae changes across the locations and species.'''
 
-    # I think we should be able to hack some of the code used in the symportal repo for this.
-    # we esentially just want to re-jig the symportal plotting outputs so that we have the same plotting order of samples
-    # which are based on the types and then we can just plot subsamples of these according to the order of
-    # islands, then site then species. I think we can plot 3 levels of lines below each plot that can indicate
-    # which island, site and species they are from.
-
-    info_df = generate_info_df_for_samples()
-
-
-    # we want to read in the table that contains both the coral and non-coral sequences so that we can
-    # plot the csw and the surface water samples along side the corals
-    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.relative.txt'
-    # path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
-
-    path_to_tab_delim_rel_count_type = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.profiles.relative.txt'
-
-    output_directory = '/home/humebc/projects/tara/initial_its2_processing'
-
-    generate_stacked_bar_data_submission(path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone, path_to_tab_delim_rel_count_type, output_directory, info_df, time_date_str=None)
-
-    return
 
 def write_out_stats_and_reorder_files():
-    ''' The purpose of this will be to produce a couple of very basic stats of how many samples
-    we have for the different types and then to write out the files into two directories.
-    We will write out the coral samples into one directory and the water samples into another.
-    We do this as the coral samples will go all the way through the SP analysis and have predicted.
-    The water samples can just be submitted to the db and we can get the sequences through QC. They
-    will still need further processing but this will be more tertiary analysis.
-    '''
+
+    # The purpose of this will be to produce a couple of very basic stats of how many samples
+    # we have for the different types and then to write out the files into two directories.
+    # We will write out the coral samples into one directory and the water samples into another.
+    # We do this as the coral samples will go all the way through the SP analysis and have predicted.
+    # The water samples can just be submitted to the db and we can get the sequences through QC. They
+    # will still need further processing but this will be more tertiary analysis.
+
 
     info_df = generate_info_df_for_samples()
 
@@ -1666,4 +1586,330 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
 
     return new_colours
 
-generate_qc_summary_figure()
+non_symbiodiniaceae_taxonomy_work()
+
+### OLD
+def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df,
+                                                  time_date_str=None):
+    print('Generating stacked bar data submission')
+    # /Users/humebc/Documents/SymPortal_testing_repo/SymPortal_framework/outputs/non_analysis/35.DIVs.relative.txt
+
+    # Here we will generate our standard stacked bar output.
+    # We should take into account that we don't know how many samples will be coming through.
+    # I think we should aim for a standard width figure but which can get deeper if there are many samples.
+    # I.e. we should split up very large sets of samples into multiple plots to keep interpretability
+    # as high as possible.
+
+    # I think it would be cool to see the its2 type plotted below the sequences for each of the samples
+    # we can also hack the code for this from SP
+
+    # read in the SymPortal relative abundance output
+    smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df = process_div_df(path_to_tab_delim_count_DIV)
+
+
+    # In theory the output should already be somewhat ordered in that the samples should be in order of similarity.
+    # However, these have the artifical clade ordering so for the plotting it will probably be better to get a new
+    # order for the samples that is not constrained to the order of the clades. For this we should order as usual
+    # according to the most common majority sequences and then within this grouping we should order according to the
+    # the abundance of these sequences within the samples.
+    # We should plot the sequences most abundant across all samples first.
+    # In terms of colour I think its easiest if we go with the high contrast colours list of 269 for the minus black
+    # and white if they are in there for the most abundant sequencs.
+    # if we have more than this number of sequences in the dataset then we should simply work ourway through a grey
+    # palette for the remainder of the sequences.
+    # when doing the plotting using the matplotlib library I want to try a new approach of creating the rectangle
+    # patches individually and holding them in a list before adding them all to the plot at once. Previously we had
+    # been generating the plot one sequence at a time. This can take a considerable amount of time when we get above
+    # ~50-150 sequences depending on the number of samples.
+
+    colour_palette = get_colour_list()
+    grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+
+    # get a list of the sequences in order of their abundance and use this list to create the colour dict
+    # the abundances can be got by simply summing up the columns making sure to ommit the last columns
+    abundance_dict = {}
+    for col in list(sp_output_df_div):
+        abundance_dict[col] = sum(sp_output_df_div[col])
+
+    # get the names of the sequences sorted according to their totalled abundance
+    ordered_list_of_seqs = [x[0] for x in sorted(abundance_dict.items(), key=lambda x: x[1], reverse=True)]
+
+    # create the colour dictionary that will be used for plotting by assigning a colour from the colour_palette
+    # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
+    # If we aer only going to have a legend that is cols x rows as shown below, then we should only use
+    # that many colours in the plotting.
+    max_n_cols = 8
+    max_n_rows = 7
+    num_leg_cells = max_n_cols * max_n_rows
+    colour_dict = {}
+    for i in range(len(ordered_list_of_seqs)):
+        if i < num_leg_cells:
+            colour_dict[ordered_list_of_seqs[i]] = colour_palette[i]
+        else:
+            grey_index = i % len(grey_palette)
+            colour_dict[ordered_list_of_seqs[i]] = grey_palette[grey_index]
+
+    # the ordered_list_of_seqs can also be used for the plotting order
+
+    # we should consider doing a plot per clade but for the time being lets start by doing a single plot that will
+    # contain all of the clades
+
+    # if we are plotting this in companion with an ITS2 type profile output then we will be passed a
+    # sample_order_list. It is very useful to have the ITS2 type profile output figure and the seq figure
+    # in the same sample order for direct comparison
+
+    #TODO get the ordered_sample_list simply from the index order of the df.
+    ordered_sample_list = sp_output_df_div.index.values.tolist()
+    # let's reorder the columns and rows of the sp_output_df according to the sequence sample and sequence
+    # order so that plotting the data is easier
+    sp_output_df_div = sp_output_df_div[ordered_list_of_seqs]
+    sp_output_df_div = sp_output_df_div.reindex(ordered_sample_list)
+
+    # At this stage we are ready to plot
+    # The three following links show how we should be able to construct a list of matplotlib
+    # patches (Rectangles in this case) and add these patches to a PatchCollection before finally
+    # adding this patch collection to the ax using ax.add_collection().
+    # https://matplotlib.org/api/_as_gen/matplotlib.patches.Rectangle.html
+    # https://matplotlib.org/examples/api/patch_collection.html
+    # https://matplotlib.org/users/artists.html
+    # I hope that this will be quicker than using the bar helper sequence by sequence as we normally do
+    # It turns out that the colour parameters are ignored from the individual patches when using
+
+
+
+    # n_samples = len(sp_output_df.index.values.tolist())
+    # smp_per_plot = 50
+    # # number of subplots will be one per smp_per_plot
+    # # and if tehre are remainers be sure to add an extra plot for this
+    # if (n_samples % smp_per_plot) != 0:
+    #     n_subplots = int(n_samples / smp_per_plot) + 1
+    # else:
+    #     n_subplots = int(n_samples / smp_per_plot)
+
+    fig = plt.figure(figsize=(14, 10))
+    # the bottom row will be for the legend
+    gs = plt.GridSpec(4, 9, figure=fig)
+    ax_list = []
+
+
+    for i in range(27):
+        grid_x_placement_coord = i%9
+        grid_y_placement_coord = int(i/9)
+        ax_list.append(plt.subplot(gs[grid_y_placement_coord, grid_x_placement_coord]))
+
+    #finally the ax for the legend
+    legend_ax = plt.subplot(gs[3, :])
+
+    # ax0 = plt.subplot(gs[0])
+    # ax1 = plt.subplot(gs[1])
+    # ax2 = plt.subplot(gs[2])
+    # ax3 = plt.subplot(gs[3])
+    # ax4 = plt.subplot(gs[4])
+    # ax5 = plt.subplot(gs[5])
+
+    # # depth of image is 3 inches per subplot
+    # # we have to work out how to access the axarr
+    # # we add  1 to the n_subplots here for the legend at the bottom
+    # f, axarr = plt.subplots(n_subplots + 1, 1, figsize=(10, 3 * n_subplots))
+
+    # we will leave one subplot empty for making the legend in at the end
+    ax_count = 0
+    for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
+        for site in ['SITE01', 'SITE02', 'SITE03']:
+            for spp in ['PORITES', 'POCILLOPORA', 'MILLEPORA']:
+                ax = ax_list[ax_count]
+                patches_list = []
+                ind = 0
+                colour_list = []
+
+                # for each set of location, site and spp, we basically want to get a list of the samples
+                # that meet the set criteria, we then want to plot samples according to the ordered_sample_list
+                # order which will be in IDs. As such we will have to convert the sample_name in the info_df
+                # to a sample ID using the smp_name_to_smp_id_dict.
+
+                # get sample_names that fit the requirements
+                sample_names_of_set = info_df.loc[
+                    (info_df['location'] == location) &
+                    (info_df['site'] == site) &
+                    (info_df['spp_water'] == spp)
+                ].index.values.tolist()
+
+                # temporarily remove CO0002044, CO0002041
+                # from the above list
+                if 'CO0002044' or 'CO0002041' in sample_names_of_set:
+                    sample_names_of_set = [name for name in sample_names_of_set if name not in ['CO0002044', 'CO0002041']]
+
+                # convert these to sample IDs
+                # The sample names in symportal are actually the full file names version rather than
+                # the shorter versions in the info_df. As such we should we will have to do a conversion here
+                full_sample_names = ['_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in sample_names_of_set]
+                smple_ids_of_set = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names]
+
+                # now we want to plot in the order of the ordered_sample_list
+                ordered_smple_ids_of_set = [smpl_id for smpl_id in ordered_sample_list if smpl_id in smple_ids_of_set]
+
+                num_smp_in_this_subplot = len(ordered_smple_ids_of_set)
+                x_tick_label_list = []
+                for smple_id_to_plot in ordered_smple_ids_of_set:
+
+                    # PLOT DIVs
+                    sys.stdout.write('\rPlotting sample: {}'.format(smple_id_to_plot))
+                    x_tick_label_list.append(smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0])
+                    # for each sample we will start at 0 for the y and then add the height of each bar to this
+                    bottom = 0
+                    # for each sequence, create a rect patch
+                    # the rect will be 1 in width and centered about the ind value.
+                    for seq in list(sp_output_df_div):
+                        # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+                        rel_abund = sp_output_df_div.loc[smple_id_to_plot, seq]
+                        if rel_abund > 0:
+                            patches_list.append(Rectangle((ind - 0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+                            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+                            colour_list.append(colour_dict[seq])
+                            bottom += rel_abund
+                    ind += 1
+
+                # We can try making a custom colour map
+                # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
+                this_cmap = ListedColormap(colour_list)
+
+                # here we should have a list of Rectangle patches
+                # now create the PatchCollection object from the patches_list
+                patches_collection = PatchCollection(patches_list, cmap=this_cmap)
+                patches_collection.set_array(np.arange(len(patches_list)))
+
+                # if n_subplots is only 1 then we can refer directly to the axarr object
+                # else we will need ot reference the correct set of axes with i
+                # Add the pathces to the axes
+                ax.add_collection(patches_collection)
+                ax.autoscale_view()
+                ax.figure.canvas.draw()
+
+                # also format the axes.
+                # make it so that the x axes is constant length that will be the num of samples per subplot
+                # we will hard wire this for the time being
+                smp_per_plot = 10
+                ax.set_xlim(0 - 0.5, smp_per_plot - 0.5)
+                ax.set_ylim(0, 1)
+                ax.set_xticks(range(num_smp_in_this_subplot))
+                ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
+                ax.get_yaxis().set_visible(False)
+                ax.spines['right'].set_visible(False)
+                ax.spines['top'].set_visible(False)
+                ax.spines['left'].set_visible(False)
+
+                # as well as getting rid of the top and right axis splines
+                # I'd also like to restrict the bottom spine to where there are samples plotted but also
+                # maintain the width of the samples
+                # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
+                # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
+                ax.spines['bottom'].set_visible(False)
+                ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
+
+                ax_count += 1
+
+    # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
+    # all in favour... Ok.
+    # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
+    # the one we currenty have. So.. we will add a subplot when we initially create the figure. We will make the axis
+    # 100 by 100 just to make our coordinate easy to work with. We can get rid of all of the axes lines and ticks
+
+    # lets aim to plot a 10 by 10 legend max
+    # we should start plotting in the top left working right and then down
+    # until we have completed 100 sequences.
+
+    # Y axis coordinates
+    # we will allow a buffer of 0.5 of the legend box's height between each legend box.
+    # as such the coordinates of each y will be in increments of 100 / (1.5 * num rows)
+    # the depth of the Rectangle for the legend box will be 2/3 * the above.
+    y_coord_increments = 100 / (max_n_rows)
+    leg_box_depth = 2 / 3 * y_coord_increments
+
+    # X axis coordinates
+    # for the x axis we will work in sets of three columns were the first col will be for the box
+    # and the second and third cols will be for the text
+    # as such the x coordinates will be in increments of 100 / (3 * numcols) starting with 0
+    # the width of the legend Rectangle will be the above number * 1/3.
+    x_coord_increments = 100 / max_n_cols
+    leg_box_width = x_coord_increments / 3
+
+    # go column by column
+    # we can now calculate the actual number of columns and rows we are going to need.
+    if len(ordered_list_of_seqs) < num_leg_cells:
+        if len(ordered_list_of_seqs) % max_n_cols != 0:
+            n_rows = int(len(ordered_list_of_seqs) / max_n_cols) + 1
+        else:
+            n_rows = int(len(ordered_list_of_seqs) / max_n_cols)
+        last_row_len = len(ordered_list_of_seqs) % max_n_cols
+    else:
+        n_rows = max_n_rows
+        last_row_len = max_n_cols
+
+    sequence_count = 0
+
+    # Once we know the number of rows, we can also adjust the y axis limits
+    legend_ax.set_xlim(0, 100)
+    # axarr[-1].set_ylim(0, 100)
+    legend_ax.set_ylim(0, ((n_rows - 1) * y_coord_increments) + leg_box_depth)
+    legend_ax.invert_yaxis()
+
+    # If there are more sequences than there are rows x cols then we need to make sure that we are only going
+    # to plot the first row x cols number of sequences.
+
+    sys.stdout.write('\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows * max_n_cols)))
+    for row_increment in range(min(n_rows, max_n_rows)):
+        # if not in the last row then do a full set of columns
+        if row_increment + 1 != n_rows:
+            for col_increment in range(max_n_cols):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
+                                              width=leg_box_width, height=leg_box_depth,
+                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
+                               fontsize=8)
+
+                # increase the sequence count
+                sequence_count += 1
+        # else just do up to the number of last_row_cols
+        else:
+            for col_increment in range(last_row_len):
+                # add the legend Rectangle
+                leg_box_x = col_increment * x_coord_increments
+                leg_box_y = row_increment * y_coord_increments
+                legend_ax.add_patch(Rectangle((leg_box_x, leg_box_y),
+                                              width=leg_box_width, height=leg_box_depth,
+                                              color=colour_dict[ordered_list_of_seqs[sequence_count]]))
+
+                # add the text
+                text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
+                text_y = leg_box_y + (0.5 * leg_box_depth)
+                legend_ax.text(text_x, text_y, ordered_list_of_seqs[sequence_count], verticalalignment='center',
+                               fontsize=8)
+
+                # Increase the sequences count
+                sequence_count += 1
+
+    legend_ax.set_frame_on(False)
+    legend_ax.get_xaxis().set_visible(False)
+    legend_ax.get_yaxis().set_visible(False)
+
+    if time_date_str:
+        date_time_str = time_date_str
+    else:
+        date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
+
+    plt.tight_layout()
+    fig_output_base = '{0}/{1}'.format(output_directory, date_time_str)
+    sys.stdout.write('\nsaving as .svg\n')
+    plt.savefig('{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base))
+    sys.stdout.write('\nsaving as .png\n')
+    plt.savefig('{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base))
+    # plt.show()
+    return '{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base), \
+           '{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base)
