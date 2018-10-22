@@ -17,7 +17,17 @@ import statistics
 import subprocess
 from collections import defaultdict
 
-def non_symbiodiniaceae_taxonomy_work():
+def non_symbiodiniaceae_taxonomy_work_do_plotting():
+    pickle.dump(taxa_abund_dict_holder_dict, open('taxa_abund_dict_holder_dict.pickle', 'wb'))
+    pickle.dump(taxa_abund_dict_holder_dict_group, open('taxa_abund_dict_holder_dict_group.pickle', 'wb'))
+    pickle.dump(taxa_abund_dict_holder_dict_match_values, open('taxa_abund_dict_holder_dict_match_values.pickle', 'wb'))
+
+    pickle.dump(master_taxa_abund_dict, open('master_taxa_abund_dict.pickle', 'wb'))
+    pickle.dump(master_taxa_abund_dict_group, open('master_taxa_abund_dict_group.pickle', 'wb'))
+
+    pickle.dump(symbiodinium_list, open('symbiodinium_list.pickle', 'wb'))
+
+def non_symbiodiniaceae_taxonomy_work_do_blasting():
     # the aim of this metod will be to see what we actually have in the non-Symbidiniaceae sequences
     # I have changed SymPortal so that it now puts out the throwaway non-symbiodiniaceae sequences
     # on a sample by sample basis. This should allow us to go through and look at the taxonomy
@@ -47,9 +57,14 @@ def non_symbiodiniaceae_taxonomy_work():
 
     # a dictionary that will hold the total for the binomials
     master_taxa_abund_dict = defaultdict(int)
+    # also have a dict for the taxa group
+    master_taxa_abund_dict_group = defaultdict(int)
 
     # also a dict that will hold the sample dicts
     taxa_abund_dict_holder_dict = {}
+    taxa_abund_dict_holder_dict_group = {}
+    # this dict will hold the average for the match and coverage percentage
+    taxa_abund_dict_holder_dict_match_values = {}
 
     # first do the 6 OA samples
     # get sample_names that fit the requirements
@@ -63,7 +78,8 @@ def non_symbiodiniaceae_taxonomy_work():
         sample_names_of_set]
 
     for sample_name in full_sample_names:
-        blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list)
+        blast_sample_taxonomy(master_taxa_abund_dict, master_taxa_abund_dict_group, sample_name,
+                              taxa_abund_dict_holder_dict, taxa_abund_dict_holder_dict_group, taxa_abund_dict_holder_dict_match_values, symbiodinium_list)
 
     for site in ['SITE01', 'SITE02', 'SITE03']:
         for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
@@ -88,19 +104,26 @@ def non_symbiodiniaceae_taxonomy_work():
                     sample_names_of_set]
 
                 for sample_name in full_sample_names:
-                    blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list)
+                    blast_sample_taxonomy(master_taxa_abund_dict, master_taxa_abund_dict_group, sample_name,
+                                          taxa_abund_dict_holder_dict, taxa_abund_dict_holder_dict_group, taxa_abund_dict_holder_dict_match_values,
+                                          symbiodinium_list)
 
 
 
     # here we should pickle the totally sweet dictionaries that we have made
     pickle.dump(taxa_abund_dict_holder_dict, open('taxa_abund_dict_holder_dict.pickle', 'wb'))
-    pickle.dump(master_taxa_abund_dict, open('master_taxa_abund_dict.pickle', 'wb'))
+    pickle.dump(taxa_abund_dict_holder_dict_group, open('taxa_abund_dict_holder_dict_group.pickle', 'wb'))
+    pickle.dump(taxa_abund_dict_holder_dict_match_values, open('taxa_abund_dict_holder_dict_match_values.pickle', 'wb'))
 
+    pickle.dump(master_taxa_abund_dict, open('master_taxa_abund_dict.pickle', 'wb'))
+    pickle.dump(master_taxa_abund_dict_group, open('master_taxa_abund_dict_group.pickle', 'wb'))
+
+    pickle.dump(symbiodinium_list, open('symbiodinium_list.pickle', 'wb'))
 
     return
 
 
-def blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_holder_dict, symbiodinium_list):
+def blast_sample_taxonomy(master_taxa_abund_dict, master_taxa_abund_dict_group, sample_name, taxa_abund_dict_holder_dict, taxa_abund_dict_holder_dict_group, taxa_abund_dict_holder_dict_match_values, symbiodinium_list):
     print('Blasting {}'.format(sample_name))
     # these are now names that we can iterate through and look up the fasta and name files accordingly
     # get the fasta
@@ -143,11 +166,29 @@ def blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_h
         blast_out_dict[components[0]].append(components[1:])
     # now we can go key by key in the blast_out_dict and collect counts for what binomials we can
     taxa_count_dict = defaultdict(int)
+    taxa_count_dict_group = defaultdict(int)
+    taxa_count_dict_match_values = []
     total_seqs = sum(seq_name_to_abundance_dict.values())
     for seq_key, blast_list in blast_out_dict.items():
         specific_binomial_found = False
-        for result_list in blast_list:
+        # the blast_list needs sorting according to it e-value
+        # go through the list and get a list of the evalues or put 0 if not found
+        # create list of tuples where first value is the evalue and second the list of items
+        # then sort this and work through the new list below
+        new_tup_list = []
+        for sub_list in blast_list:
+            try:
+                evalue = sub_list[4].split('-')[-1]
+                new_tup_list.append((evalue, sub_list))
+            except:
+                continue
+        # now sort the new_typ list
+        sorted_list_of_lists = [a[1] for a in sorted(new_tup_list, key=lambda x: x[0], reverse=True)]
+        for result_list in sorted_list_of_lists:
             binomial = result_list[2]
+            group = result_list[3]
+            ident = float(result_list[5])
+            cov = float(result_list[6])
             if binomial != 'uncultured eukaryote' and binomial != 'N/A':
                 # then we should use this binomial
                 if binomial.split(' ')[0] in ['symbiodinium', 'Symbiodinium', 'Symbiodiniaceae', 'symbiodiniaceae', 'Cladocopium',
@@ -155,15 +196,28 @@ def blast_sample_taxonomy(master_taxa_abund_dict, sample_name, taxa_abund_dict_h
                                 'Durusdinium', 'durussinium', 'Gerakladium', 'gerakladium', 'Effrenium', 'effrenium']:
                     symbiodinium_list.extend(['>{}'.format(seq_key), fasta_dict[seq_key]])
 
-                taxa_count_dict[binomial.split(' ')[0]] += seq_name_to_abundance_dict[seq_key] / total_seqs
-                master_taxa_abund_dict[binomial.split(' ')[0]] += seq_name_to_abundance_dict[seq_key] / total_seqs
+                rel_abund_of_seq = seq_name_to_abundance_dict[seq_key] / total_seqs
+                taxa_count_dict[binomial.split(' ')[0]] += rel_abund_of_seq
+                taxa_count_dict_group[group] += rel_abund_of_seq
+                # we will multiply the identify and coverage values by the relative abundance of the sequence
+                # when summed this should give us an accurate average
+                rel_ident = ident * rel_abund_of_seq
+                rel_cov = cov * rel_abund_of_seq
+                taxa_count_dict_match_values.append((rel_ident, rel_cov))
+                master_taxa_abund_dict[binomial.split(' ')[0]] += rel_abund_of_seq
+                master_taxa_abund_dict_group[group] += rel_abund_of_seq
+
                 specific_binomial_found = True
                 break
         # if we get here then we didn't find a binomial that wasn't uncultured eukaryote
         if not specific_binomial_found:
             taxa_count_dict['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
+            taxa_count_dict_group['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
             master_taxa_abund_dict['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
+            master_taxa_abund_dict_group['uncultured eukaryote'] += seq_name_to_abundance_dict[seq_key] / total_seqs
     taxa_abund_dict_holder_dict[sample_name] = taxa_count_dict
+    taxa_abund_dict_holder_dict_group[sample_name] = taxa_count_dict_group
+    taxa_abund_dict_holder_dict_match_values[sample_name] = taxa_count_dict_match_values
     apples = 'asdf'
 
 
@@ -191,10 +245,10 @@ def figure_making_bar_plots_corals():
 
     # we want to read in the table that contains both the coral and non-coral sequences so that we can
     # plot the csw and the surface water samples along side the corals
-    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.relative.txt'
-    # path_to_tab_delim_rel_count_DIV = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.DIVs.relative.txt'
+    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-21_08-59-37.620726.DIVs.relative.txt'
 
-    path_to_tab_delim_rel_count_type = '33_init_tara_standalone_151018_2018-10-15_06-19-27.594509.profiles.relative.txt'
+
+    path_to_tab_delim_rel_count_type = '34_init_tara_standalone_all_samps_151018_2018-10-21_08-45-56.507454.profiles.relative.txt'
 
     output_directory = '/home/humebc/projects/tara/initial_its2_processing'
 
@@ -204,12 +258,12 @@ def figure_making_bar_plots_corals():
 
 def generate_qc_summary_figure():
     info_df = generate_info_df_for_samples()
-    # TODO switch off the 2044 and 2041 exclusion when they have been run
-    info_df.drop(['CO0002044', 'CO0002041'], axis=0, inplace=True)
+    # #  switch off the 2044 and 2041 exclusion when they have been run
+    # info_df.drop(['CO0002044', 'CO0002041'], axis=0, inplace=True)
 
     # we want to read in the table that contains both the coral and non-coral sequences so that we can
     # plot the csw and the surface water samples along side the corals
-    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-17_00-50-45.813920.DIVs.absolute.txt'
+    path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone = '2018-10-21_08-59-37.620726.DIVs.absolute.txt'
 
     # read in the SymPortal output
     sp_output_df = pd.read_csv(path_to_tab_delim_rel_count_DIV_coral_non_coral_standalone, sep='\t', lineterminator='\n')
@@ -806,9 +860,9 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
 
                 # temporarily remove CO0002044, CO0002041
                 # from the above list
-                if 'CO0002044' or 'CO0002041' in sample_names_of_set:
-                    sample_names_of_set = [name for name in sample_names_of_set if
-                                           name not in ['CO0002044', 'CO0002041']]
+                # if 'CO0002044' or 'CO0002041' in sample_names_of_set:
+                #     sample_names_of_set = [name for name in sample_names_of_set if
+                #                            name not in ['CO0002044', 'CO0002041']]
 
                 # convert these to sample IDs
                 # The sample names in symportal are actually the full file names version rather than
@@ -1586,7 +1640,7 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
 
     return new_colours
 
-non_symbiodiniaceae_taxonomy_work()
+generate_qc_summary_figure()
 
 ### OLD
 def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df,
@@ -1736,8 +1790,8 @@ def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, o
 
                 # temporarily remove CO0002044, CO0002041
                 # from the above list
-                if 'CO0002044' or 'CO0002041' in sample_names_of_set:
-                    sample_names_of_set = [name for name in sample_names_of_set if name not in ['CO0002044', 'CO0002041']]
+                # if 'CO0002044' or 'CO0002041' in sample_names_of_set:
+                #     sample_names_of_set = [name for name in sample_names_of_set if name not in ['CO0002044', 'CO0002041']]
 
                 # convert these to sample IDs
                 # The sample names in symportal are actually the full file names version rather than
