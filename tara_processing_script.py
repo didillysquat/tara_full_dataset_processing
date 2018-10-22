@@ -17,25 +17,273 @@ import statistics
 import subprocess
 from collections import defaultdict
 
+# This is the method to call for plotting the non-symbiodiniacea bar plots of the non-coral samples
 def non_symbiodiniaceae_taxonomy_work_do_plotting():
-    pickle.dump(taxa_abund_dict_holder_dict, open('taxa_abund_dict_holder_dict.pickle', 'wb'))
-    pickle.dump(taxa_abund_dict_holder_dict_group, open('taxa_abund_dict_holder_dict_group.pickle', 'wb'))
-    pickle.dump(taxa_abund_dict_holder_dict_match_values, open('taxa_abund_dict_holder_dict_match_values.pickle', 'wb'))
+    taxa_abund_dict_holder_dict = pickle.load(open('taxa_abund_dict_holder_dict.pickle', 'rb'))
+    taxa_abund_dict_holder_dict_group = pickle.load(open('taxa_abund_dict_holder_dict_group.pickle', 'rb'))
+    taxa_abund_dict_holder_dict_match_values = pickle.load(open('taxa_abund_dict_holder_dict_match_values.pickle', 'rb'))
 
-    pickle.dump(master_taxa_abund_dict, open('master_taxa_abund_dict.pickle', 'wb'))
-    pickle.dump(master_taxa_abund_dict_group, open('master_taxa_abund_dict_group.pickle', 'wb'))
+    master_taxa_abund_dict = pickle.load(open('master_taxa_abund_dict.pickle', 'rb'))
+    master_taxa_abund_dict_group = pickle.load(open('master_taxa_abund_dict_group.pickle', 'rb'))
 
-    pickle.dump(symbiodinium_list, open('symbiodinium_list.pickle', 'wb'))
+    symbiodinium_list = pickle.load(open('symbiodinium_list.pickle', 'rb'))
+
+    sorted_taxa_list = [a[0] for a in sorted(master_taxa_abund_dict.items(), key=lambda x: x[1], reverse=True)]
+
+    info_df = generate_info_df_for_samples()
+
+    # SETUP AXES
+    # https://matplotlib.org/users/gridspec.html
+    fig = plt.figure(figsize=(10, 6))
+
+    # the bottom row will be for the legend
+    # the second to last will just be invisible to give a space between the legend and the other plots
+    # we also want to include a gridspec plot after each of the main three. These will hold the csw and surface
+    # samples
+    gs = plt.GridSpec(5, 4, figure=fig, height_ratios=[1, 1, 1, 0.3, 1])
+
+    # The easiest way to do the labeling of the axes is to create an axis that is each of the Gridspec cells
+    # this way we can just apply labels and titles to these
+    # first make the axes for the main 3 x 3
+    labeling_ax = []
+    for row_ind in range(3):
+        temp_list = []
+        for col_ind in range(3):
+            ax = plt.subplot(gs[row_ind, col_ind])
+            remove_axes_but_allow_labels(ax)
+            temp_list.append(ax)
+        labeling_ax.append(temp_list)
+    OAaxx = plt.subplot(gs[0, 3])
+    remove_axes_but_allow_labels(OAaxx)
+
+
+    # within each of the GrdiSpec subplots we will make a subplotspec which is three plots on one row
+
+    ax_list = []
+
+    grid_spec_subplot_list = []
+    for row_ind in range(3):
+        for col_ind in range(4):
+            if col_ind == 3 and row_ind == 0:
+                # this is the axis for the OA samples
+                ax = plt.subplot(gs[row_ind, col_ind])
+                ax_list.append(ax)
+            elif col_ind !=3:
+                # put in the main data 3 plots
+                temp_grid_spec_subplot = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[row_ind, col_ind])
+                grid_spec_subplot_list.append(temp_grid_spec_subplot)
+                for i in range(2):
+                    # NB this might be a 2d array, lets see.
+                    ax = plt.Subplot(fig, temp_grid_spec_subplot[i])
+                    ax_list.append(ax)
+                    fig.add_subplot(ax)
+
+
+    # now do the invisible row that will give us the space we want
+    ax_space = plt.subplot(gs[3, :])
+    remove_axes_but_allow_labels(ax_space)
+    # now split up the final row to put the legend in. One for DIVs and one for TYPEs
+    # temp_grid_spec_subplot_leg = gridspec.GridSpecFromSubplotSpec(1, 2, subplot_spec=gs[4, :])
+    leg_axes = []
+    for i in range(2):
+        ax = plt.subplot(gs[4, :-1])
+        # ax = plt.Subplot(fig, temp_grid_spec_subplot_leg[i])
+        leg_axes.append(ax)
+        # fig.add_subplot(ax)
+
+    max_n_cols = 4
+    max_n_rows = 7
+    num_leg_cells = max_n_cols * max_n_rows
+    if os.path.isfile('taxa_colour_dict.pickle'):
+        colour_dict_taxa = pickle.load(open('taxa_colour_dict.pickle', 'rb'))
+    else:
+        colour_palette_pas = ['#%02x%02x%02x' % rgb_tup for rgb_tup in
+                              create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=1000, num_cols=len(master_taxa_abund_dict.keys()),
+                                                 time_out_iterations=10000)]
+
+        grey_palette_taxa = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+
+
+
+        colour_dict_taxa = {}
+        for i in range(len(sorted_taxa_list)):
+            if i < num_leg_cells:
+                colour_dict_taxa[sorted_taxa_list[i]] = colour_palette_pas[i]
+            else:
+                grey_index = i % len(grey_palette_taxa)
+                colour_dict_taxa[sorted_taxa_list[i]] = grey_palette_taxa[grey_index]
+        pickle.dump(colour_dict_taxa, open('taxa_colour_dict.pickle', 'wb'))
+
+    ax_count = 0
+    extra_ax_count = 0
+    for site in ['SITE01', 'SITE02', 'SITE03']:
+        for location in ['ISLAND06', 'ISLAND10', 'ISLAND15']:
+            for spp in ['CSW', 'SURFACE']:
+                ax = ax_list[ax_count]
+                patches_list = []
+                ind = 0
+                colour_list = []
+
+                # for each set of location, site and spp, we basically want to get a list of the samples
+                # that meet the set criteria, we then want to plot samples according to the ordered_sample_list
+                # order which will be in IDs. As such we will have to convert the sample_name in the info_df
+                # to a sample ID using the smp_name_to_smp_id_dict.
+
+                # get sample_names that fit the requirements
+                sample_names_of_set = info_df.loc[
+                    (info_df['location'] == location) &
+                    (info_df['site'] == site) &
+                    (info_df['spp_water'] == spp)
+                    ].index.values.tolist()
+
+                # convert these to sample IDs
+                # The sample names in symportal are actually the full file names version rather than
+                # the shorter versions in the info_df. As such we should we will have to do a conversion here
+                full_sample_names = [
+                    '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in
+                    sample_names_of_set]
+
+
+                num_smp_in_this_subplot = len(full_sample_names)
+                x_tick_label_list = []
+
+                plot_sample_on_ax_taxa(colour_dict_taxa, colour_list, full_sample_names, ind, patches_list,
+                                       sorted_taxa_list, taxa_abund_dict_holder_dict, x_tick_label_list)
+
+                if site=='SITE03':
+                    if spp == 'CSW':
+                        x_tick_label_list = ['CSW', 'CSW']
+                    elif spp == 'SURFACE':
+                        x_tick_label_list = ['SURFACE']
+                    apply_patches_to_ax_taxa(ax, colour_list, num_smp_in_this_subplot, patches_list, spp,
+                                             max_num_smpls_in_subplot=3, x_tick_label_list=x_tick_label_list)
+                else:
+                    apply_patches_to_ax_taxa(ax, colour_list, num_smp_in_this_subplot, patches_list, spp, max_num_smpls_in_subplot=3)
+
+                ax_count += 1
+
+                # now here we should check to see if we should be plotting the OA samples.
+                # this should happen just after we plotted ISLAND 15, site 2, SURFACE
+                if spp == 'SURFACE' and location == 'ISLAND15' and site =='SITE01':
+                    # get sample_names that fit the requirements
+                    sample_names_of_set = info_df.loc[info_df['spp_water'] == 'PLANKTON'].index.values.tolist()
+
+                    # convert these to sample IDs
+                    # The sample names in symportal are actually the full file names version rather than
+                    # the shorter versions in the info_df. As such we should we will have to do a conversion here
+                    full_sample_names = [
+                        '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for
+                        smp_name in sample_names_of_set]
+
+                    num_smp_in_this_subplot = len(full_sample_names)
+                    x_tick_label_list = []
+                    patches_list = []
+                    ind = 0
+                    colour_list = []
+                    ax = ax_list[ax_count]
+                    plot_sample_on_ax_taxa(colour_dict_taxa, colour_list, full_sample_names, ind, patches_list,
+                                           sorted_taxa_list, taxa_abund_dict_holder_dict, x_tick_label_list)
+
+                    apply_patches_to_ax_taxa(ax, colour_list, num_smp_in_this_subplot, patches_list, spp,
+                                             max_num_smpls_in_subplot=num_smp_in_this_subplot,
+                                             x_tick_label_list=x_tick_label_list)
+
+                    ax_count += 1
+
+    #now plot the leg axes
+    # plot_div_legend(colour_dict_div=colour_dict_taxa, leg_axes=leg_axes, max_n_cols_div=max_n_cols, max_n_rows_div=max_n_rows, num_leg_cells_div=num_leg_cells, ordered_list_of_seqs=sorted_taxa_list)
+    plot_type_legend(colour_dict_type=colour_dict_taxa, leg_axes=leg_axes, max_n_cols_type=max_n_cols, max_n_rows_type=max_n_rows, num_leg_cells_type=num_leg_cells, sorted_type_prof_names_by_local_abund=sorted_taxa_list, string_cut_off=18)
+    # plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_type, num_leg_cells_type,
+    #                  sorted_type_prof_names_by_local_abund)
+
+    for site_ind, site_label in enumerate(['SITE01', 'SITE02', 'SITE03']):
+        for loc_ind, loc_label in enumerate(['ISLAND06', 'ISLAND10', 'ISLAND15']):
+            if site_ind == 0:
+                labeling_ax[site_ind][loc_ind].set_title(loc_label)
+            if loc_ind == 0:
+                labeling_ax[site_ind][loc_ind].set_ylabel(site_label, fontsize='large')
+            # labeling_ax[0].set_xlabel('porites', fontsize='medium')
+    OAaxx.set_title('OA samples')
+
+    date_time_str = str(datetime.now()).replace(' ', '_').replace(':', '-')
+
+
+    fig_output_base = '{}/{}'.format(os.getcwd(), date_time_str)
+    sys.stdout.write('\nsaving as .svg\n')
+    plt.savefig('{}_tara_init_results_non_symbiodiniaceae_bar_plots.svg'.format(fig_output_base))
+    sys.stdout.write('\nsaving as .png\n')
+    plt.savefig('{}_tara_init_results_non_symbiodiniaceae_bar_plots.png'.format(fig_output_base))
+
+
+    apples = 'asdf'
+
+
+def apply_patches_to_ax_taxa(ax, colour_list, num_smp_in_this_subplot, patches_list, spp, max_num_smpls_in_subplot, x_tick_label_list=None):
+    # We can try making a custom colour map
+    # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
+    this_cmap = ListedColormap(colour_list)
+    # here we should have a list of Rectangle patches
+    # now create the PatchCollection object from the patches_list
+    patches_collection = PatchCollection(patches_list, cmap=this_cmap)
+    patches_collection.set_array(np.arange(len(patches_list)))
+    # if n_subplots is only 1 then we can refer directly to the axarr object
+    # else we will need ot reference the correct set of axes with i
+    # Add the pathces to the axes
+    ax.add_collection(patches_collection)
+    ax.autoscale_view()
+    ax.figure.canvas.draw()
+    # also format the axes.
+    # make it so that the x axes is constant length
+
+    ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
+    ax.set_ylim(0, 1)
+    if x_tick_label_list:
+        ax.set_xticks(range(num_smp_in_this_subplot))
+        ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
+
+        remove_axes_but_allow_labels(ax, x_tick_label_list)
+    else:
+        remove_axes_but_allow_labels(ax)
+    # as well as getting rid of the top and right axis splines
+    # I'd also like to restrict the bottom spine to where there are samples plotted but also
+    # maintain the width of the samples
+    # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
+    # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
+    # ax.spines['bottom'].set_visible(False)
+    ax.add_line(Line2D((0 - 0.5, num_smp_in_this_subplot - 0.5), (0, 0), linewidth=2, color='black'))
+
+
+def plot_sample_on_ax_taxa(colour_dict_taxa, colour_list, full_sample_names, ind, patches_list, sorted_taxa_list,
+                           taxa_abund_dict_holder_dict, x_tick_label_list):
+    for smple_name_to_plot in full_sample_names:
+        # General plotting
+        sys.stdout.write('\rPlotting sample: {}'.format(smple_name_to_plot))
+        x_tick_label_list.append(smple_name_to_plot.split('_')[0])
+        # for each sample we will start at 0 for the y and then add the height of each bar to this
+
+        bottom_div = 0
+        # for each sequence, create a rect patch
+        # the rect will be 1 in width and centered about the ind value.
+        for taxa in list(sorted_taxa_list):
+            # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+            rel_abund_div = taxa_abund_dict_holder_dict[smple_name_to_plot][taxa]
+            if rel_abund_div > 0:
+                patches_list.append(
+                    Rectangle((ind - 0.5, bottom_div), 1, rel_abund_div, color=colour_dict_taxa[taxa]))
+                # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+                colour_list.append(colour_dict_taxa[taxa])
+                bottom_div += rel_abund_div
+
+        ind += 1
+
 
 def non_symbiodiniaceae_taxonomy_work_do_blasting():
     # the aim of this metod will be to see what we actually have in the non-Symbidiniaceae sequences
     # I have changed SymPortal so that it now puts out the throwaway non-symbiodiniaceae sequences
     # on a sample by sample basis. This should allow us to go through and look at the taxonomy
     # of whats in them.
-
     # I think the basic principle will be to do the surface and csw samples in the same layout as the corals but
     # maybe with piecharts or stacks
-
     # and then to do the OA samples seperately.
 
     info_df = generate_info_df_for_samples()
@@ -219,6 +467,9 @@ def blast_sample_taxonomy(master_taxa_abund_dict, master_taxa_abund_dict_group, 
     taxa_abund_dict_holder_dict_group[sample_name] = taxa_count_dict_group
     taxa_abund_dict_holder_dict_match_values[sample_name] = taxa_count_dict_match_values
     apples = 'asdf'
+
+
+
 
 
 def figure_making_bar_plots_corals():
@@ -648,7 +899,7 @@ def add_labels(ax_list, leg_axes, extra_ax_list):
 
 
 def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_type, num_leg_cells_type,
-                     sorted_type_prof_names_by_local_abund):
+                     sorted_type_prof_names_by_local_abund, string_cut_off=10):
     # Since the matplotlib legends are pretty rubbish when made automatically, I vote that we make our own axes
     # all in favour... Ok.
     # Let's plot the boxes and text that are going to make up the legend in another subplot that we will put underneath
@@ -691,7 +942,7 @@ def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_typ
     # to plot the first row x cols number of sequences.
     sys.stdout.write(
         '\nGenerating figure legend for {} most common sequences\n'.format(str(max_n_rows_type * max_n_cols_type)))
-    label_max_length = 10
+
     for row_increment in range(min(n_rows_type, max_n_rows_type)):
         # if not in the last row then do a full set of columns
         if row_increment + 1 != n_rows_type:
@@ -708,9 +959,9 @@ def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_typ
                 text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
                 text_y = leg_box_y + (0.5 * leg_box_depth)
                 # lets limit the name to 15 characters and '...'
-                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > label_max_length:
+                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > string_cut_off:
                     text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count][
-                                      :label_max_length] + '...'
+                                      :string_cut_off] + '...'
                 else:
                     text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count]
                 leg_axes[1].text(text_x, text_y, text_for_legend,
@@ -734,9 +985,9 @@ def plot_type_legend(colour_dict_type, leg_axes, max_n_cols_type, max_n_rows_typ
                 text_x = leg_box_x + leg_box_width + (0.2 * leg_box_width)
                 text_y = leg_box_y + (0.5 * leg_box_depth)
                 # lets limit the name to 15 characters and '...'
-                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > label_max_length:
+                if len(sorted_type_prof_names_by_local_abund[its2_profile_count]) > string_cut_off:
                     text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count][
-                                      :label_max_length] + '...'
+                                      :string_cut_off] + '...'
                 else:
                     text_for_legend = sorted_type_prof_names_by_local_abund[its2_profile_count]
                 leg_axes[1].text(text_x, text_y, text_for_legend,
@@ -829,9 +1080,7 @@ def plot_div_legend(colour_dict_div, leg_axes, max_n_cols_div, max_n_rows_div, n
                 # Increase the sequences count
                 sequence_count += 1
     remove_axes_but_allow_labels(leg_axes[0])
-    # leg_axes[0].spines[].set_visible(False)
-    # leg_axes[0].get_xaxis().set_visible(False)
-    # leg_axes[0].get_yaxis().set_visible(False)
+
 
 
 def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, info_df, ordered_sample_list, smp_id_to_smp_name_dict,
@@ -1051,9 +1300,10 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
             extra_ax_count += 1
 
 
-def remove_axes_but_allow_labels(ax):
+def remove_axes_but_allow_labels(ax, x_tick_label_list=None):
     ax.set_frame_on(False)
-    ax.set_xticks([])
+    if not x_tick_label_list:
+        ax.set_xticks([])
     ax.set_yticks([])
 
 
@@ -1640,7 +1890,7 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
 
     return new_colours
 
-generate_qc_summary_figure()
+non_symbiodiniaceae_taxonomy_work_do_plotting()
 
 ### OLD
 def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, output_directory, info_df,
@@ -1967,3 +2217,5 @@ def generate_stacked_bar_data_submission_only_div(path_to_tab_delim_count_DIV, o
     # plt.show()
     return '{}_seq_abundance_stacked_bar_plot.svg'.format(fig_output_base), \
            '{}_seq_abundance_stacked_bar_plot.png'.format(fig_output_base)
+
+    non_symbiodiniaceae_taxonomy_work_do_plotting
