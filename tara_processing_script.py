@@ -873,8 +873,10 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
                 full_sample_names = [
                     '_'.join(info_df.loc[smp_name]['fastq_fwd_file_path'].split('/')[-1].split('_')[:3]) for smp_name in
                     sample_names_of_set]
-                smple_ids_of_set = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names]
-
+                try:
+                    smple_ids_of_set = [smp_name_to_smp_id_dict[smp_name] for smp_name in full_sample_names]
+                except:
+                    apples = 'asdf'
                 # now we want to plot in the order of the ordered_sample_list
                 ordered_smple_ids_of_set = [smpl_id for smpl_id in ordered_sample_list if smpl_id in smple_ids_of_set]
 
@@ -1230,11 +1232,7 @@ def process_type_df(path_to_tab_delim_count_type):
 
 def process_div_df(path_to_tab_delim_count_DIV):
     sp_output_df = pd.read_csv(path_to_tab_delim_count_DIV, sep='\t', lineterminator='\n', header=0, index_col=0)
-    # create sample id to sample name dict
-    smp_id_to_smp_name_dict = {ID: nm for ID, nm in
-                               zip(sp_output_df.index.values.tolist(), sp_output_df['sample_name'].values.tolist())}
-    smp_name_to_smp_id_dict = {nm: ID for ID, nm in
-                               zip(sp_output_df.index.values.tolist(), sp_output_df['sample_name'].values.tolist())}
+
     # In order to be able to drop the DIV row at the end and the meta information rows, we should
     # drop all rows that are after the DIV column. We will pass in an index value to the .drop
     # that is called here. To do this we need to work out which index we are working with
@@ -1244,6 +1242,14 @@ def process_div_df(path_to_tab_delim_count_DIV):
             # then this is the index (in negative notation) that we need to cut from
             meta_index_to_cut_from = i
             break
+    sp_output_df = sp_output_df.iloc[:meta_index_to_cut_from]
+
+    # create sample id to sample name dict
+    smp_id_to_smp_name_dict = {ID: '_'.join(nm.split('_')[:3]) for ID, nm in
+                               zip(sp_output_df.index.values.tolist(), sp_output_df['sample_name'].values.tolist())}
+    smp_name_to_smp_id_dict = {'_'.join(nm.split('_')[:3]): ID for ID, nm in
+                               zip(sp_output_df.index.values.tolist(), sp_output_df['sample_name'].values.tolist())}
+
     # now lets drop the QC columns from the SP output df and also drop the clade summation columns
     # we will be left with just clumns for each one of the sequences found in the samples
     sp_output_df.drop(columns=['sample_name', 'noName Clade A', 'noName Clade B', 'noName Clade C', 'noName Clade D',
@@ -1254,8 +1260,7 @@ def process_div_df(path_to_tab_delim_count_DIV):
                                'post_taxa_id_unique_non_symbiodinium_seqs',
                                'size_screening_violation_absolute', 'size_screening_violation_unique',
                                'post_med_absolute', 'post_med_unique'
-                               ], index=sp_output_df.index[range(meta_index_to_cut_from, 0, 1)]
-                      , inplace=True)
+                               ], inplace=True)
     sp_output_df = sp_output_df.astype('float')
     return smp_id_to_smp_name_dict, smp_name_to_smp_id_dict, sp_output_df
 
@@ -1294,7 +1299,7 @@ def generate_qc_summary_figure():
                                'size_screening_violation_absolute', 'size_screening_violation_unique',
                                'post_med_absolute', 'post_med_unique']]
 
-    f, axarr = plt.subplots(3, 1, figsize=(10, 8))
+    f, axarr = plt.subplots(3, 1, figsize=(7, 7))
     # counter to reference which set of axes we are plotting on
     axarr_index = 0
     # y_axis_labels = ['raw_contigs', 'post_qc', 'Symbiodinium', 'non-Symbiodinium', 'post-MED', 'post-MED / pre-MED']
@@ -1375,7 +1380,7 @@ def generate_qc_summary_figure():
                     # axarr[axarr_index].set_xticklabels(env_types_list)
                     axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
                     # set the xaxis title
-                    axarr[axarr_index].set_xlabel('raw_contigs')
+                    axarr[axarr_index].set_xlabel('raw_contigs', fontsize='large')
                     axarr[axarr_index].set_ylim(10000, 100000)
 
 
@@ -1451,8 +1456,8 @@ def generate_qc_summary_figure():
                         #                                labelbottom=False)
                         # ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
                         axarr[2].set_xticks([0.1875, 1.1875, 2.1875, 3.1875])
-                        axarr[2].set_xticklabels(env_types_list)
-                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+                        axarr[2].set_xticklabels(env_types_list, fontsize='large')
+                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index], fontsize='large')
 
                     else:
                         # the legend work for non-symbiodiniaceae
@@ -1474,7 +1479,7 @@ def generate_qc_summary_figure():
 
                         axarr[axarr_index].tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
                         ax2.tick_params(axis='x', which='both', bottom=False, top=False, labelbottom=False)
-                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index])
+                        axarr[axarr_index].set_xlabel(x_axis_labels[axarr_index], fontsize='large')
 
 
 
@@ -1483,8 +1488,8 @@ def generate_qc_summary_figure():
         axarr_index += 1
 
     apples = 'asdf'
-    f.text(0.04, 0.55, 'total sequences', va='center', ha='center', rotation='vertical', color='b')
-    f.text(1 - 0.03, 0.40, 'distinct sequences', ha='center', va='center', rotation='vertical', color='r')
+    f.text(0.02, 0.55, 'total sequences', va='center', ha='center', rotation='vertical', color='b', fontsize='large')
+    f.text(1 - 0.02, 0.40, 'distinct sequences', ha='center', va='center', rotation='vertical', color='r', fontsize='large')
     # f.text(0.07, 0.18, 'ratio', va='center', rotation='vertical', color='b')
     # f.text(1 - 0.05, 0.18, 'ratio', va='center', rotation='vertical', color='r')
 
@@ -1492,7 +1497,6 @@ def generate_qc_summary_figure():
     # plt.tight_layout()
     f.savefig('qc_stats.svg')
     f.savefig('qc_stats.png')
-    f.show()
     return
 
 
@@ -1872,4 +1876,4 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
     return new_colours
 
 
-non_symbiodiniaceae_taxonomy_work_do_plotting()
+generate_qc_summary_figure()
