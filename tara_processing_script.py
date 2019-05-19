@@ -5,6 +5,8 @@ import sys
 import pickle
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 # from matplotlib.pyplot import *
 from matplotlib.colors import ListedColormap
