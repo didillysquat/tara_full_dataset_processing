@@ -486,7 +486,6 @@ def figure_making_bar_plots_corals():
     with open('individual_info', 'r') as f:
         indi_info_list = [line.rstrip() for line in f]
 
-
     indi_info = {line.split(' ')[0]:line.split(' ')[1] for line in indi_info_list}
 
     # we want to read in the table that contains both the coral and non-coral sequences so that we can
@@ -536,6 +535,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
 
 
     ordered_sample_list = sp_output_df_type.index.values.tolist()
+    # pickle.dump(ordered_sample_list, open('ordered_sample_list_for_18s_work.pickle', 'wb'))
     # let's reorder the columns and rows of the sp_output_df according to the sequence sample and sequence
     # order so that plotting the data is easier
 
@@ -1187,28 +1187,11 @@ def process_type_df(path_to_tab_delim_count_type):
     # now drop the local abund row and promote the its2_type_prof names to columns headers.
     sp_output_df_type.drop(index=[0, 1], inplace=True)
     sp_output_df_type = sp_output_df_type.set_index(keys='sample_id', drop=True).astype('float')
-    # we should plot sample by sample and its2 type by its2 type in the order of the output
-    # the problem with doing he convert_to_pastel is that the colours become very similar
-    # colour_palette = convert_to_pastel(get_colour_list())
-    # Rather, I will attempt to generate a quick set of colours that are pastel and have a minimum distance
-    # rule for any colours that are generated from each other.
-    # let's do this for 50 colours to start with and see how long it takes.
-    # turns out it is very quick. Easily quick enough to do dynamically.
-    # When working with pastel colours (i.e. mixing with 255,255,255 it is probably best to work with a smaller dist cutoff
-    colour_palette_pas = ['#%02x%02x%02x' % rgb_tup for rgb_tup in
-                          create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=1000, num_cols=50,
-                                             time_out_iterations=10000)]
-    # # The below 3d scatter produces a 3d scatter plot to examine the spread of the colours created
-    # from mpl_toolkits.mplot3d import Axes3D
-    # colour_palette = create_colour_list(sq_dist_cutoff=5000)
-    # hex_pal = ['#%02x%02x%02x' % rgb_tup for rgb_tup in colour_palette]
-    # colcoords = [list(a) for a in zip(*colour_palette)]
-    # print(colcoords)
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # ax.scatter(colcoords[0], colcoords[1], colcoords[2], c=hex_pal, marker='o')
-    # colour_palette = get_colour_list()
-    grey_palette_type = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+
+    max_n_cols = 4
+    max_n_rows = 7
+    num_leg_cells = max_n_cols * max_n_rows
+
     # we will use the col headers as the its2 type profile order for plotting but we
     # we should colour according to the abundance of the its2 type profiles
     # as we don't want to run out of colours by the time we get to profiles that are very abundant.
@@ -1218,16 +1201,46 @@ def process_type_df(path_to_tab_delim_count_type):
     # to the most abundant seqs first and after that cycle through the grey_pallette assigning colours
     sorted_type_prof_names_by_local_abund = [a[0] for a in
                                              sorted(type_profile_to_abund_tup_list, key=lambda x: x[1], reverse=True)]
-    max_n_cols = 4
-    max_n_rows = 7
-    num_leg_cells = max_n_cols * max_n_rows
-    colour_dict_type = {}
-    for i in range(len(sorted_type_prof_names_by_local_abund)):
-        if i < num_leg_cells:
-            colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = colour_palette_pas[i]
-        else:
-            grey_index = i % len(grey_palette_type)
-            colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = grey_palette_type[grey_index]
+
+    # we should plot sample by sample and its2 type by its2 type in the order of the output
+    # the problem with doing he convert_to_pastel is that the colours become very similar
+    # colour_palette = convert_to_pastel(get_colour_list())
+    # Rather, I will attempt to generate a quick set of colours that are pastel and have a minimum distance
+    # rule for any colours that are generated from each other.
+    # let's do this for 50 colours to start with and see how long it takes.
+    # turns out it is very quick. Easily quick enough to do dynamically.
+    # When working with pastel colours (i.e. mixing with 255,255,255 it is probably best to work with a smaller dist cutoff
+    if os.path.isfile('{}/colour_dict_type.pickle'.format(os.getcwd())):
+        colour_dict_type = pickle.load(open('{}/colour_dict_type.pickle'.format(os.getcwd()), 'rb'))
+    else:
+        colour_palette_pas = ['#%02x%02x%02x' % rgb_tup for rgb_tup in
+                              create_colour_list(mix_col=(255, 255, 255), sq_dist_cutoff=2000, num_cols=30,
+                                                 time_out_iterations=100000)]
+        # todo, I want to have a constant set of pastelles here so that I can reporduce this figure and also
+        # use aspects of it in other figures and have agreements. To do this I will pickle out this pastelle pallette
+        # to reuse.
+
+        # # The below 3d scatter produces a 3d scatter plot to examine the spread of the colours created
+        # from mpl_toolkits.mplot3d import Axes3D
+        # colour_palette = create_colour_list(sq_dist_cutoff=5000)
+        # hex_pal = ['#%02x%02x%02x' % rgb_tup for rgb_tup in colour_palette]
+        # colcoords = [list(a) for a in zip(*colour_palette)]
+        # print(colcoords)
+        # fig = plt.figure()
+        # ax = fig.add_subplot(111, projection='3d')
+        # ax.scatter(colcoords[0], colcoords[1], colcoords[2], c=hex_pal, marker='o')
+        # colour_palette = get_colour_list()
+        grey_palette_type = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+
+
+        colour_dict_type = {}
+        for i in range(len(sorted_type_prof_names_by_local_abund)):
+            if i < num_leg_cells:
+                colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = colour_palette_pas[i]
+            else:
+                grey_index = i % len(grey_palette_type)
+                colour_dict_type[sorted_type_prof_names_by_local_abund[i]] = grey_palette_type[grey_index]
+        pickle.dump(colour_dict_type, open('{}/colour_dict_type.pickle'.format(os.getcwd()), 'wb'))
     return colour_dict_type, sp_output_df_type, sorted_type_prof_names_by_local_abund, max_n_cols, max_n_rows, num_leg_cells
 
 def process_div_df(path_to_tab_delim_count_DIV):
@@ -1876,4 +1889,4 @@ def create_colour_list(sq_dist_cutoff=None, mix_col=None, num_cols=50, time_out_
     return new_colours
 
 
-generate_qc_summary_figure()
+figure_making_bar_plots_corals()
