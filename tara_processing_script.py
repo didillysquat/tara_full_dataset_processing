@@ -623,7 +623,7 @@ def generate_stacked_bar_data_submission(path_to_tab_delim_count_DIV, path_to_ta
     sys.stdout.write('\nsaving as .svg\n')
     plt.savefig('{}_tara_init_results_coral_bar_plot_with_csw.svg'.format(fig_output_base))
     sys.stdout.write('\nsaving as .png\n')
-    plt.savefig('{}_tara_init_results_coral_bar_plot_with_csw.png'.format(fig_output_base))
+    plt.savefig('{}_tara_init_results_coral_bar_plot_with_csw.png'.format(fig_output_base), dpi=1200)
     # plt.show()
     return
 
