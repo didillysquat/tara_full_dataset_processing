@@ -6,7 +6,7 @@ import pickle
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 # from matplotlib.pyplot import *
 from matplotlib.colors import ListedColormap
@@ -923,7 +923,7 @@ def plot_data_axes(ax_list, extra_ax_list, colour_dict_div, colour_dict_type, in
 
                     # General plotting
                     sys.stdout.write('\rPlotting sample: {}'.format(smple_id_to_plot))
-                    x_tick_label_list.append(smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0])
+                    x_tick_label_list.append(info_df.loc[smp_id_to_smp_name_dict[smple_id_to_plot].split('_')[0], 'individual'])
                     # for each sample we will start at 0 for the y and then add the height of each bar to this
 
                     # PLOT DIVs
@@ -1082,10 +1082,13 @@ def paint_rect_to_axes_div_and_type(ax, colour_list, num_smp_in_this_subplot,  p
     # make it so that the x axes is constant length
     ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
     ax.set_ylim(-0.2, 1)
-    # ax.set_xticks(range(num_smp_in_this_subplot))
-    # ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
+    if x_tick_label_list is not None:
+        ax.set_xticks(range(num_smp_in_this_subplot))
+        ax.set_xticklabels(x_tick_label_list, rotation='vertical', fontsize=6)
 
-    remove_axes_but_allow_labels(ax)
+        remove_axes_but_allow_labels(ax, x_tick_label_list=x_tick_label_list)
+    else:
+        remove_axes_but_allow_labels(ax)
 
     # as well as getting rid of the top and right axis splines
     # I'd also like to restrict the bottom spine to where there are samples plotted but also
