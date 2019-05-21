@@ -1646,6 +1646,16 @@ def generate_info_df_for_samples():
         # here we have a dataframe with all of the samples in it
         # we can now move on to do the analysis of them.
         # this hsould be done in a separte method
+    # Now add a column that gives us the coral number
+    individual_list = []
+    for i, ind in enumerate(info_df.index.values.tolist()):
+        if 'CORAL' in info_df.at[ind, 'fastq_fwd_file_path']:
+            # add extract and add the individual info
+            individual_list.append(int(info_df.at[ind, 'fastq_fwd_file_path'].split('/')[11][-3:]))
+        else:
+        # add a 'NONE'
+            individual_list.append(0)
+    info_df['individual'] = individual_list
     return info_df
 
 def create_info_df_from_info_collection_dict(columns_for_df, info_collection_dict):
