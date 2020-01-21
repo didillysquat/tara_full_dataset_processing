@@ -13,11 +13,15 @@ import pickle
 import sys
 import pandas as pd
 import subprocess
+from collections import defaultdict
 
 class ITS2Processing:
     def __init__(self):
         self.base_directory_of_sequencing_data = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200116_tara_pacific_its2/"
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
+        self.output_dir = os.path.abspath(os.path.join('.', 'output'))
+        os.makedirs(self.input_dir, exist_ok=True)
+        os.makedirs(self.output_dir, exist_ok=True)
         self.sample_provenance_path = os.path.join(self.input_dir, 'tara_samples_provenance.csv')
         self.sample_provenance_df = self._make_sample_provenance_df()
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
@@ -27,6 +31,8 @@ class ITS2Processing:
         # It does not contain information for the negative controls
         # Ideally we want to run the negative samples that correspond to the coral samples
         # in the same dataloading and analysis
+        # However, it appears that a given set of samples (i.e. multiple samples) have 2 negative controls.
+        # As such I'm not sure how much use it will be to run the negatives with the samples.
         # The negative control sequencing files are all located in a single directory
         # and there is a mapping file that is space delimited. In this file the sequencing file name
         # i.e. TARA_AW-0000064_METAB-ITS2_CP8RR-12BA001-1
@@ -35,9 +41,10 @@ class ITS2Processing:
         # i.e. CEB_AWN CEB_AWO. It seems that a very large number of samples
         # map to two negative controls. As such I'm guessing that the negative controls are
         # for the master mixes or something.
-        # Because we are on a bit of a tight deadline until the next tara meeting
-        # and becuase I don't think these negative are going to be of much use,
-        # I'm going to discount them for the time being.
+        # I think a good approach from here will be to first run the negatives and see what they contain.
+        # If they all fail (i.e. good news) then we don't need to consider them futher.
+        # If some of them have a considerable amount of ITS2 Symbiodiniaceae in them 
+        # Then we can run all of the negative controls to gether and see where they fall out in the analysis.
 
     def _make_sample_provenance_df(self):
         # The SAMPLE ID is in the sequencing file name so we will be able to use this to get the latitute
@@ -63,7 +70,72 @@ class ITS2Processing:
         datasheet template. We will then use this to start the symportal data. We are going to implement
         a new functionality to SymPortal that will allow for full paths to be provided in the datasheet in which
         case the the sequencing file pair will be looked for at that directory else the file name will be looked
-        for in the directory that was provided as the argument to --load."""
+        for in the directory that was provided as the argument to --load.
+        As such, for the datasheet that we will want to create here we will want to have the full paths to the 
+        seq files so that we don't need to create a single directory in which the files.
+        
+        THe columns for the SP datasheet are:
+        sample_name	fastq_fwd_file_name	fastq_rev_file_name	sample_type	host_phylum	host_class	
+        host_order	host_family	host_genus	host_species	collection_latitude	collection_longitude	collection_date	collection_depth
+        """
+
+        spsh = SPDataSheet(info_df=self.info_df, out_dir=self.output_dir)
+        spsh.create_sp_df()
+
+class SPDataSheet:
+    """Class to make the SPDataSheet from the sample info dataframe."""
+    def __init__(self, info_df, out_dir):
+        self.datasheet_cols = ['sample_name','fastq_fwd_file_name','fastq_rev_file_name','sample_type','host_phylum',
+        'host_class','host_order','host_family','host_genus','host_species','collection_latitude','collection_longitude',
+        'collection_date','collection_depth']
+        self.rows = []
+        self.info_df = info_df
+        self.out_dir = out_dir
+    
+    def create_sp_df(self):
+        # For each sample that is a coral, populate a row that will be entered
+        # into the new datasheet dataframe.
+        # NB I think we should be able to use None values where we want blank values,
+        # i.e. for the collection dates
+        non_three_list = defaultdict(int)
+        for sample_name, ser in self.info_df[self.info_df['coral_plankton'] == 'CORAL'].iterrows():
+            fastq_fwd_file_path = ser['fastq_fwd_file_path']
+            fastq_rev_file_path = ser['fastq_rev_file_path']
+            sample_type = 'coral'
+            species = ser['spp_water']
+            host_phylum = 'cnidaria'
+            if species == 'PORITES':
+                host_class = 'anthozoa'
+                host_order = 'scleractinia'
+                host_family = 'poritidae'
+                host_genus = 'porites'
+                host_species = 'lobata'
+            elif species == 'POCILLOPORA':
+                host_class = 'anthozoa'
+                host_order = 'scleractinia'
+                host_family = '	pocilloporidae'
+                host_genus = 'pocillopora'
+                host_species = 'meandrina'
+            elif species == 'MILLEPORA':
+                host_class = 'hydrozoa'
+                host_order = 'anthoathecata'
+                host_family = 'milleporidae'
+                host_genus = 'millepora'
+                host_species = 'dichotoma'
+            else:
+                non_three_list[species] += 1
+                continue
+            latitude = ser['lat']
+            longitude = ser['lon']
+            collection_date = None
+            collection_depth = None
+
+            self.rows.append([sample_name, fastq_fwd_file_path, fastq_rev_file_path, sample_type, host_phylum, host_class, host_order, host_family, host_genus, host_species, latitude, longitude, collection_date, collection_depth])
+
+        print(f'There were {sum(non_three_list.values())} coral samples collected that were not of the normal three species.')
+        print(non_three_list)
+        spds_df = pd.DataFrame(self.rows, columns=self.datasheet_cols)
+        spds_df.to_csv(os.path.join(self.out_dir, 'coral_only_sp_data_sheet.csv'), index=False)
 
 class GenerateInfoCollectionDF:
     """Class concerned with creating the information dataframe"""
@@ -74,7 +146,7 @@ class GenerateInfoCollectionDF:
 
     def generate_df(self):
         self._create_data_rows()
-        return pd.DataFrame(data=self.rows, columns=['sample_name', 'fastq_fwd_file_path', 'fastq_rev_file_path', 'coral_plankton', 'spp_water', 'location', 'site', 'lat', 'lon'])
+        return pd.DataFrame(data=self.rows, columns=['sample_name', 'fastq_fwd_file_path', 'fastq_rev_file_path', 'coral_plankton', 'spp_water', 'location', 'site', 'lat', 'lon']).set_index(keys='sample_name')
     
     def _create_data_rows(self):
         """ Parse through the seq data file structure gathering 
@@ -206,3 +278,4 @@ class SampleRowGenerator:
             return [self.sample_name, self.fwd_path, self.rev_path, self.sample_type, self.water_type, self.location, self.site, self.lat, self.lon]
 
 its2processing = ITS2Processing()
+its2processing.make_sp_data_sheet()
