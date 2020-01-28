@@ -183,7 +183,7 @@ class ITS2Processing:
             prof_meta_info_df=self.prof_meta_info_df,
             prof_uid_to_name_dict=self.prof_uid_to_name_dict,
             prof_absolute_abundance_df=self.prof_absolute_abundance_df,
-            prof_relative_abundance_df=self.prof_relative_abundance_df, output_dir=self.output_dir)
+            prof_relative_abundance_df=self.prof_relative_abundance_df, output_dir=self.output_dir, fig_type=fig_type)
 
 
     def _make_sample_provenance_df(self):
@@ -229,7 +229,7 @@ class SequenceAndProfilePlotterCoralOnly:
             prof_meta_info_df,
             prof_uid_to_name_dict,
             prof_absolute_abundance_df,
-            prof_relative_abundance_df, output_dir):
+            prof_relative_abundance_df, output_dir, fig_type):
         self.info_df = info_df
         self.sp_datasheet = sp_datasheet
         self.seq_meta_info_df = seq_meta_info_df
@@ -241,6 +241,7 @@ class SequenceAndProfilePlotterCoralOnly:
         self.prof_absolute_abundance_df = prof_absolute_abundance_df
         self.prof_relative_abundance_df = prof_relative_abundance_df
         self.output_dir = output_dir
+        self.fig_type = fig_type
         self.species = ['PORITES', 'POCILLOPORA', 'MILLEPORA']
         # Get list of islands
         # Dict that will have island names as key and a list of sites as value
@@ -249,6 +250,19 @@ class SequenceAndProfilePlotterCoralOnly:
         # Get the colour dicts that we will use for plotting
         self.seq_color_dict = seq_color_dict
         self.prof_color_dict = prof_color_dict
+        if self.fig_type == 'genera':
+            # Convert the seq_color_dict to genera colours
+            temp_dict = {}
+            for k, v in self.seq_color_dict.items():
+                if k.startswith('A') or k.endswith('A'):
+                    temp_dict[k] = "#DCDCDC"
+                elif k.startswith('C') or k.endswith('C'):
+                    temp_dict[k] = "#A9A9A9"
+                elif k.startswith('D') or k.endswith('D'):
+                    temp_dict[k] = "#696969"
+                else:
+                    temp_dict[k] = "#FF0000"
+            self.seq_color_dict = temp_dict
         # Setup the plot
         self.fig = plt.figure(figsize=(14, 10))
         self.gs = self.fig.add_gridspec(18, 18, figure=self.fig, height_ratios=[1 for _ in range(18)],
@@ -265,12 +279,14 @@ class SequenceAndProfilePlotterCoralOnly:
                     # In here we can do the actual plotting
                     single_sp_time_start = time.time()
                     ax = self.fig.add_subplot(self.gs[ax_row_index, ax_col_index])
-                    spip = SeqProfIndiPlot(parent=self, ax=ax, island=island, site=site, species=species)
+                    spip = SeqProfIndiPlot(parent=self, ax=ax, island=island, site=site, species=species, fig_type=self.fig_type)
                     spip.do_plotting()
                     single_sp_time_tot = time.time() - single_sp_time_start
                     print(f'The whole single took {single_sp_time_tot}')
-        plt.savefig(os.path.join(self.output_dir, 'seq_and_profile_fig_all.svg'))
-        plt.savefig(os.path.join(self.output_dir, 'seq_and_profile_fig_all.png'), dpi=1200)
+        print('Writing .svg')
+        plt.savefig(os.path.join(self.output_dir, f'seq_and_profile_fig_{self.fig_type}.svg'))
+        print('Writing .png')
+        plt.savefig(os.path.join(self.output_dir, f'seq_and_profile_fig_{self.fig_type}.png'), dpi=1200)
         foo = 'bar'
 
 
@@ -285,12 +301,13 @@ class SequenceAndProfilePlotterCoralOnly:
         return island_site_dict
         
 class SeqProfIndiPlot:
-    def __init__(self, parent, ax, island, site, species):
+    def __init__(self, parent, ax, island, site, species, fig_type):
         self.parent = parent
         self.ax = ax
         self.island = island
         self.site = site
         self.species = species
+        self.fig_type = fig_type
         self.samples = self.parent.info_df[
             (self.parent.info_df['location'] == self.island) &
             (self.parent.info_df['site'] == self.site) &
@@ -318,10 +335,11 @@ class SeqProfIndiPlot:
             div_over_total += (div_over_stop - div_over_start)
 
             # PLOT type
-            type_under_start = time.time()
-            self._plot_type_under_div(sample_to_plot)
-            type_under_stop = time.time()
-            type_under_total += (type_under_stop - type_under_start)
+            if self.fig_type == 'all':
+                type_under_start = time.time()
+                self._plot_type_under_div(sample_to_plot)
+                type_under_stop = time.time()
+                type_under_total += (type_under_stop - type_under_start)
             self.ind += 1
         paint_start = time.time()
         self._paint_rect_to_axes_div_and_type()
@@ -382,11 +400,14 @@ class SeqProfIndiPlot:
         # Add the pathces to the axes
         self.ax.add_collection(patches_collection)
         self.ax.autoscale_view()
-        self.ax.figure.canvas.draw()
+        # self.ax.figure.canvas.draw()
         # also format the axes.
         # make it so that the x axes is constant length
         self.ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
-        self.ax.set_ylim(-0.2, 1)
+        if self.fig_type == 'all':
+            self.ax.set_ylim(-0.2, 1)
+        else:
+            self.ax.set_ylim(0,1)
         self._remove_axes_but_allow_labels()
 
         # as well as getting rid of the top and right axis splines
@@ -395,7 +416,8 @@ class SeqProfIndiPlot:
         # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
         # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
         # ax.spines['bottom'].set_visible(False)
-        self.ax.add_line(Line2D((0 - 0.5, self.num_smp_in_this_subplot - 0.5), (0, 0), linewidth=0.5, color='black'))
+        if self.fig_type == 'all':
+            self.ax.add_line(Line2D((0 - 0.5, self.num_smp_in_this_subplot - 0.5), (0, 0), linewidth=0.5, color='black'))
 
     def _remove_axes_but_allow_labels(self):
         self.ax.set_frame_on(False)
@@ -912,4 +934,4 @@ class SampleRowGenerator:
             return [self.sample_name, self.fwd_path, self.rev_path, self.sample_type, self.water_type, self.location, self.site, self.lat, self.lon]
 
 its2processing = ITS2Processing()
-its2processing.seq_and_profile_results_figure()
+its2processing.seq_and_profile_results_figure(fig_type='genera')
