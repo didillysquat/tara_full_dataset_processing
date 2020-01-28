@@ -14,10 +14,16 @@ import sys
 import pandas as pd
 import subprocess
 from collections import defaultdict
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
+from matplotlib.colors import ListedColormap
+from matplotlib.lines import Line2D
 import matplotlib as mpl
-mpl.use('TkAgg')
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 import json
+import numpy as np
+import time
 
 class ITS2Processing:
     def __init__(self):
@@ -82,7 +88,7 @@ class ITS2Processing:
         prof_meta_abs_info_path = os.path.join(
             self.sp_output_base_dir,
             'its2_type_profiles',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.profiles.absolute.meta_only.txt'
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.profiles.absolute.meta_only.txt'
         )
         prof_meta_info_df = pd.read_csv(prof_meta_abs_info_path, sep='\t')
         # Make our uid to sample name dict
@@ -95,12 +101,12 @@ class ITS2Processing:
         abs_path = os.path.join(
             self.sp_output_base_dir,
             'its2_type_profiles',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.profiles.absolute.abund_only.txt')
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.profiles.absolute.abund_only.txt')
 
         rel_path = os.path.join(
             self.sp_output_base_dir,
             'its2_type_profiles',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.profiles.relative.abund_only.txt')
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.profiles.relative.abund_only.txt')
 
         abs_df = pd.read_csv(abs_path, sep='\t')
         rel_df = pd.read_csv(rel_path, sep='\t')
@@ -120,12 +126,12 @@ class ITS2Processing:
         abs_path = os.path.join(
             self.sp_output_base_dir,
             'post_med_seqs',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.seqs.absolute.abund_only.txt')
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.seqs.absolute.abund_only.txt')
 
         rel_path = os.path.join(
             self.sp_output_base_dir,
             'post_med_seqs',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.seqs.relative.abund_only.txt')
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.seqs.relative.abund_only.txt')
 
         abs_df = pd.read_csv(abs_path, sep='\t')
         rel_df = pd.read_csv(rel_path, sep='\t')
@@ -145,7 +151,7 @@ class ITS2Processing:
         seq_meta_abs_info_path = os.path.join(
             self.sp_output_base_dir,
             'post_med_seqs',
-            '90_20200125_DBV_2020-01-25_07-59-51.003829.seqs.absolute.meta_only.txt'
+            '90_20200125_DBV_2020-01-27_03-21-24.288417.seqs.absolute.meta_only.txt'
         )
         seq_meta_info_df = pd.read_csv(seq_meta_abs_info_path, sep='\t')
         # Make our uid to sample name dict
@@ -177,7 +183,7 @@ class ITS2Processing:
             prof_meta_info_df=self.prof_meta_info_df,
             prof_uid_to_name_dict=self.prof_uid_to_name_dict,
             prof_absolute_abundance_df=self.prof_absolute_abundance_df,
-            prof_relative_abundance_df=self.prof_relative_abundance_df)
+            prof_relative_abundance_df=self.prof_relative_abundance_df, output_dir=self.output_dir)
 
 
     def _make_sample_provenance_df(self):
@@ -223,7 +229,7 @@ class SequenceAndProfilePlotterCoralOnly:
             prof_meta_info_df,
             prof_uid_to_name_dict,
             prof_absolute_abundance_df,
-            prof_relative_abundance_df):
+            prof_relative_abundance_df, output_dir):
         self.info_df = info_df
         self.sp_datasheet = sp_datasheet
         self.seq_meta_info_df = seq_meta_info_df
@@ -234,35 +240,38 @@ class SequenceAndProfilePlotterCoralOnly:
         self.prof_uid_to_name_dict = prof_uid_to_name_dict
         self.prof_absolute_abundance_df = prof_absolute_abundance_df
         self.prof_relative_abundance_df = prof_relative_abundance_df
-        self.species = ['PORITIES', 'POCILLOPORA', 'MILLEPORA']
+        self.output_dir = output_dir
+        self.species = ['PORITES', 'POCILLOPORA', 'MILLEPORA']
         # Get list of islands
         # Dict that will have island names as key and a list of sites as value
         self.island_site_dict = self._determine_sites_and_island()
         self.islands = sorted(list(self.island_site_dict.keys()))
         # Get the colour dicts that we will use for plotting
-
+        self.seq_color_dict = seq_color_dict
+        self.prof_color_dict = prof_color_dict
         # Setup the plot
         self.fig = plt.figure(figsize=(14, 10))
         self.gs = self.fig.add_gridspec(18, 18, figure=self.fig, height_ratios=[1 for _ in range(18)],
                                         width_ratios=[1 for _ in range(18)])
         # The axis list that has been linearised
         # we will go in order of: for island, for site, for species
-        self.current_ax = None
         # we will linearize the axes and go in order of for island, for site, for species
         for island in self.islands:
-            site_list = self.island_site_dict[island][:3]
+            site_list = sorted(list(self.island_site_dict[island]))[:3]
             for site in site_list:
                 for species in self.species:
-                    ax_row_index = ((self.islands.index(island)/6)*3) + site_list.index(site)
-                    ax_col_index = ((self.islands.index(island)%6)*3) + self.species.index(species)
+                    ax_row_index = int((int(self.islands.index(island)/6)*3) + site_list.index(site))
+                    ax_col_index = int(((self.islands.index(island)%6)*3) + self.species.index(species))
                     # In here we can do the actual plotting
-                    self.current_ax = self.fig.add_subplot(self.gs[ax_row_index, ax_col_index])
-                    self._do_individual_plot()
-
-
-    def _do_individual_plot(self):
-        """Function resoponsible for doing the plotting of a single subplot,
-        i.e. a for a given island, site and species"""
+                    single_sp_time_start = time.time()
+                    ax = self.fig.add_subplot(self.gs[ax_row_index, ax_col_index])
+                    spip = SeqProfIndiPlot(parent=self, ax=ax, island=island, site=site, species=species)
+                    spip.do_plotting()
+                    single_sp_time_tot = time.time() - single_sp_time_start
+                    print(f'The whole single took {single_sp_time_tot}')
+        plt.savefig(os.path.join(self.output_dir, 'seq_and_profile_fig_all.svg'))
+        plt.savefig(os.path.join(self.output_dir, 'seq_and_profile_fig_all.png'), dpi=1200)
+        foo = 'bar'
 
 
     def _determine_sites_and_island(self):
@@ -274,6 +283,124 @@ class SequenceAndProfilePlotterCoralOnly:
             site = self.info_df.at[sample_index, 'site']
             island_site_dict[island].add(site)
         return island_site_dict
+        
+class SeqProfIndiPlot:
+    def __init__(self, parent, ax, island, site, species):
+        self.parent = parent
+        self.ax = ax
+        self.island = island
+        self.site = site
+        self.species = species
+        self.samples = self.parent.info_df[
+            (self.parent.info_df['location'] == self.island) &
+            (self.parent.info_df['site'] == self.site) &
+            (self.parent.info_df['spp_water'] == self.species) &
+            (self.parent.info_df['coral_plankton'] == 'CORAL') &
+            (self.parent.info_df['spp_water'] != 'HELIOPORA') &
+            (self.parent.info_df['spp_water'] != 'PORITES_PANAMENSIS')
+        ].index.values.tolist()
+        foo = 'bar'
+        self.patches_list = []
+        self.ind = 0
+        self.color_list = []
+        self.num_smp_in_this_subplot = len(self.samples)
+
+    def do_plotting(self):
+        div_over_total = 0
+        type_under_total = 0
+        for sample_to_plot in self.samples:
+            sys.stdout.write(f'\rPlotting sample: {self.island} {self.site} {self.species} {sample_to_plot}')
+
+            # PLOT DIVs
+            div_over_start = time.time()
+            self._plot_div_over_type(sample_to_plot)
+            div_over_stop = time.time()
+            div_over_total += (div_over_stop - div_over_start)
+
+            # PLOT type
+            type_under_start = time.time()
+            self._plot_type_under_div(sample_to_plot)
+            type_under_stop = time.time()
+            type_under_total += (type_under_stop - type_under_start)
+            self.ind += 1
+        paint_start = time.time()
+        self._paint_rect_to_axes_div_and_type()
+        paint_stop = time.time()
+        paint_total = paint_stop - paint_start
+
+        print(f'\n\ndiv_over took {div_over_total}')
+        print(f'type_under took {type_under_total}')
+        print(f'paint took {paint_total}')
+
+
+
+    def _plot_div_over_type(self, sample_to_plot):
+        bottom_div = 0
+        # In order that the sequences are listed in the seq_relative_abundance_df for those that are
+        # present in the sample, plot a rectangle.
+        smp_series = self.parent.seq_relative_abundance_df.loc[sample_to_plot]
+        non_zero_series = smp_series.iloc[smp_series.to_numpy().nonzero()[0]]
+        for seq_name, seq_rel_abund in non_zero_series.iteritems():
+            # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
+            self.patches_list.append(Rectangle((self.ind - 0.5, bottom_div), 1, seq_rel_abund, color=self.parent.seq_color_dict[seq_name]))
+            self.color_list.append(self.parent.seq_color_dict[seq_name])
+            bottom_div += seq_rel_abund
+
+    def _plot_type_under_div(self, sample_to_plot):
+        # the idea of the type is to put it as a reflection below the y=0 line
+        # as such we should just want to make everything negative
+        bottom_prof = 0
+        # for each sequence, create a rect patch
+        # the rect will be 1 in width and centered about the ind value.
+        # we want to plot the rects so that they add to 1. As such we want to divide
+        # each value by the total for that sample.
+        non_zero_indices = self.parent.prof_absolute_abundance_df.loc[sample_to_plot].to_numpy().nonzero()[0]
+        non_zero_series = self.parent.prof_absolute_abundance_df.loc[sample_to_plot].iloc[non_zero_indices]
+        total = sum(non_zero_series.values)
+        non_zero_series_relative = non_zero_series / total
+        for profile_uid, profile_rel_abund in non_zero_series_relative.iteritems():
+            # We will scale the profile so that it is 0.2 of the length of the seq info
+            depth = -0.2 * profile_rel_abund
+            self.patches_list.append(
+                Rectangle((self.ind - 0.5, bottom_prof), 1, depth,
+                            color=self.parent.prof_color_dict[profile_uid]))
+            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
+            self.color_list.append(self.parent.prof_color_dict[profile_uid])
+            bottom_prof += depth
+
+    def _paint_rect_to_axes_div_and_type(self, max_num_smpls_in_subplot=10):
+        # We can try making a custom colour map
+        # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
+        this_cmap = ListedColormap(self.color_list)
+        
+        # here we should have a list of Rectangle patches
+        # now create the PatchCollection object from the patches_list
+        patches_collection = PatchCollection(self.patches_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(self.patches_list)))
+        # if n_subplots is only 1 then we can refer directly to the axarr object
+        # else we will need ot reference the correct set of axes with i
+        # Add the pathces to the axes
+        self.ax.add_collection(patches_collection)
+        self.ax.autoscale_view()
+        self.ax.figure.canvas.draw()
+        # also format the axes.
+        # make it so that the x axes is constant length
+        self.ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
+        self.ax.set_ylim(-0.2, 1)
+        self._remove_axes_but_allow_labels()
+
+        # as well as getting rid of the top and right axis splines
+        # I'd also like to restrict the bottom spine to where there are samples plotted but also
+        # maintain the width of the samples
+        # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
+        # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
+        # ax.spines['bottom'].set_visible(False)
+        self.ax.add_line(Line2D((0 - 0.5, self.num_smp_in_this_subplot - 0.5), (0, 0), linewidth=0.5, color='black'))
+
+    def _remove_axes_but_allow_labels(self):
+        self.ax.set_frame_on(False)
+        self.ax.set_yticks([])
+        self.ax.set_xticks([])
 
 class QCPlotterCoralOnly:
     def __init__(self, info_df, sp_datasheet, seq_meta_info_df, output_dir):
@@ -341,7 +468,7 @@ class QCPlotterCoralOnly:
         print(f'Number of samples = {len(self.seq_meta_info_df.index)}')
         print(f'\tPorites lobata: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "lobata"].index)}')
         print(f'\tPocillopora meandrina: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "meandrina"].index)}')
-        print(f'\tMillepora dichotoma: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "lobata"].index)}')
+        print(f'\tMillepora dichotoma: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "dichotoma"].index)}')
         average_raw_contigs_per_sample = int(self.seq_meta_info_df['raw_contigs'].mean())
         print(f'average_raw_contigs_per_sample: {average_raw_contigs_per_sample}')
         average_non_sym_total = int(self.seq_meta_info_df['post_taxa_id_absolute_non_symbiodinium_seqs'].mean())
