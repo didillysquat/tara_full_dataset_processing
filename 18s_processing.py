@@ -23,7 +23,11 @@ class EighteenSAnalysis:
 
         # Perform the QC for the samples
         # Mothur processing that will be fed into the taxonomic screening
-        foo = 'bar'
+        SequenceQC(info_df=self.info_df, qc_dir=self.qc_dir).do_qc()
+
+        # After the mothur QC we will have a set of .name and .fasta files for each sample
+        # Now we need to discard all sequences that are not the coral host in question
+        
 
     def _make_sample_provenance_df(self):
         # The SAMPLE ID is in the sequencing file name so we will be able to use this to get the latitute
@@ -37,61 +41,63 @@ class SequenceQC:
     def __init__(self, info_df, qc_dir):
         self.info_df = info_df
         self.qc_dir = qc_dir
-        self.mothur_exe = "/home/humebc/phylogeneticSoftware/mothur1.40/mothur/mothur"
-        # the list that we will map to the mothur qc
-        self.apply_list = self._make_apply_list()
 
     def do_qc(self):
-        """ for each of the samples in the info df we will make a directory
+        """ 
+        for each of the samples in the info df we will make a directory
         in the qc_dir. We will produce all of qc files in this dir
         """
-
-        # We should aim to use the Pool version of multiprocessing.
-        # We will aim to provide a list lists where each list is n=3 or the sample name,
-        # the fwd path and rev path.
-        # TODO actually to simplify this let's just do the multiprocessing within the mothur
-        # i.e. lets just do one sample at a time with.
-        with Pool(5) as p:
-            p.map(self._mothur_qc, self.apply_list)
-
-    def _make_apply_list(self):
-        apply_list = []
         for sample_name, ser in self.info_df.iterrows():
-            apply_list.append([sample_name, ser['fwd_path'], ser['rev_path']])
-        return apply_list
+            if self._check_if_qc_already_complete(sample_name):
+                continue
+            else:
+                IndividualMothurQC(
+                    sample_name=sample_name, 
+                    fwd_path=ser['fwd_path'], 
+                    rev_path=ser['rev_path'], 
+                    qc_base_dir=self.qc_dir,
+                    num_proc=16).start_qc()
 
-    def _mothur_qc(self, sample_info):
-        sample_name, fwd_path, rev_path = sample_info
-        # make a dir in the qc_dir
-
-
-        # write out an oligo file and a file file
-        self._write_out_oligo_file()
+    def _check_if_qc_already_complete(self, sample_name):
+        return os.path.exists(os.path.join(self.qc_dir, sample_name, 'qc_complete.txt'))
 
 class IndividualMothurQC:
-    def __init__(self, sample_info, qc_base_dir):
-        self.sample_name, self.fwd_path, self.rev_path = sample_info
+    def __init__(self, sample_name, fwd_path, rev_path, qc_base_dir, num_proc=20):
+        self.sample_name = sample_name
+        self.fwd_path = fwd_path
+        self.rev_path = rev_path
         self.sample_qc_dir = os.path.join(qc_base_dir, self.sample_name)
         os.makedirs(self.sample_qc_dir, exist_ok=True)
+        self.num_proc=num_proc
         self._write_out_oligo_file()
         self.stability_file_path = self._write_out_file_file()
         self.mothur_batch_file_path = self._write_out_mothur_batch_file()
-
+        
     def start_qc(self):
         subprocess.run(['mothur', self.mothur_batch_file_path])
         print(f'Mothur QC complete for {self.sample_name}')
+        # We are running very short on space so let's clean up
+        for file_to_del in os.listdir(self.sample_qc_dir):
+            if file_to_del not in ['stability.trim.contigs.good.unique.abund.pcr.names', 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta']:
+                os.remove(os.path.join(self.sample_qc_dir, file_to_del))
+        # Write out a log file to show that qc has been completed
+        with open(os.path.join(self.sample_qc_dir, 'qc_complete.txt'), 'w') as f:
+            f.write('qc_complete.txt\n')
+        # Output file examples:
+        # /home/humebc/projects/tara/full_18s_data/seq_qc/TARA_CO-0001684/stability.trim.contigs.good.unique.abund.pcr.names
+        # /home/humebc/projects/tara/full_18s_data/seq_qc/TARA_CO-0001684/stability.trim.contigs.good.unique.abund.pcr.unique.fasta
 
     def _write_out_oligo_file(self):
         oligo_file_path = os.path.join(self.sample_qc_dir, 'primers.oligos')
         oligo_file = ['forward\tTTGTACACACCGCCC', 'reverse\tCCTTCYGCAGGTTCACCTAC']
         with open(oligo_file_path, 'w') as f:
             for line in oligo_file:
-                f.write(f'{line}\n')s
+                f.write(f'{line}\n')
 
     def _write_out_file_file(self):
         """This is the file that will be supplied to make the contigs"""
         stability_file = [f'{self.fwd_path}\t{self.rev_path}']
-        stability_file_path = os.join(self.sample_qc_dir, 'stability.files')
+        stability_file_path = os.path.join(self.sample_qc_dir, 'stability.files')
 
         # write out stability file
         with open(stability_file_path, 'w') as f:
@@ -105,7 +111,7 @@ class IndividualMothurQC:
         mothur_batch_file = [
             f'set.dir(input={self.sample_qc_dir})',
             f'set.dir(output={self.sample_qc_dir})',
-            f'make.contigs(file={self.stability_file_path}, processors=20)',
+            f'make.contigs(file={self.stability_file_path}, processors={self.num_proc})',
             f'summary.seqs(fasta={base}.trim.contigs.fasta)',
             f'screen.seqs(fasta={base}.trim.contigs.fasta, maxambig=0, maxhomop=5)',
             f'summary.seqs(fasta={base}.trim.contigs.good.fasta)',
@@ -120,8 +126,10 @@ class IndividualMothurQC:
             f'name={base}.trim.contigs.good.rare.names)',
             f'pcr.seqs(fasta={base}.trim.contigs.good.unique.abund.fasta, '
             f'name={base}.trim.contigs.good.abund.names, '
-            f'oligos={self.sample_qc_dir}/primers.oligos, pdiffs=2, rdiffs=2, processors=20)',
+            f'oligos={self.sample_qc_dir}/primers.oligos, pdiffs=2, rdiffs=2, processors={self.num_proc})',
             f'unique.seqs(fasta={base}.trim.contigs.good.unique.abund.pcr.fasta, '
+            f'name={base}.trim.contigs.good.abund.pcr.names)',
+            f'summary.seqs(fasta={base}.trim.contigs.good.unique.abund.pcr.fasta, '
             f'name={base}.trim.contigs.good.abund.pcr.names)'
         ]
 
@@ -159,11 +167,11 @@ class MakeInfoDF:
             path_lists = self.paired_files_dict[sample_name]
             if len(path_lists) > 1:
                 for i in range(len(path_lists)):
-                    fwd_path = path_lists[i][0]
-                    rev_path = path_lists[i][1]
+                    fwd_path = os.path.join(self.seq_dir, path_lists[i][0])
+                    rev_path = os.path.join(self.seq_dir, path_lists[i][1])
                     info_df_dict[f'{sample_name}_{i}'] = [fwd_path, rev_path, species]
             else:
-                info_df_dict[sample_name] = [path_lists[0][0], path_lists[0][1], species]
+                info_df_dict[sample_name] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species]
         return pd.DataFrame.from_dict(info_df_dict, orient='index', columns=['fwd_path', 'rev_path', 'species'])
 
     def _find_sample_respective_seq_files(self):
