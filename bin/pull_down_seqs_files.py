@@ -70,7 +70,7 @@ class SeqFilePullDown:
             soup = BeautifulSoup(requests.get(self.current_url, auth=self.authorisation_tup, headers=self.headers).text, features="html.parser")
             # Strip out the table links and those that have already been visited
             links_to_visit = [link.string for link in soup.find_all('a') if
-                              ((link.string not in ['Name', 'Last modified', 'Size', 'Description', 'Parent Directory']) and
+                              ((link.string not in ['Name', 'Last modified', 'Size', 'Description', 'Parent Directory', 'NEGATIVE_CONTROLS/']) and
                                ('/'.join([self.current_url.strip('/'), link.string]) not in self.list_of_completed_urls))]
             fastq_gz_list = [link.string for link in links_to_visit if 'fastq.gz' in link.string]
             links_to_visit = [link for link in links_to_visit if link not in fastq_gz_list]
@@ -100,7 +100,6 @@ class SeqFilePullDown:
             else:
                 # restart the walk
                 continue
-
 
     def _assess_fastq_gz_files(self, fastq_gz_list):
         for fastq_file in fastq_gz_list:
