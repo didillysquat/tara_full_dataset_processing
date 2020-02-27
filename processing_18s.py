@@ -8,16 +8,14 @@ from multiprocessing import Pool
 import subprocess
 import compress_pickle
 
-class EighteenSAnalysis:
+class EighteenSProcessing:
     def __init__(self):
         self.root_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.seq_dir = os.path.join(self.root_dir, 'seq_files')
-        # The directory where QC files will be written
+        # The directory where the finalised post qc and post taxa screening files will be written
         self.qc_dir = os.path.join(self.root_dir, 'seq_qc')
         self.cache_dir = os.path.join(self.root_dir, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
-        # The directory where the finalised post qc and post taxa screening files will be written
-        self.processed_seqs_dir = os.path.join(self.root_dir, 'processed_seqs_dir')
         self.sample_provenance_path = os.path.join(self.root_dir, "tara_samples_provenance.csv")
         self.sample_provenance_df = self._make_sample_provenance_df()
         # The main info df that we will use
@@ -26,7 +24,12 @@ class EighteenSAnalysis:
         
         # Perform the QC for the samples
         # Mothur processing that will be fed into the taxonomic screening
-        seq_qc = SequenceQC(info_df=self.info_df, qc_dir=self.qc_dir).do_mothur_qc()
+        seq_qc = SequenceQC(
+            info_df=self.info_df, 
+            qc_dir=self.qc_dir, 
+            cache_dir=self.cache_dir, 
+            root_dir=self.root_dir
+            ).do_mothur_qc()
 
         # After the mothur QC we will have a set of .name and .fasta files for each sample
         # Now we need to annotate these sequences according to taxonomy
@@ -61,11 +64,14 @@ class EighteenSAnalysis:
 class SequenceQC:
     """Quality control of the sequences using Mothur firstly and then running through BLAST
     to remove all non-coral sequences"""
-    def __init__(self, info_df, qc_dir):
+    def __init__(self, info_df, qc_dir, cache_dir, root_dir):
         self.info_df = info_df
         self.qc_dir = qc_dir
+        self.root_dir = root_dir
         # These dicts will be used for getting the taxonomic level, and name of a
         # taxonomic match.
+        self.node_dict_pickle_path = os.path.join(cache_dir, 'node_dict.p.bz')
+        self.name_dict_pickle_path = os.path.join(cache_dir, 'name_dict.p.bz')
         self.node_dict, self.name_dict = self._generate_taxa_and_name_dicts()
 
     def do_mothur_qc(self):
@@ -91,6 +97,7 @@ class SequenceQC:
             # we should still be able to debug as we won't have to aceess Pool.
             with Pool(24) as p:
                 p.map(self._init_indi_mothur_qc, apply_list)
+        return self
 
     def _init_indi_mothur_qc(self, sample_info):
         """We have to pass the Pool a single function. This is the function we will use to instantiate 
@@ -120,6 +127,8 @@ class SequenceQC:
 
         We will run this in serial but use multiple processors for running the blast.
         """
+        self._write_out_ncbi_db_config_file()
+        
         for sample_name in self.info_df.index:
             IndividualTaxAnnotationQC(
                 node_dict=self.node_dict, 
@@ -128,21 +137,38 @@ class SequenceQC:
                 sample_name=sample_name
                 ).do_taxonomy_annotation()
 
+    def _write_out_ncbi_db_config_file(self):
+        ncbircFile = []
+        ncbircFile.extend(["[BLAST]", "BLASTDB=/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/"])
+
+        # write out the ncbircFile
+        with open(os.path.join(self.root_dir, '.ncbirc'), 'w') as f:
+            for line in ncbircFile:
+                f.write(f'{line}\n')
+    
     def _generate_taxa_and_name_dicts(self,
                 taxdump_dir='/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/taxdump'):
-            # read in the .nodes file. This file tells us which tax level the node is and which node is the parent level
-            with open('{}/nodes.dmp'.format(taxdump_dir), 'r') as f:
-                node_file = [line.rstrip() for line in f]
-            # now make a dict from this where key is the tax id and the value is a tup where 0 = parent 1 = tax level
-            node_dict = {line.split('\t|\t')[0]: (line.split('\t|\t')[1], line.split('\t|\t')[2]) for line in node_file}
+            if os.path.isfile(self.node_dict_pickle_path):
+                node_dict = compress_pickle.load(self.node_dict_pickle_path)
+            else:
+                # read in the .nodes file. This file tells us which tax level the node is and which node is the parent level
+                with open(f'{taxdump_dir}/nodes.dmp', 'r') as f:
+                    node_file = [line.rstrip() for line in f]
+                # now make a dict from this where key is the tax id and the value is a tup where 0 = parent 1 = tax level
+                node_dict = {line.split('\t|\t')[0]: (line.split('\t|\t')[1], line.split('\t|\t')[2]) for line in node_file}
+                compress_pickle.dump(node_dict, self.node_dict_pickle_path)
 
-            # next read in the names file. This file hold the name of the node.
-            with open('{}/names.dmp'.format(taxdump_dir), 'r') as f:
-                name_file = [line.rstrip() for line in f]
+            if os.path.isfile(self.name_dict_pickle_path):
+                name_dict = compress_pickle.load(self.name_dict_pickle_path)
+            else:
+                # next read in the names file. This file hold the name of the node.
+                with open(f'{taxdump_dir}/names.dmp', 'r') as f:
+                    name_file = [line.rstrip() for line in f]
 
-            # now make a dict from the names file where the key is the staxid and the value is the name
-            name_dict = {line.split('\t|\t')[0]: line.split('\t|\t')[1] for line in name_file if
-                         line.split('\t|\t')[3].replace('\t|', '') == 'scientific name'}
+                # now make a dict from the names file where the key is the staxid and the value is the name
+                name_dict = {line.split('\t|\t')[0]: line.split('\t|\t')[1] for line in name_file if
+                            line.split('\t|\t')[3].replace('\t|', '') == 'scientific name'}
+                compress_pickle.dump(name_dict, self.name_dict_pickle_path)
 
             return node_dict, name_dict
 
@@ -153,6 +179,7 @@ class IndividualTaxAnnotationQC:
         self.genus = None
         self.family = None
         self.order = None
+        self.sample_name = sample_name
         self.fasta_path = os.path.join(qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
         self.blast_out_path = os.path.join(qc_dir, sample_name, 'blast.out')
         self.output_format = "6 qseqid sseqid staxids evalue pident qcovs staxid stitle ssciname"
@@ -177,7 +204,7 @@ class IndividualTaxAnnotationQC:
                 results_list=result_list, 
                 sample_dict=self.sample_annotation_dict, 
                 symbiodiniaceae_dict=self.symbiodiniaceae_annotation_dict, 
-                coral_dict=self.coral_annotation_dict
+                coral_dict=self.coral_annotation_dict, node_dict=self.node_dict, names_dict=self.names_dict
                 ).process_matches()
         
         # Here we have populated the taxonomy dictionaries for the sample in question
@@ -186,40 +213,10 @@ class IndividualTaxAnnotationQC:
         compress_pickle.dump(self.coral_annotation_dict, self.coral_annotation_dict_pickle_path)
         compress_pickle.dump(self.symbiodiniaceae_annotation_dict, self.coral_symbiodiniaceae_dict_pickle_path)
 
-    def _get_taxa_designation_from_staxid(self, staxid, tax_level_list=['genus', 'family', 'order']):
-            # I have set this up so that you can either feed in the already made node_dict and name_dict or
-            # you they can be generated by this method. If you are running this method many times it will make
-            # sense to run the above generate_taxa_designation_from_staxid_dicts methods
-            # to generate the dicts to feed into this
-            # This will take in a list as its argument and find the levels that are listed in the list
-            list_to_return = [False for i in tax_level_list]
-
-            # now we can do the searching
-            # go through staxid nodes until we get to the tax_level required
-            # then grab the name
-            while True:
-                if staxid == '1':
-                    # If we get here then we have not been able to find names for each of the
-                    # taxonomic levels for some reason and we should return the list containing a False
-                    # for those levels for which an identity could not be found
-                    return list_to_return
-                current_tax_level = self.node_dict[staxid][1]
-                if current_tax_level in tax_level_list:
-                    # then this is the taxonomic level we want, grab the name and return
-                    list_to_return[tax_level_list.index(current_tax_level)] = self.names_dict[staxid]
-                    if False not in list_to_return:
-                        # then we have found all of the taxa_levels
-                        return list_to_return
-                    else:
-                        # else we have not and we should continue the procession through the tax ids
-                        staxid = self.node_dict[staxid][0]
-                else:
-                    staxid = self.node_dict[staxid][0]
-
     def _make_blast_out_dict(self):
         # now create a dict that is the list of 10 result items using the seq name as key
         blast_output_dict = defaultdict(list)
-        for output_line in blast_output_file:
+        for output_line in self.blast_output_file:
             components = output_line.split('\t')
             blast_output_dict[components[0]].append(components)
         return blast_output_dict
@@ -233,6 +230,7 @@ class IndividualTaxAnnotationQC:
             return compress_pickle.load(self.blast_out_pickle_path)
         else:
             # Run local blast
+            print(f'Running blast for sample {self.sample_name}')
             subprocess.run(
                 ['blastn', '-out', self.blast_out_path, '-outfmt', self.output_format, '-query', self.fasta_path, '-db', 'nt',
                     '-max_target_seqs', '10', '-num_threads', '20'])
@@ -247,7 +245,9 @@ class IndividualTaxAnnotationQC:
     
     class IndividualTaxAnnotationQCSub:
         """This is a utility class that is used for counting the genus hits for a given sequence"""
-        def __init__(self, blasted_seq_name, results_list, sample_dict, symbiodiniaceae_dict, coral_dict):
+        def __init__(self, blasted_seq_name, results_list, sample_dict, symbiodiniaceae_dict, coral_dict, node_dict, names_dict):
+            self.node_dict = node_dict
+            self.names_dict = names_dict
             # Name of the sequence that was blasted
             self.blasted_seq_name = blasted_seq_name
             # This is the list that will hold 10 lists, 
@@ -279,9 +279,9 @@ class IndividualTaxAnnotationQC:
             if not any([self.other_genus_count_dict, self.symbiodiniaceae_genus_count_dict, self.coral_genus_count_dict]):
                 return 
             
-            o_count = len(self.other_genus_count_dict.items())
-            s_count = len(self.symbiodiniaceae_genus_count_dict.items())
-            c_count = len(self.coral_genus_count_dict.items())
+            o_count = sum(self.other_genus_count_dict.values())
+            s_count = sum(self.symbiodiniaceae_genus_count_dict.values())
+            c_count = sum(self.coral_genus_count_dict.values())
             
             # Find most abundant taxa and populate respective parent dictionary
             if o_count > max(s_count, c_count):
@@ -304,7 +304,7 @@ class IndividualTaxAnnotationQC:
                 # Get the taxonomic annotations for the sequence
                 try:
                     genus_level, family_level, order_level = self._get_taxa_designation_from_staxid(
-                        staxid=comp_list[6], tax_level_list=['genus', 'family', 'order'])
+                        staxid=comp_list[6])
                 except:
                     # there are some tax_ids that we don't seem to be able to find
                     # for the time being we will just continue over this seqeunce
@@ -320,6 +320,36 @@ class IndividualTaxAnnotationQC:
                     self.coral_genus_count_dict[genus_level] += 1
                 else:
                     self.other_genus_count_dict[genus_level] += 1
+
+        def _get_taxa_designation_from_staxid(self, staxid, tax_level_list=['genus', 'family', 'order']):
+            # I have set this up so that you can either feed in the already made node_dict and name_dict or
+            # you they can be generated by this method. If you are running this method many times it will make
+            # sense to run the above generate_taxa_designation_from_staxid_dicts methods
+            # to generate the dicts to feed into this
+            # This will take in a list as its argument and find the levels that are listed in the list
+            list_to_return = [False for i in tax_level_list]
+
+            # now we can do the searching
+            # go through staxid nodes until we get to the tax_level required
+            # then grab the name
+            while True:
+                if staxid == '1':
+                    # If we get here then we have not been able to find names for each of the
+                    # taxonomic levels for some reason and we should return the list containing a False
+                    # for those levels for which an identity could not be found
+                    return list_to_return
+                current_tax_level = self.node_dict[staxid][1]
+                if current_tax_level in tax_level_list:
+                    # then this is the taxonomic level we want, grab the name and return
+                    list_to_return[tax_level_list.index(current_tax_level)] = self.names_dict[staxid]
+                    if False not in list_to_return:
+                        # then we have found all of the taxa_levels
+                        return list_to_return
+                    else:
+                        # else we have not and we should continue the procession through the tax ids
+                        staxid = self.node_dict[staxid][0]
+                else:
+                    staxid = self.node_dict[staxid][0]
 
 class IndividualMothurQC:
     def __init__(self, sample_name, fwd_path, rev_path, qc_base_dir, num_proc=20):
@@ -426,14 +456,16 @@ class MakeInfoDF:
         for sample_name in self.paired_files_dict.keys():
             species = self.sample_provenance_df.at[sample_name, 'SAMPLE MATERIAL taxonomy'].split(' ')[1]
             path_lists = self.paired_files_dict[sample_name]
+            island = self.sample_provenance_df.at[sample_name, 'I##']
+            site = self.sample_provenance_df.at[sample_name, 'S##']
             if len(path_lists) > 1:
                 for i in range(len(path_lists)):
                     fwd_path = os.path.join(self.seq_dir, path_lists[i][0])
                     rev_path = os.path.join(self.seq_dir, path_lists[i][1])
-                    info_df_dict[f'{sample_name}_{i}'] = [fwd_path, rev_path, species]
+                    info_df_dict[f'{sample_name}_{i}'] = [fwd_path, rev_path, species, island, site]
             else:
-                info_df_dict[sample_name] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species]
-        return pd.DataFrame.from_dict(info_df_dict, orient='index', columns=['fwd_path', 'rev_path', 'species'])
+                info_df_dict[sample_name] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species, island, site]
+        return pd.DataFrame.from_dict(info_df_dict, orient='index', columns=['fwd_path', 'rev_path', 'species', 'island', 'site'])
 
     def _find_sample_respective_seq_files(self):
         for sample_name in self.sample_names:
@@ -462,4 +494,5 @@ class MakeInfoDF:
         sample_names = list(sample_names)
         return sample_names
 
-esa = EighteenSAnalysis()
+if __name__ == "__main__":
+    esa = EighteenSProcessing()
