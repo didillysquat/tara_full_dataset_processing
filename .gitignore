@@ -4,3 +4,8 @@ tara_samples_provenance.csv
 bin/auth.txt
 *.p
 seq_qc/
+.ncbirc
+.vscode
+cache/
+envs/
+figures/

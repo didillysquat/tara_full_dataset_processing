@@ -35,7 +35,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.colors import ListedColormap
 from matplotlib.lines import Line2D
 import matplotlib as mpl
-mpl.use('Agg')
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
 import time
 import numpy as np
@@ -77,7 +77,7 @@ class EighteenSAnalysis:
         sbp = StackedBarPlotter(
             plot_type='all_taxa', islands=self.islands, 
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
-            fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir)
+            fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df)
         sbp.plot()
 
     def _make_info_df(self):
@@ -98,13 +98,14 @@ class EighteenSAnalysis:
 class StackedBarPlotter:
     """
     This class will be responsible for plotting the stacked bar plots
-    that will be arranged in a large 16 x 16 matrice of the islands sites and coral species.
+    that will be arranged in a large 18 x 18 matrice of the islands sites and coral species.
     We will use this plot to get an overview of the sequencing results.
     """
-    def __init__(self, plot_type, islands, island_site_dict, host_species, fig_output_dir, qc_dir):
+    def __init__(self, plot_type, islands, island_site_dict, host_species, fig_output_dir, qc_dir, info_df):
         # We will use this plot type variable to change between the different types of plots being produced
         # We will start with 'all_taxa' that can be all of the taxa in a single plot
         self.plot_type = plot_type
+        self.info_df = info_df
         self.qc_dir = qc_dir
         self.islands = islands
         self.island_site_dict = island_site_dict
@@ -120,7 +121,7 @@ class StackedBarPlotter:
         if self.plot_type == 'all_taxa':
             col_dict = {'Porites': '#FFFF00', 'Pocillopora': '#87CEFA', 'Millepora': '#FF6347',
                             'other_coral': '#C0C0C0', 'Symbiodiniaceae': '#00FF00', 'other_taxa': '#696969'}
-            return col_dict, ['Porites', 'Pocillopora', 'Millepora', 'other_coral', 'Symbiodiniaceae', 'other_taxa'] 
+            return ['Porites', 'Pocillopora', 'Millepora', 'other_coral', 'Symbiodiniaceae', 'other_taxa'], col_dict
         else:
             raise NotImplementedError()
 
@@ -141,7 +142,7 @@ class StackedBarPlotter:
                     if sbip.samples:
                         sbip.do_plotting()
         
-        print('Writing .svg')
+        print('\nWriting .svg')
         plt.savefig(os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg'))
         print('Writing .png')
         plt.savefig(os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png'), dpi=1200)
@@ -199,42 +200,45 @@ class StackedBarIndiPlot:
 
             # the order of the categories is ['Porites', 'Pocillopora', 'Millepora', 'other_coral', 'Symbiodiniaceae', 'other_taxa']
             # We will use this list order for the abundances too
-            sample_count_dd = defaultdict(int)
+            sample_count_dict = {cat: 0 for cat in self.parent.plotting_categories}
             if self.parent.plot_type == 'all_taxa':
-                self._log_abundances_all_taxa(sample_annotation_dict, sample_count_dd, sample_abund_dict, coral_annotation_dict)
+                self._log_abundances_all_taxa(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
             else:
                 raise NotImplementedError
 
             # Now add the collected abundances to the sample df_dict
             # Making them relative by dividing by the total of the sample_count_dd
-            df_dict[sample_name] = [sample_count_dd[cat_key]/sum(sample_count_dd.values()) for cat_key in self.parent.plotting_categories]
+            df_dict[sample_name] = [
+                sample_count_dict[cat_key]/sum(sample_count_dict.values()) for
+                cat_key in self.parent.plotting_categories
+            ]
 
         # Now create the df from the df_dict
         return pd.DataFrame.from_dict(data=df_dict, orient='index', columns=self.parent.plotting_categories)
 
-    def _log_abundances_all_taxa(self, sample_annotation_dict, sample_count_dd, sample_abund_dict, coral_annotation_dict):
+    def _log_abundances_all_taxa(self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
         for blasted_seq, annotation in sample_annotation_dict.items():
-                if annotation == 'Scleractinia_Anthoathecata':
-                    # Then this is a coral seq and we should add the count to either one of the target genera
-                    # or to an other coral count
-                    # TODO this is where we can change our logic to according to what type of plot we are doing
-                    coral_genus = coral_annotation_dict[blasted_seq]
-                    key = None
-                    if coral_genus == 'Porites':
-                        key = 'Porites'
-                    elif coral_genus == 'Pocillopora':
-                        key = 'Pocillopora'
-                    elif coral_genus == 'Millepora':
-                        key = 'Millepora'
-                    else:
-                        key = 'other_coral'
-                elif annotation == 'Symbiodiniaceae':
-                    key = 'Symbiodiniaceae'
+            if annotation == 'Scleractinia_Anthoathecata':
+                # Then this is a coral seq and we should add the count to either one of the target genera
+                # or to an other coral count
+                # TODO this is where we can change our logic to according to what type of plot we are doing
+                coral_genus = coral_annotation_dict[blasted_seq]
+                key = None
+                if coral_genus == 'Porites':
+                    key = 'Porites'
+                elif coral_genus == 'Pocillopora':
+                    key = 'Pocillopora'
+                elif coral_genus == 'Millepora':
+                    key = 'Millepora'
                 else:
-                    key = 'other_taxa'
-                
-                # now log the abundance
-                sample_count_dd[key] += sample_abund_dict[blasted_seq]
+                    key = 'other_coral'
+            elif annotation == 'Symbiodiniaceae':
+                key = 'Symbiodiniaceae'
+            else:
+                key = 'other_taxa'
+
+            # now log the abundance
+            sample_count_dict[key] += sample_abund_dict[blasted_seq]
 
     def _make_abund_dict_from_names_path(self, sample_name):
         with open(os.path.join(self.parent.qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
@@ -284,3 +288,6 @@ class StackedBarIndiPlot:
         self.ax.set_frame_on(False)
         self.ax.set_yticks([])
         self.ax.set_xticks([])
+
+if __name__ == "__main__":
+    EighteenSAnalysis().do_stacked_bar_plots()
