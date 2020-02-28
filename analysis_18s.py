@@ -79,7 +79,7 @@ class EighteenSAnalysis:
 
     def do_stacked_bar_plots(self):
         sbp = StackedBarPlotter(
-            plot_type='all_coral_genus', islands=self.islands,
+            plot_type='all_coral_sequence', islands=self.islands,
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
             fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df, cache_dir=self.cache_dir)
         sbp.plot()
@@ -98,6 +98,7 @@ class EighteenSAnalysis:
         df.set_index(keys='SAMPLE ID', drop=True, inplace=True)
         df.rename(columns={'EVENT latitude start (North)': 'lat', 'EVENT longitude start (East)': 'lon'}, inplace=True)
         return df
+
 
 class SeqConsolidator:
     # In order to do the all_coral_sequence, we are going to need to move
@@ -287,8 +288,7 @@ class SeqConsolidator:
                         return 'Millepora'
                 except KeyError:
                     continue
-
-    
+  
     def _write_out_dicts(self):
         compress_pickle.dump(
             self.consolidated_host_seqs_rel_abundance_dict, 
@@ -387,7 +387,7 @@ class SeqConsolidator:
                         # Finally, we use this sequence as the consolidation representative for the
                         # consolidation path
                         representative_seq = sorted(
-                            [(match_seq, self.hhost_seqs_abundance_dictost_seqs_dict[match_seq]) for match_seq in matches],
+                            [(match_seq, self.consolidated_host_seqs_rel_abundance_dict[match_seq]) for match_seq in matches],
                             key=lambda x: x[1], reverse=True)[0][0]
                         consolidation_path_list.append((q_seq, representative_seq))
                     else:
@@ -435,6 +435,8 @@ class SeqConsolidator:
                     "#6C8F7D", "#D7BFC2", "#3C3E6E", "#D83D66", "#2F5D9B", "#6C5E46", "#D25B88", "#5B656C", "#00B57F",
                     "#545C46", "#866097", "#365D25", "#252F99", "#00CCFF", "#674E60", "#FC009C", "#92896B"]
         return colour_list
+
+
 class StackedBarPlotter:
     """
     This class will be responsible for plotting the stacked bar plots
@@ -462,11 +464,17 @@ class StackedBarPlotter:
         self.host_species = host_species
         self.fig_output_dir = fig_output_dir
         self.plotting_categories, self.color_dict = self._init_color_dict()
+        if self.plot_type == 'all_coral_sequence':
+            self.ordered_seq_name_list = self._get_ordered_seq_name_list()
         # Setup the plot
         self.fig = plt.figure(figsize=(14, 10))
         self.gs = self.fig.add_gridspec(24, 18, figure=self.fig,
                                         height_ratios=[0.6 if (i % 4 == 0) else 1 for i in range(24)],
                                         width_ratios=[1 for _ in range(18)])
+    
+    def _get_ordered_seq_name_list(self):
+        coral_seq_abund_dict = compress_pickle.load(os.path.join(self.cache_dir, 'consolidated_host_seqs_rel_abundance_dict.p.bz'))
+        return [tup[0] for tup in sorted([(k, v) for k, v in coral_seq_abund_dict.items()], key=lambda x:x[1], reverse=True)]
     
     def _init_color_dict(self):
         if self.plot_type == 'all_taxa':
@@ -548,8 +556,17 @@ class StackedBarIndiPlot:
         # We will use the pickled out dictionaries to do this
         # TODO it might be a good idea to do this for all samples at once so that it can be pickled out
         # rather than for a variable collection of samples at one time
-        self.abundance_df = self._make_abundance_df()
-
+        if self.parent.plot_type in ['all_taxa', 'all_coral_genus']:
+            # If doing these plots then we are working with set categories
+            # and we can work with a DataFrame
+            self.abundance_df = self._make_abundance_df()
+        else:
+            # Then we are working with unknown sequences and we need to work with a dictionary
+            # That we will then plot in the order of self.parent.ordered_seq_name_list
+            # This is a dict of dicts where first key is sample name,
+            # second key is consolidated seq_name, and value is rel abund in sample
+            self.abundance_dicts = self._make_abundance_dicts()
+        
     def _get_sample_name_list(self):
         """TODO because we still have the taxa annotation running
         here, we will screen the samples to be plotted to only plot those that
@@ -570,6 +587,18 @@ class StackedBarIndiPlot:
                 return True
         return False
 
+    def _make_abundance_dicts(self):
+        df_dict = {}
+        for sample_name in self.samples:
+            sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
+            sample_consolidated_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+            # TODO, when we do the minor seqs only then we will want to get rid of the most abundant seq and work with this
+            if self.parent.plot_type == 'all_coral_sequence':
+                df_dict[sample_name] = sample_consolidated_abund_dict
+            else:
+                raise NotImplementedError
+        return df_dict
+
     def _make_abundance_df(self):
         # Dict that we will populate and then use to make the abundance_df
         df_dict = {}
@@ -586,7 +615,7 @@ class StackedBarIndiPlot:
             if self.parent.plot_type == 'all_taxa':
                 self._log_abundances_all_taxa(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
             elif self.parent.plot_type == 'all_coral_genus':
-                self._log_abundances_all_coral(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
+                self._log_abundances_all_coral_genus(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
             else:
                 raise NotImplementedError
 
@@ -623,7 +652,7 @@ class StackedBarIndiPlot:
             # now log the abundance
             sample_count_dict[key] += sample_abund_dict[blasted_seq]
 
-    def _log_abundances_all_coral(self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
+    def _log_abundances_all_coral_genus(self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
         for blasted_seq, annotation in sample_annotation_dict.items():
             if annotation == 'Scleractinia_Anthoathecata':
                 # Then this is a coral seq and we should add the count to either one of the target genera
@@ -650,15 +679,27 @@ class StackedBarIndiPlot:
     def do_plotting(self):
         for sample_to_plot in self.samples:
             sys.stdout.write(f'\rPlotting sample: {self.island} {self.site} {self.species} {sample_to_plot}')
-            
-            self._plot_bars(sample_to_plot)
+            if self.parent.plot_type in ['all_taxa', 'all_coral_genus']:
+                self._plot_bars_from_df(sample_to_plot)
+            else:
+                self._plot_bars_from_dicts(sample_to_plot)
             self.ind += 1
         self._paint_rect_to_axes()
 
-    def _plot_bars(self, sample_to_plot):
+    def _plot_bars_from_dicts(self, sample_to_plot):
         bottom_div = 0
-        # In order that the sequences are listed in the seq_relative_abundance_df for those that are
-        # present in the sample, plot a rectangle.
+        sample_abund_dict = self.abundance_dicts[sample_to_plot]
+        order_to_plot = [seq_name for seq_name in self.parent.ordered_seq_name_list if seq_name in sample_abund_dict]
+        # In order of the master consolidated seqs
+        for seq_name in order_to_plot:
+            seq_rel_abund = sample_abund_dict[seq_name] 
+            self.patches_list.append(Rectangle((self.ind - 0.5, bottom_div), 1, seq_rel_abund, color=self.parent.color_dict[seq_name]))
+            self.color_list.append(self.parent.color_dict[seq_name])
+            bottom_div += seq_rel_abund
+
+    def _plot_bars_from_df(self, sample_to_plot):
+        bottom_div = 0
+        # In the order of the plotting categories
         for plot_cat in self.parent.plotting_categories:
             cat_rel_abund = self.abundance_df.at[sample_to_plot, plot_cat]
             self.patches_list.append(Rectangle((self.ind - 0.5, bottom_div), 1, cat_rel_abund, color=self.parent.color_dict[plot_cat]))
