@@ -7,21 +7,11 @@ from collections import defaultdict
 from multiprocessing import Pool
 import subprocess
 import compress_pickle
+from base_18s import EighteenSBase
 
-class EighteenSProcessing:
+class EighteenSProcessing(EighteenSBase):
     def __init__(self):
-        self.root_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        self.seq_dir = os.path.join(self.root_dir, 'seq_files')
-        # The directory where the finalised post qc and post taxa screening files will be written
-        self.qc_dir = os.path.join(self.root_dir, 'seq_qc')
-        self.cache_dir = os.path.join(self.root_dir, 'cache')
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self.sample_provenance_path = os.path.join(self.root_dir, "tara_samples_provenance.csv")
-        self.sample_provenance_df = self._make_sample_provenance_df()
-        # The main info df that we will use
-        # Sample name as key, fwd and rev path to seq files, coral species
-        self.info_df = self._make_info_df()
-        
+        super().__init__()
         # Perform the QC for the samples
         # Mothur processing that will be fed into the taxonomic screening
         seq_qc = SequenceQC(
@@ -37,29 +27,6 @@ class EighteenSProcessing:
         # One is all sequnces, one is only coral, one is only symbiodiniaceae
         seq_qc.do_bast_qc()
 
-        # At this point I think we have the sequences as we want them.
-        # We can now work from individual methods.
-        # Probably a good idea to run some PCoA work. Just to see how what the spread looks like
-        # for the sequnces of the genus in question.
-
-        # Once we've looked at that we can get an idea of whether it may be a good idea to cluster or not
-        # Then it will be time to compute the distance matrices per species.
-        # We should probably complete a set of unifrac and a set of braycurtis.
-        
-    def _make_info_df(self):
-        try:
-            return compress_pickle.load(os.path.join(self.cache_dir, 'info_df.p.bz'))
-        except FileNotFoundError:
-            info_df = MakeInfoDF(seq_dir=self.seq_dir, sample_provenance_df=self.sample_provenance_df).make_info_df()
-            compress_pickle.dump(info_df, os.path.join(self.cache_dir, 'info_df.p.bz'))
-            return info_df
-
-    def _make_sample_provenance_df(self):
-        # The SAMPLE ID is in the sequencing file name so we will be able to use this to get the latitute
-        df = pd.read_csv(self.sample_provenance_path)
-        df.set_index(keys='SAMPLE ID', drop=True, inplace=True)
-        df.rename(columns={'EVENT latitude start (North)': 'lat', 'EVENT longitude start (East)': 'lon'}, inplace=True)
-        return df
 
 class SequenceQC:
     """Quality control of the sequences using Mothur firstly and then running through BLAST
@@ -128,14 +95,17 @@ class SequenceQC:
         We will run this in serial but use multiple processors for running the blast.
         """
         self._write_out_ncbi_db_config_file()
-        
+
+        print('Taxonomic annotation')
         for sample_name in self.info_df.index:
+            sys.stdout.write(f'\r{sample_name}')
             IndividualTaxAnnotationQC(
                 node_dict=self.node_dict, 
                 names_dict=self.name_dict, 
                 qc_dir=self.qc_dir, 
                 sample_name=sample_name
                 ).do_taxonomy_annotation()
+        print('\nTaxonomic annotation complete\n')
 
     def _write_out_ncbi_db_config_file(self):
         ncbircFile = []
@@ -277,29 +247,36 @@ class IndividualTaxAnnotationQC:
             
             # If all dicts are empty, then we have had no valid annotations for this seqeunce
             if not any([self.other_genus_count_dict, self.symbiodiniaceae_genus_count_dict, self.coral_genus_count_dict]):
-                return 
-            
+                return
+
             o_count = sum(self.other_genus_count_dict.values())
             s_count = sum(self.symbiodiniaceae_genus_count_dict.values())
             c_count = sum(self.coral_genus_count_dict.values())
             
             # Find most abundant taxa and populate respective parent dictionary
             if o_count > max(s_count, c_count):
+                # log the annotation tup
                 self.sample_genus_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.other_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0]
             
             elif c_count > max(o_count, s_count):
-                self.sample_genus_dict[self.blasted_seq_name] = 'Scleractinia_Anthoathecata'
-                # for the scleractinian dictionary we should associate to the most abundant genus
-                self.coral_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.coral_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0]
+                # log the annotation tup
+                self.sample_genus_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.coral_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0]
+                # log the scleractinian genus
+                self.coral_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.coral_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0][0]
             
             elif s_count > max(o_count, c_count):
-                # Then this is a Symbiodiniaceae and we should store the genus in the specific dictionary
-                self.sample_genus_dict[self.blasted_seq_name] = 'Symbiodiniaceae'            
-                self.symbiodiniceae_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.symbiodiniaceae_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0]
+                # log the annotation tup
+                self.sample_genus_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.symbiodiniaceae_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0]
+                # log the symbiodiniaceae genus
+                self.symbiodiniceae_dict[self.blasted_seq_name] = [a[0] for a in sorted(self.symbiodiniaceae_genus_count_dict.items(), key=lambda x: x[1], reverse=True)][0][0]
 
         def _count_genus_hits(self):
             """For each of the 10 results, check to see which genus it was matched to and 
-            count to see which genus was most commonly matched to"""
+            count to see which genus was most commonly matched to
+
+            TODO log the order, family and genus so that we can output this info inthe
+            annotation tables
+            """
             for comp_list in self.super_results_list:
                 # Get the taxonomic annotations for the sequence
                 try:
@@ -314,12 +291,13 @@ class IndividualTaxAnnotationQC:
                     continue
                 
                 # Log the match
+                annotation_tup = (genus_level, family_level, order_level)
                 if family_level == 'Symbiodiniaceae':
-                    self.symbiodiniaceae_genus_count_dict[genus_level] += 1
+                    self.symbiodiniaceae_genus_count_dict[annotation_tup] += 1
                 elif order_level == 'Scleractinia' or order_level == 'Anthoathecata':
-                    self.coral_genus_count_dict[genus_level] += 1
+                    self.coral_genus_count_dict[annotation_tup] += 1
                 else:
-                    self.other_genus_count_dict[genus_level] += 1
+                    self.other_genus_count_dict[annotation_tup] += 1
 
         def _get_taxa_designation_from_staxid(self, staxid, tax_level_list=['genus', 'family', 'order']):
             # I have set this up so that you can either feed in the already made node_dict and name_dict or
@@ -433,66 +411,6 @@ class IndividualMothurQC:
 
         return mothur_batch_file_path
 
-class MakeInfoDF:
-    def __init__(self, seq_dir, sample_provenance_df):
-        self.paired_files_dict = defaultdict(list)
-        self.seq_dir = seq_dir
-        self.seq_files = [file for file in os.listdir(self.seq_dir) if 'fastq' in file]
-        self.sample_provenance_df = sample_provenance_df
-        # Get a list of the samples that we have seq files for
-        self.sample_names = self._get_sample_names_list()
-
-    def make_info_df(self):
-        # for each of the sample names, find the respective seq files, pair them up and populate the paired_files dict
-        self._find_sample_respective_seq_files()
-
-        # here we have the dictionary that tells us which sample names relate to which seqfiles populated
-        # Now populate the info dict splitting up those samples that have multiple pairs of seq files
-        # Dict that we will create info df from eventually
-        return self._return_info_df()
-
-    def _return_info_df(self):
-        info_df_dict = {}
-        for sample_name in self.paired_files_dict.keys():
-            species = self.sample_provenance_df.at[sample_name, 'SAMPLE MATERIAL taxonomy'].split(' ')[1]
-            path_lists = self.paired_files_dict[sample_name]
-            island = self.sample_provenance_df.at[sample_name, 'I##']
-            site = self.sample_provenance_df.at[sample_name, 'S##']
-            if len(path_lists) > 1:
-                for i in range(len(path_lists)):
-                    fwd_path = os.path.join(self.seq_dir, path_lists[i][0])
-                    rev_path = os.path.join(self.seq_dir, path_lists[i][1])
-                    info_df_dict[f'{sample_name}_{i}'] = [fwd_path, rev_path, species, island, site]
-            else:
-                info_df_dict[sample_name] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species, island, site]
-        return pd.DataFrame.from_dict(info_df_dict, orient='index', columns=['fwd_path', 'rev_path', 'species', 'island', 'site'])
-
-    def _find_sample_respective_seq_files(self):
-        for sample_name in self.sample_names:
-            matching_seq_files = []
-            for seq_file in self.seq_files:
-                if sample_name in seq_file:
-                    matching_seq_files.append(seq_file)
-            # here we have a list of all of the seq files
-            # if there are only two, then this is simple
-            if not matching_seq_files:
-                raise RuntimeError(f'No sequencing files found for sample {sample_name}')
-            if len(matching_seq_files) == 2:
-                if '_R1.' in matching_seq_files[0]:
-                    self.paired_files_dict[sample_name] = [[matching_seq_files[0], matching_seq_files[1]]]
-                else:
-                    self.paired_files_dict[sample_name] = [[matching_seq_files[1], matching_seq_files[0]]]
-            else:
-                # if there are more than two then we need to pair them up
-                for seq_file in [seq_file for seq_file in matching_seq_files if '_R1.' in seq_file]:
-                    self.paired_files_dict[sample_name].append([seq_file, seq_file.replace('_R1.', '_R2.')])
-
-    def _get_sample_names_list(self):
-        sample_names = set()
-        for seq_file in self.seq_files:
-            sample_names.add('_'.join(seq_file.split('_')[:2]))
-        sample_names = list(sample_names)
-        return sample_names
 
 if __name__ == "__main__":
     esa = EighteenSProcessing()

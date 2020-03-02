@@ -41,24 +41,14 @@ import time
 import numpy as np
 import operator
 import matplotlib.gridspec as gridspec
+from base_18s import EighteenSBase
 
 # TODO later we will be able to write this as a subclass of EighteenSProcessing
 # But for the time being we don't want to interfere with any of that code because 
 # it is currently running to create the 18S taxa annotations.
-class EighteenSAnalysis:
+class EighteenSAnalysis(EighteenSBase):
     def __init__(self):
-        self.root_dir = os.path.dirname(os.path.abspath(sys.argv[0]))
-        self.seq_dir = os.path.join(self.root_dir, 'seq_files')
-        # The directory where the finalised post qc and post taxa screening files will be written
-        self.qc_dir = os.path.join(self.root_dir, 'seq_qc')
-        self.cache_dir = os.path.join(self.root_dir, 'cache')
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self.sample_provenance_path = os.path.join(self.root_dir, "tara_samples_provenance.csv")
-        self.sample_provenance_df = self._make_sample_provenance_df()
-        # The main info df that we will use
-        # Sample name as key, fwd and rev path to seq files, coral species
-        self.info_df = self._make_info_df()
-
+        super().__init__()
         # This will hold the additional variables used only in this analysis class
         self.island_site_dict = self._determine_sites_and_island()
         self.islands = sorted(list(self.island_site_dict.keys()))
@@ -85,21 +75,6 @@ class EighteenSAnalysis:
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
             fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df, cache_dir=self.cache_dir)
         sbp.plot()
-
-    def _make_info_df(self):
-        try:
-            return compress_pickle.load(os.path.join(self.cache_dir, 'info_df.p.bz'))
-        except FileNotFoundError:
-            info_df = MakeInfoDF(seq_dir=self.seq_dir, sample_provenance_df=self.sample_provenance_df).make_info_df()
-            compress_pickle.dump(info_df, os.path.join(self.cache_dir, 'info_df.p.bz'))
-            return info_df
-
-    def _make_sample_provenance_df(self):
-        # The SAMPLE ID is in the sequencing file name so we will be able to use this to get the latitute
-        df = pd.read_csv(self.sample_provenance_path)
-        df.set_index(keys='SAMPLE ID', drop=True, inplace=True)
-        df.rename(columns={'EVENT latitude start (North)': 'lat', 'EVENT longitude start (East)': 'lon'}, inplace=True)
-        return df
 
 
 class SeqConsolidator:
@@ -405,7 +380,7 @@ class SeqConsolidator:
             coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
 
             for blasted_seq, annotation in sample_annotation_dict.items():
-                if annotation == 'Scleractinia_Anthoathecata':
+                if annotation[2] in ['Scleractinia', 'Anthoathecata']:
                     # Then this is a coral seq
                     # If it is of one of the three genera in question then we should
                     # add it to the list of sequences
@@ -639,8 +614,10 @@ class StackedBarPlotter:
     def _init_color_dict(self):
         if self.plot_type == 'all_taxa':
             col_dict = {'Porites': '#FFFF00', 'Pocillopora': '#87CEFA', 'Millepora': '#FF6347',
-                            'other_coral': '#C0C0C0', 'Symbiodiniaceae': '#00FF00', 'other_taxa': '#696969'}
-            return ['Porites', 'Millepora', 'Pocillopora', 'other_coral', 'Symbiodiniaceae', 'other_taxa'], col_dict
+                            'other_coral': '#C0C0C0', 'Symbiodiniaceae': '#00FF00', 'other_taxa': '#696969',
+                        'not_annotated': '#282828'}
+            return ['Porites', 'Millepora', 'Pocillopora', 'other_coral',
+                    'Symbiodiniaceae', 'other_taxa', 'not_annotated'], col_dict
         elif self.plot_type == 'all_coral_genus':
             col_dict = {'Porites': '#FFFF00', 'Pocillopora': '#87CEFA', 'Millepora': '#FF6347',
                             'other_coral': '#C0C0C0'}
@@ -828,14 +805,19 @@ class StackedBarIndiPlot:
             sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
             # make a seq_name to abundance dict from the fasta and .names pair
             sample_abund_dict = self._make_abund_dict_from_names_path(sample_name=sample_name)
-
+            # For the all_taxa, we will go sequence by sequence through the fasta file
+            with open(
+                    os.path.join(sample_qc_dir, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'),
+                    'r') as f:
+                fasta_file_as_list = [line.rstrip() for line in f]
+            fasta_names = [line.split('\t')[0][1:] for line in fasta_file_as_list if line[0] == '>']
             # then load the three dictionaries
             sample_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'sample_annotation_dict.p.bz'))
             coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
 
             sample_count_dict = {cat: 0 for cat in self.parent.plotting_categories}
             if self.parent.plot_type == 'all_taxa':
-                self._log_abundances_all_taxa(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
+                self._log_abundances_all_taxa(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict, fasta_names)
             elif self.parent.plot_type == 'all_coral_genus':
                 self._log_abundances_all_coral_genus(sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict)
             else:
@@ -851,32 +833,36 @@ class StackedBarIndiPlot:
         # Now create the df from the df_dict
         return pd.DataFrame.from_dict(data=df_dict, orient='index', columns=self.parent.plotting_categories)
 
-    def _log_abundances_all_taxa(self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
-        for blasted_seq, annotation in sample_annotation_dict.items():
-            if annotation == 'Scleractinia_Anthoathecata':
-                # Then this is a coral seq and we should add the count to either one of the target genera
-                # or to an other coral count
-                # TODO this is where we can change our logic to according to what type of plot we are doing
-                coral_genus = coral_annotation_dict[blasted_seq]
-                if coral_genus == 'Porites':
-                    key = 'Porites'
-                elif coral_genus == 'Pocillopora':
-                    key = 'Pocillopora'
-                elif coral_genus == 'Millepora':
-                    key = 'Millepora'
+    def _log_abundances_all_taxa(
+            self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict, fasta_names):
+        for fasta_name in fasta_names:
+            try:
+                annotation = sample_annotation_dict[fasta_name]
+                if annotation[2] in ['Scleractinia', 'Anthoathecata']:
+                    # Then this is a coral seq and we should add the count to either one of the target genera
+                    # or to an other coral count
+                    coral_genus = coral_annotation_dict[fasta_name]
+                    if coral_genus == 'Porites':
+                        key = 'Porites'
+                    elif coral_genus == 'Pocillopora':
+                        key = 'Pocillopora'
+                    elif coral_genus == 'Millepora':
+                        key = 'Millepora'
+                    else:
+                        key = 'other_coral'
+                elif annotation[1] == 'Symbiodiniaceae':
+                    key = 'Symbiodiniaceae'
                 else:
-                    key = 'other_coral'
-            elif annotation == 'Symbiodiniaceae':
-                key = 'Symbiodiniaceae'
-            else:
-                key = 'other_taxa'
-
+                    key = 'other_taxa'
+            except KeyError:
+                key = 'not_annotated'
             # now log the abundance
-            sample_count_dict[key] += sample_abund_dict[blasted_seq]
+            sample_count_dict[key] += sample_abund_dict[fasta_name]
 
-    def _log_abundances_all_coral_genus(self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
+    def _log_abundances_all_coral_genus(
+            self, sample_annotation_dict, sample_count_dict, sample_abund_dict, coral_annotation_dict):
         for blasted_seq, annotation in sample_annotation_dict.items():
-            if annotation == 'Scleractinia_Anthoathecata':
+            if annotation[2] in ['Scleractinia', 'Anthoathecata']:
                 # Then this is a coral seq and we should add the count to either one of the target genera
                 # or to an other coral count
                 # TODO this is where we can change our logic to according to what type of plot we are doing
@@ -894,7 +880,8 @@ class StackedBarIndiPlot:
                 sample_count_dict[key] += sample_abund_dict[blasted_seq]
 
     def _make_abund_dict_from_names_path(self, sample_name):
-        with open(os.path.join(self.parent.qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
+        with open(os.path.join(
+                self.parent.qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
             name_file = [line.rstrip() for line in f]
         return {line.split('\t')[0]: len(line.split('\t')[1].split(',')) for line in name_file}
 
@@ -971,6 +958,6 @@ if __name__ == "__main__":
     # all_coral_genus
     # all_coral_sequences
     # minor_coral_sequence
-    # for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
-    #     EighteenSAnalysis().do_stacked_bar_plots(plot_type)
-    EighteenSAnalysis().do_stacked_bar_plots('minor_coral_sequence')
+    for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
+        EighteenSAnalysis().do_stacked_bar_plots(plot_type)
+    # EighteenSAnalysis().do_stacked_bar_plots('all_taxa')
