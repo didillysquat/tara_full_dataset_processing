@@ -1,6 +1,17 @@
 from base_18s import EighteenSBase
 import os
 import compress_pickle
+import pandas as pd
+import hashlib
+import sys
+from plumbum import local
+import subprocess
+from scipy.spatial.distance import braycurtis
+from skbio.stats.ordination import pcoa
+from skbio.tree import TreeNode
+from skbio.diversity import beta_diversity
+import numpy as np
+import itertools
 
 class EighteenSDistance(EighteenSBase):
     """
@@ -40,7 +51,7 @@ class EighteenSDistance(EighteenSBase):
                 coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
                 most_abund_coral_genus_df_list.append(self._identify_most_abund_coral_genus(rel_all_seq_abundance_dict, coral_annotation_dict))
                 consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-                most_abund_seq_of_coral_genus_df_list.append(sorted(_ for _ in consolidated_host_seqs_abund_dict.items(), key=lambda x: x[0], reverse=True)[0][0])
+                most_abund_seq_of_coral_genus_df_list.append(sorted([_ for _ in consolidated_host_seqs_abund_dict.items()], key=lambda x: x[0], reverse=True)[0][0])
             self.info_df['most_abund_coral_genus'] = most_abund_coral_genus_df_list
             self.info_df['most_abund_seq_of_coral_genus'] = most_abund_seq_of_coral_genus_df_list
             compress_pickle.dump(self.info_df, os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz'))
@@ -65,41 +76,51 @@ class EighteenSDistance(EighteenSBase):
     def make_and_plot_dist_and_pcoa(self, resolution_type):
         # Call the class that will be responsible for calculating the distances
         # Calculating the PCoA and then plotting
-        da = DistanceAnlyses(resolution_type=resolution_type, info_df=self.info_df)
+        da = DistanceAnlyses(resolution_type=resolution_type, info_df=self.info_df, qc_dir=self.qc_dir, output_dir=self.output_dir)
         da.compute_distances()
+        # TODO we can do the plotting here
 
 class DistanceAnlyses:
-    def __init__(self, resolution_type, info_df):
+    def __init__(self, resolution_type, info_df, qc_dir, output_dir):
         self.resolution_type = resolution_type
+        self.qc_dir = qc_dir
         self.info_df = info_df
+        self.output_dir = output_dir
         # get the category names and list of samples that will be used in calculating
         # the distances for each of those categories. For example when
         # resolution_type == 'host_only', categories will be Porites, Millepora, Pocillopora
         # When host_secondary_seq == e.g. Porites_first, Porites_second etc.
-        self.categories, self.sample_lists = _generate_distance_categories()
+        self.categories, self.sample_lists = self._generate_distance_categories()
         self.dist_methods = ['unifrac', 'braycurtis']
     
     def compute_distances(self):
         for distance_cat, sample_list in zip(self.categories, self.sample_lists):
             for dist_method in self.dist_methods:
-                indi_dist_creator = IndiDistanceAnalysis()
-            
+                IndiDistanceAnalysis(
+                    distance_cat=distance_cat, sample_list=sample_list, dist_method=dist_method, qc_dir=self.qc_dir, output_dir=self.output_dir)
+
     def _generate_distance_categories(self):
         if self.resolution_type == 'host_only':
             sample_lists = []
-            categories = list(info_df['most_abund_coral_genus'].values())
+            categories = list(self.info_df['most_abund_coral_genus'].values())
             for category in categories:
-                sample_lists.append(list(info_df[info_df['most_abund_coral_genus'] == category].values()))
+                sample_lists.append(list(self.info_df[self.info_df['most_abund_coral_genus'] == category].values()))
             return categories, sample_lists
 
 class IndiDistanceAnalysis:
-    def __init__(self, distance_cat, sample_list, dist_method, qc_dir):
+    def __init__(self, distance_cat, sample_list, dist_method, qc_dir, output_dir):
         """This is the class that will take care of creating a single between sample
         distance method"""
         self.qc_dir = qc_dir
         self.category = distance_cat
         self.samples = sample_list
         self.dist_method = dist_method
+        self.output_dir = output_dir
+        
+        # A temp directory where we can write out the unaligned fastas
+        # and aligned fasta and any other intermediate files
+        self.temp_dir = os.path.join(os.path.dirname(self.qc_dir), 'temp')
+        os.makedirs(self.temp_dir, exist_ok=True)
         # In the initial 18s we were using a normalisation of 10000 seqs for the braycurtis
         # but 1000 for the unifrac due to the amount of time it was taking to create
         # the trees. We will start here with 1000 seqs for the unifrac and see
@@ -108,9 +129,24 @@ class IndiDistanceAnalysis:
             self.num_seqs_to_normalise_to = 1000
         else:
             self.num_seqs_to_normalise_to = 10000
-        self.abundance_df = _create_abundance_df()
+        self.abundance_df = self._create_abundance_df()
+
+        # Generic variables shared between braycurtis and unifrac
+        self.dist_out_path = os.path.join(self.output_dir, f'{self.category}_{self.dist_method}.dist')
+        self.pcoa_out_path = os.path.join(self.output_dir, f'{self.category}_{self.dist_method}.csv')
+        self.pcoa_df = None
+
+        # Variables concerned with unifrac
+        self.unaligned_fasta_path = os.path.join(self.temp_dir, 'unaligned_fasta.fasta')
+        self.aligned_fasta_path = os.path.join(self.temp_dir, 'aligned_fasta.fasta')
+        self.tree_path = os.path.join(self.temp_dir, 'tree.treefile')
+        self.wu = None
+
+        # Variables concerned with braycurtis
+        self.braycurtis_btwn_sample_distance_dictionary = None
+        
         # The pseudo code for this is
-        # Create a abundance dataframe (we need to choose whether to normalise this or not)
+        # Create an abundance dataframe (we need to choose whether to normalise this or not)
         # We probably should normalise.
         # Do this by creating a dict of dicts and using the dicts methods that exist
         # in the initial 18S code
@@ -130,7 +166,7 @@ class IndiDistanceAnalysis:
         to a master dictionary where sample_name is key. Then finally create a df from this
         dict of dicts"""
         dict_to_create_df_from = {}
-        for sample_name in samples:
+        for sample_name in self.samples:
             temp_sample_dict = {}
             sample_qc_dir = os.path.join(self.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
@@ -144,6 +180,257 @@ class IndiDistanceAnalysis:
         df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
         df[pd.isna(self.abundance_df)] = 0
         return df
-            
 
+    def do_analysis(self):
+        if self.dist_method == 'unifrac':
+            self._do_unifrac_analysis()
+        else:
+            raise NotImplementedError
+
+    # BRAYCURTIS METHODS
+    def _do_braycurtis_analysis(self):
+        self.braycurtis_btwn_sample_distance_dictionary = self._compute_braycurtis_distance_dict()
+        self.braycurtis_btwn_sample_distance_file = self._make_and_write_braycurtis_distance_file()
+        self.pcoa_df = self._make_pcoa_df_braycurtis()
+
+    def _make_pcoa_df_braycurtis(self):
+        # simultaneously grab the sample names in the order of the distance matrix and put the matrix into
+        # a twoD list and then convert to a numpy array
+        temp_two_D_list = []
+        sample_names_from_dist_matrix = []
+        for line in self.braycurtis_btwn_sample_distance_file[1:]:
+            temp_elements = line.split('\t')
+            sample_names_from_dist_matrix.append(temp_elements[0])
+            temp_two_D_list.append([float(a) for a in temp_elements[1:]])
+        uni_frac_dist_array = np.array(temp_two_D_list)
+        sys.stdout.write('\rcalculating PCoA coordinates')
+
+        pcoa_df = pcoa(uni_frac_dist_array)
+
+        # rename the dataframe index as the sample names
+        pcoa_df.samples['sample'] = sample_names_from_dist_matrix
+        renamed_dataframe = pcoa_df.samples.set_index('sample')
+
+        # now add the variance explained as a final row to the renamed_dataframe
+        renamed_dataframe = renamed_dataframe.append(pcoa_df.proportion_explained.rename('proportion_explained'))
+
+        return renamed_dataframe
+
+    def _make_and_write_braycurtis_distance_file(self):
+        # Generate the distance out file from this dictionary
+        # from this dict we can produce the distance file that can be passed into the generate_PCoA_coords method
+        distance_out_file = [len(self.samples)]
+        for sample_outer in self.samples:
+            # The list that will hold the line of distance. This line starts with the name of the sample
+            temp_sample_dist_string = [sample_outer]
+
+            for sample_inner in self.samples:
+                if sample_outer == sample_inner:
+                    temp_sample_dist_string.append(0)
+                else:
+                    temp_sample_dist_string.append(self.braycurtis_btwn_sample_distance_dictionary[
+                                                        f'{sample_outer}_{sample_inner}'])
+            distance_out_file.append(
+                '\t'.join([str(distance_item) for distance_item in temp_sample_dist_string]))
+        
+        with open(self.dist_out_path, 'w') as f:
+            for line in distance_out_file:
+                f.write(f'{line}\n')
+        return distance_out_file
+
+    def _compute_braycurtis_distance_dict(self):
+        # Create a dictionary that will hold the distance between the two samples
+        spp_distance_dict = {}
+        # For pairwise comparison of each of these sequences
+        for smp_one, smp_two in itertools.combinations(self.samples, 2):
+            print('Calculating distance for {}_{}'.format(smp_one, smp_two))
+            # Get a set of the sequences found in either one of the samples
+            smp_one_abund_dict = self.abundance_df[smp_one]
+            smp_two_abund_dict = self.abundance_df[smp_two]
+            list_of_seqs_of_pair = []
+            list_of_seqs_of_pair.extend(list(smp_one_abund_dict.keys()))
+            list_of_seqs_of_pair.extend(list(smp_two_abund_dict.keys()))
+            list_of_seqs_of_pair = list(set(list_of_seqs_of_pair))
+
+            # then create a list of abundances for sample one by going through the above list and checking
+            sample_one_abundance_list = []
+            for seq_name in list_of_seqs_of_pair:
+                if seq_name in smp_one_abund_dict.keys():
+                    sample_one_abundance_list.append(smp_one_abund_dict[seq_name])
+                else:
+                    sample_one_abundance_list.append(0)
+
+            # then create a list of abundances for sample two by going through the above list and checking
+            sample_two_abundance_list = []
+            for seq_name in list_of_seqs_of_pair:
+                if seq_name in smp_two_abund_dict.keys():
+                    sample_two_abundance_list.append(smp_two_abund_dict[seq_name])
+                else:
+                    sample_two_abundance_list.append(0)
+
+            # Do the Bray Curtis.
+            distance = braycurtis(sample_one_abundance_list, sample_two_abundance_list)
+
+            # Add the distance to the dictionary using both combinations of the sample names
+            spp_distance_dict[f'{smp_one}_{smp_two}'] = distance
+            spp_distance_dict[f'{smp_two}_{smp_one}'] = distance
+        
+        return spp_distance_dict
+
+    # UNIFRAC METHODS
+    def _do_unifrac_analysis(self):
+        self._create_tree()
+        self._compute_weighted_unifrac()
+        self._write_out_unifrac_dist_file()
+        self._make_pcoa_df_unifrac()
+
+    def _create_tree(self):
+        """Unifrac requires a tree."""
+        # Create a fasta file that has the hashed sequence as the sequence names
+        hash_cols, fasta_as_list = self._make_fasta_and_hash_names()
+        # Set the df column names to the hashes
+        self._set_df_cols_to_hashes(hash_cols)
+        # Align the fasta
+        self._align_seqs(fasta_as_list)
+        # Make and root the tree
+        self._make_and_root_tree()
+
+    def _make_fasta_and_hash_names(self):
+            # here we have a set of all of the sequences
+            seq_fasta_list = []
+            # we will change the df columns so that they match the seq names in the tree
+            columns = []
+            for seq in list(self.abundance_df):
+                hash_of_seq = hashlib.md5(seq.encode()).hexdigest()
+                if hash_of_seq in columns:
+                    sys.exit('non-unique hash')
+                seq_fasta_list.extend([f'>{hash_of_seq}', seq])
+                columns.append(hash_of_seq)
+            return columns, seq_fasta_list
+    
+    def _set_df_cols_to_hashes(self, columns):
+            # change the columns of the df
+            self.abundance_df.columns = columns
+
+    def _align_seqs(self, seq_fasta_list):
+            # Write out the unaligned fasta
+            with open(self.unaligned_fasta_path, 'w') as f:
+                for line in seq_fasta_list:
+                    f.write(f'{line}\n')
+            
+            self._mafft_align_fasta(input_path=self.unaligned_fasta_path, output_path=self.aligned_fasta_path, method='auto', num_proc=6)
+
+            # read in the aligned fasta
+            with open(self.aligned_fasta_path, 'r') as f:
+                aligned_fasta = [line.rstrip() for line in f]
+
+
+            sequential_fasta = self._convert_interleaved_to_sequencial_fasta(aligned_fasta)
+            
+            # Write out the sequential aligned fasta to the same aligned fasta path
+            with open(self.unaligned_fasta_path, 'w') as f:
+                for line in sequential_fasta:
+                    f.write(f'{line}\n')
+
+    def _make_and_root_tree(self):
+            # make the tree
+            print('Testing models and making phylogenetic tree')
+            print('This could take some time...')
+            # if not os.path.exists(self.tree_out_path_unrooted_cropped):
+            subprocess.run(
+                ['iqtree', '-nt', 'AUTO', '-s', f'{self.aligned_fasta_path}', '-redo', '-mredo'])
+            print('Tree creation complete')
+            print('Rooting the tree at midpoint')
+            tree = TreeNode.read(self.tree_path)
+            self.rooted_tree = tree.root_at_midpoint()
+            self.rooted_tree.write(self.tree_path)
+
+    def _compute_weighted_unifrac(self):
+        print('Performing unifrac calculations')
+        self.wu = beta_diversity(
+            metric='weighted_unifrac', counts=self.abundance_df.to_numpy(),
+            ids=[str(_) for _ in list(self.abundance_df.index)],
+            tree=self.rooted_tree, otu_ids=[str(_) for _ in list(self.abundance_df.columns)])
+
+    def _write_out_unifrac_dist_file(self):
+        wu_df = self.wu.to_data_frame()
+        wu_df.to_csv(path_or_buf=self.dist_out_path, index=True, header=False)
+        
+    def _make_pcoa_df_unifrac(self):
+        self.pcoa_df = self._do_spp_pcoa_unifrac(self.wu)
+
+    def _do_spp_pcoa_unifrac(self, wu):
+        # compute the pcoa
+        pcoa_output = pcoa(wu.data)
+        self._rescale_pcoa(pcoa_output)
+        pcoa_output.samples['sample'] = self.samples
+        spp_unifrac_pcoa_df = pcoa_output.samples.set_index('sample')
+        # now add the variance explained as a final row to the renamed_dataframe
+        spp_unifrac_pcoa_df = spp_unifrac_pcoa_df.append(
+            pcoa_output.proportion_explained.rename('proportion_explained'))
+        return spp_unifrac_pcoa_df
+
+    def _rescale_pcoa(self, pcoa_output):
+        # work through the magnitudes of order and see what the bigest scaler we can work with is
+        # whilst still remaining below 1
+        query = 0.1
+        scaler = 10
+        while 1:
+            if pcoa_output.samples.max().max() > query:
+                # then we cannot multiply by the scaler
+                # revert back and break
+                scaler /= 10
+                break
+            else:
+                # then we can safely multiply by the scaler
+                # increase by order of magnitude and test again
+                # we also need to test the negative if it is negative
+                min_val = pcoa_output.samples.min().min()
+                if min_val < 0:
+                    if min_val > (-1 * query):
+                        scaler *= 10
+                        query /= 10
+                    else:
+                        scaler /= 10
+                        break
+                else:
+                    scaler *= 10
+                    query /= 10
+        # now scale the df by the scaler unless it is 1
+        if scaler != 1:
+            pcoa_output.samples = pcoa_output.samples * scaler
+
+    @staticmethod
+    def _mafft_align_fasta(input_path, output_path, method='auto', mafft_exec_string='mafft', num_proc=1, iterations=1000):
+        # http://plumbum.readthedocs.io/en/latest/local_commands.html#pipelining
+        print(f'Aligning {input_path}')
+        if method == 'auto':
+            mafft = local[f'{mafft_exec_string}']
+            (mafft['--auto', '--thread', f'{num_proc}', input_path] > output_path)()
+        elif method == 'linsi':
+            mafft = local[f'{mafft_exec_string}']
+            (mafft['--localpair', '--maxiterate', f'{iterations}', '--thread', f'{num_proc}', input_path] > output_path)()
+        elif method == 'unifrac':  # These are the alignment settings specifically for doing the unifrac alignments
+            mafft = local[f'{mafft_exec_string}']
+            (mafft[
+                '--thread', f'{num_proc}', '--maxiterate', f'{iterations}',
+                '--ep', '0', '--genafpair', input_path] > output_path)()
+        print(f'Writing to {output_path}')
+
+    @staticmethod
+    def _convert_interleaved_to_sequencial_fasta(fasta_as_list):
+        new_fasta = []
+        temp_seq_string_list = []
+        for fasta_line in fasta_as_list:
+            if fasta_line.startswith('>'):
+                if temp_seq_string_list:
+                    new_fasta.append(''.join(temp_seq_string_list))
+                    temp_seq_string_list = []
+                    new_fasta.append(fasta_line)
+                else:
+                    new_fasta.append(fasta_line)
+            else:
+                temp_seq_string_list.append(fasta_line)
+        new_fasta.append(''.join(temp_seq_string_list))
+        return new_fasta
         
