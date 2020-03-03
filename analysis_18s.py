@@ -198,7 +198,7 @@ class SeqConsolidator:
 
             # Now it is time to do the consolidated_host_seqs_abund_dict
             # Firstly identify the most abundant coral sequence
-            most_abundant_coral_genus = self._indentify_most_abund_coral_genus(
+            most_abundant_coral_genus = self._identify_most_abund_coral_genus(
                 rel_all_seq_abundance_dict=rel_all_seq_abundance_dict, 
                 coral_annotation_dict=coral_annotation_dict
                 )
@@ -286,7 +286,7 @@ class SeqConsolidator:
         consolidated_host_seqs_abund_dict = {k: v/tot for k, v in consolidated_host_seqs_abund_dict.items()}
         compress_pickle.dump(consolidated_host_seqs_abund_dict, os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
 
-    def _indentify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
+    def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
         for sorted_tup in sorted(
             [(seq_name, rel_abund) for seq_name, rel_abund in rel_all_seq_abundance_dict.items()], 
             key=lambda x: x[1], 
