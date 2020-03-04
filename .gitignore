@@ -11,3 +11,4 @@ envs/
 figures/
 __pycache__
 output/
+temp/

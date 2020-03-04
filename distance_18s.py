@@ -12,6 +12,7 @@ from skbio.tree import TreeNode
 from skbio.diversity import beta_diversity
 import numpy as np
 import itertools
+from functools import partial
 
 class EighteenSDistance(EighteenSBase):
     """
@@ -43,9 +44,11 @@ class EighteenSDistance(EighteenSBase):
         if os.path.isfile(os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz')):
             self.info_df = compress_pickle.load(os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz'))
         else:
+            print('updating info_df')
             most_abund_coral_genus_df_list = []
             most_abund_seq_of_coral_genus_df_list = []
             for sample_name in self.info_df.index:
+                sys.stdout.write(f'\r{sample_name}')
                 sample_qc_dir = os.path.join(self.qc_dir, sample_name)
                 rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
                 coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
@@ -55,6 +58,7 @@ class EighteenSDistance(EighteenSBase):
             self.info_df['most_abund_coral_genus'] = most_abund_coral_genus_df_list
             self.info_df['most_abund_seq_of_coral_genus'] = most_abund_seq_of_coral_genus_df_list
             compress_pickle.dump(self.info_df, os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz'))
+            print()
 
     def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
         for sorted_tup in sorted(
@@ -94,23 +98,28 @@ class DistanceAnlyses:
         self.dist_methods = ['unifrac', 'braycurtis']
     
     def compute_distances(self):
-        for distance_cat, sample_list in zip(self.categories, self.sample_lists):
-            for dist_method in self.dist_methods:
-                IndiDistanceAnalysis(
+        for dist_method in self.dist_methods:
+            for distance_cat, sample_list in zip(self.categories, self.sample_lists):
+                indi_dist = IndiDistanceAnalysis(
                     distance_cat=distance_cat, sample_list=sample_list, dist_method=dist_method, qc_dir=self.qc_dir, output_dir=self.output_dir)
+                indi_dist.do_analysis()
 
     def _generate_distance_categories(self):
         if self.resolution_type == 'host_only':
             sample_lists = []
-            categories = list(self.info_df['most_abund_coral_genus'].values())
+            categories = ['Pocillopora', 'Millepora', 'Porites']
             for category in categories:
-                sample_lists.append(list(self.info_df[self.info_df['most_abund_coral_genus'] == category].values()))
+                sample_lists.append(list(self.info_df[self.info_df['most_abund_coral_genus'] == category].index))
             return categories, sample_lists
 
 class IndiDistanceAnalysis:
     def __init__(self, distance_cat, sample_list, dist_method, qc_dir, output_dir):
         """This is the class that will take care of creating a single between sample
-        distance method"""
+        distance method
+        
+        TODO move the tree files to the cache file rather than the temp file so that we can delete the temp file
+        Also use compression when writing out and then reading in the pcoa output files and the distance files
+        """
         self.qc_dir = qc_dir
         self.category = distance_cat
         self.samples = sample_list
@@ -139,7 +148,7 @@ class IndiDistanceAnalysis:
         # Variables concerned with unifrac
         self.unaligned_fasta_path = os.path.join(self.temp_dir, 'unaligned_fasta.fasta')
         self.aligned_fasta_path = os.path.join(self.temp_dir, 'aligned_fasta.fasta')
-        self.tree_path = os.path.join(self.temp_dir, 'tree.treefile')
+        self.tree_path = self.aligned_fasta_path + '.treefile'
         self.wu = None
 
         # Variables concerned with braycurtis
@@ -166,11 +175,21 @@ class IndiDistanceAnalysis:
         to a master dictionary where sample_name is key. Then finally create a df from this
         dict of dicts"""
         dict_to_create_df_from = {}
+        print('Creating abundance df')
         for sample_name in self.samples:
+            sys.stdout.write(f'\r{sample_name}')
             temp_sample_dict = {}
             sample_qc_dir = os.path.join(self.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
             
+            # We need to remove the most abundant sequence from the equation
+            most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), key=(lambda key: consolidated_host_seqs_abund_dict[key]))
+            # remove the most abund seq
+            del consolidated_host_seqs_abund_dict[most_abund_sequence]
+            # renormalise
+            tot = sum(consolidated_host_seqs_abund_dict.values())
+            consolidated_host_seqs_abund_dict = {k: v/tot for k, v in consolidated_host_seqs_abund_dict.items()}
+
             for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
                 normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
                 if normalised_abund:
@@ -178,14 +197,15 @@ class IndiDistanceAnalysis:
             dict_to_create_df_from[sample_name] = temp_sample_dict
         
         df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
-        df[pd.isna(self.abundance_df)] = 0
+        df[pd.isna(df)] = 0
+        print('\ndf creation complete\n')
         return df
 
     def do_analysis(self):
         if self.dist_method == 'unifrac':
             self._do_unifrac_analysis()
         else:
-            raise NotImplementedError
+            self._do_braycurtis_analysis()
 
     # BRAYCURTIS METHODS
     def _do_braycurtis_analysis(self):
@@ -279,6 +299,9 @@ class IndiDistanceAnalysis:
 
     # UNIFRAC METHODS
     def _do_unifrac_analysis(self):
+        if os.path.isfile(self.pcoa_out_path):
+            print(f'pcoa output file {self.pcoa_out_path} already exists. Skipping calculation.')
+            return
         self._create_tree()
         self._compute_weighted_unifrac()
         self._write_out_unifrac_dist_file()
@@ -328,15 +351,28 @@ class IndiDistanceAnalysis:
             sequential_fasta = self._convert_interleaved_to_sequencial_fasta(aligned_fasta)
             
             # Write out the sequential aligned fasta to the same aligned fasta path
-            with open(self.unaligned_fasta_path, 'w') as f:
+            with open(self.aligned_fasta_path, 'w') as f:
                 for line in sequential_fasta:
                     f.write(f'{line}\n')
 
     def _make_and_root_tree(self):
-            # make the tree
-            print('Testing models and making phylogenetic tree')
-            print('This could take some time...')
-            # if not os.path.exists(self.tree_out_path_unrooted_cropped):
+        # make the tree
+        print('Testing models and making phylogenetic tree')
+        print('This could take some time...')
+        # making the tree is very computationally expensive.
+        # To see if we have a computed a tree of the aligned fasta in question,
+        # we will name the output tree the md5sum of the aligned fasta file
+        # This way we can check to see if there is already a tree that we can use
+        # by looking for a file called <md5sum_of_fasta>.treefile
+        # Fist get the md5sum of the aligned fasta
+        # https://stackoverflow.com/questions/7829499/using-hashlib-to-compute-md5-digest-of-a-file-in-python-3
+        hash_of_aligned_fasta = self._md5sum(self.aligned_fasta_path)
+        if os.path.isfile(os.path.join(self.temp_dir, f'{hash_of_aligned_fasta}.treefile')):
+            # Then we have already computed the tree and we can use this tree
+            self.tree_path = os.path.join(self.temp_dir, f'{hash_of_aligned_fasta}.treefile')
+            self.rooted_tree = TreeNode.read(self.tree_path)
+        else:
+            # Then we need to do the tree from scratch
             subprocess.run(
                 ['iqtree', '-nt', 'AUTO', '-s', f'{self.aligned_fasta_path}', '-redo', '-mredo'])
             print('Tree creation complete')
@@ -344,6 +380,17 @@ class IndiDistanceAnalysis:
             tree = TreeNode.read(self.tree_path)
             self.rooted_tree = tree.root_at_midpoint()
             self.rooted_tree.write(self.tree_path)
+            # And then rename the tree so that it is the md5sum of the aligned fasta
+            os.rename(self.tree_path, os.path.join(self.temp_dir, f'{hash_of_aligned_fasta}.treefile'))
+            self.tree_path = os.path.join(self.temp_dir, f'{hash_of_aligned_fasta}.treefile')
+
+    @staticmethod
+    def _md5sum(filename):
+        with open(filename, mode='rb') as f:
+            d = hashlib.md5()
+            for buf in iter(partial(f.read, 128), b''):
+                d.update(buf)
+        return d.hexdigest()
 
     def _compute_weighted_unifrac(self):
         print('Performing unifrac calculations')
@@ -357,9 +404,10 @@ class IndiDistanceAnalysis:
         wu_df.to_csv(path_or_buf=self.dist_out_path, index=True, header=False)
         
     def _make_pcoa_df_unifrac(self):
-        self.pcoa_df = self._do_spp_pcoa_unifrac(self.wu)
+        self.pcoa_df = self._do_pcoa_unifrac(self.wu)
+        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True)
 
-    def _do_spp_pcoa_unifrac(self, wu):
+    def _do_pcoa_unifrac(self, wu):
         # compute the pcoa
         pcoa_output = pcoa(wu.data)
         self._rescale_pcoa(pcoa_output)
@@ -433,4 +481,7 @@ class IndiDistanceAnalysis:
                 temp_seq_string_list.append(fasta_line)
         new_fasta.append(''.join(temp_seq_string_list))
         return new_fasta
-        
+
+if __name__ == "__main__":
+    dist = EighteenSDistance()
+    dist.make_and_plot_dist_and_pcoa(resolution_type='host_only')

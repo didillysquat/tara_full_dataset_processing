@@ -104,8 +104,6 @@ class SeqConsolidator:
             # In the process of doing this, pickle out the all seq abunance dict for
             # the sample
             self.consolidated_host_seqs_rel_abundance_dict = self._make_host_seqs_dict()
-            if 'GTCGCTACTACCGATTGAATGGTTTAGTGAGGCCTCCTGACTGGCGCCGACACTCTGTCTCGTGCAGAGAGTGGGAGGCCGGGAAGTTGTTCAAACTTGATCATTTAGAGGAAGTAAAAGTCGTAACAAGGTTTC' in self.consolidated_host_seqs_rel_abundance_dict:
-                foo = 'bar'
             # Then create the consolidation path and
             # Consolidate the sequence insitu in the self.host_seqs_dict
             # Also produce a dict that maps blasted_seq to representative consolidated sequence
