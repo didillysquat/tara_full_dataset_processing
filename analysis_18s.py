@@ -904,7 +904,6 @@ class StackedBarIndiPlot(EighteenSBase):
             if annotation[2] in ['Scleractinia', 'Anthoathecata']:
                 # Then this is a coral seq and we should add the count to either one of the target genera
                 # or to an other coral count
-                # TODO this is where we can change our logic to according to what type of plot we are doing
                 coral_genus = coral_annotation_dict[blasted_seq]
                 if coral_genus == 'Porites':
                     key = 'Porites'

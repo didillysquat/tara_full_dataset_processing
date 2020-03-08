@@ -274,7 +274,7 @@ class IndividualTaxAnnotationQC:
             """For each of the 10 results, check to see which genus it was matched to and 
             count to see which genus was most commonly matched to
 
-            TODO log the order, family and genus so that we can output this info inthe
+            log the order, family and genus so that we can output this info inthe
             annotation tables
             """
             for comp_list in self.super_results_list:
@@ -414,22 +414,3 @@ class IndividualMothurQC:
 
 if __name__ == "__main__":
     esa = EighteenSProcessing()
-
-
-    def _compute_braycurtis_distance_dict(self):
-        # Create a dictionary that will hold the distance between the two samples
-        spp_distance_dict = {}
-        # For pairwise comparison of each of these sequences
-        for smp_one, smp_two in itertools.combinations(self.samples, 2):
-            print('Calculating distance for {}_{}'.format(smp_one, smp_two))
-            # df containing only the sequences found in either smp_one or smp_two
-            sub_df = self.abundance_df.loc[[smp_one, smp_two]]
-            sub_df = sub_df.loc[:, (sub_df != 0).any(axis=0)]
-
-            # Do the Bray Curtis.
-            distance = braycurtis(sub_df.loc[smp_one].values.tolist(), sub_df.loc[smp_two].values.tolist())
-
-            # Add the distance to the dictionary
-            spp_distance_dict[frozenset([smp_one, smp_two])] = distance
-
-        return spp_distance_dict
