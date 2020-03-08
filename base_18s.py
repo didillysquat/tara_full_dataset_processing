@@ -9,6 +9,8 @@ class EighteenSBase:
         self.seq_dir = os.path.join(self.root_dir, 'seq_files')
         self.output_dir = os.path.join(self.root_dir, 'output')
         os.makedirs(self.output_dir, exist_ok=True)
+        self.fig_output_dir = os.path.join(self.root_dir, 'figures')
+        os.makedirs(self.fig_output_dir, exist_ok=True)
         # The directory where the finalised post qc and post taxa screening files will be written
         self.qc_dir = os.path.join(self.root_dir, 'seq_qc')
         os.makedirs(self.qc_dir, exist_ok=True)

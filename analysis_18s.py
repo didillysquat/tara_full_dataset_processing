@@ -22,7 +22,6 @@ becauase the only contaminating sequnces should be from the other corals that we
 i.e. the Millepora, Pocillopora or porites and these should be really quite distinct from each
 other that the differences should be obvious. 
 """
-from processing_18s import MakeInfoDF
 import os
 import sys
 import pandas as pd
@@ -52,7 +51,6 @@ class EighteenSAnalysis(EighteenSBase):
         # This will hold the additional variables used only in this analysis class
         self.island_site_dict = self._determine_sites_and_island()
         self.islands = sorted(list(self.island_site_dict.keys()))
-        self.fig_output_dir = os.path.join(self.root_dir, 'figures')
         self.host_species = ["Porites", "Millepora", "Pocillopora"]
 
         # Do seq consolidation. This will make and pickle out various abundance
@@ -69,11 +67,12 @@ class EighteenSAnalysis(EighteenSBase):
             island_site_dict[island].add(site)
         return island_site_dict
 
-    def do_stacked_bar_plots(self, plot_type):
+    def do_stacked_bar_plots(self, plot_type, in_sample_cutoff=None):
         sbp = StackedBarPlotter(
             plot_type=plot_type, islands=self.islands,
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
-            fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df, cache_dir=self.cache_dir)
+            fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df, cache_dir=self.cache_dir,
+            in_sample_cutoff=in_sample_cutoff)
         sbp.plot()
 
 
@@ -561,7 +560,9 @@ class StackedBarPlotter:
     that will be arranged in a large 18 x 18 matrice of the islands sites and coral species.
     We will use this plot to get an overview of the sequencing results.
     """
-    def __init__(self, plot_type, islands, island_site_dict, host_species, fig_output_dir, qc_dir, info_df, cache_dir):
+    def __init__(
+            self, plot_type, islands, island_site_dict, host_species,
+            fig_output_dir, qc_dir, info_df, cache_dir, in_sample_cutoff):
         # We will use this plot type variable to change between the different types of plots being produced
         # We will start with 'all_taxa' that can be all of the taxa in a single plot
         # We will now do 'all_coral_genus'. This will be a plot of only the coral sequences and to a genus
@@ -581,16 +582,12 @@ class StackedBarPlotter:
         self.island_site_dict = island_site_dict
         self.host_species = host_species
         self.fig_output_dir = fig_output_dir
+        self.in_sample_cutoff = in_sample_cutoff
         self.plotting_categories, self.color_dict = self._init_color_dict()
         if self.plot_type in ['all_coral_sequence','minor_coral_sequence']:
             self.ordered_seq_name_list = self._get_ordered_seq_name_list()
         # Setup the plot
         self.fig = plt.figure(figsize=(14, 10))
-        # TODO This format does not allow us enough flexibility, for example when there are more than 3 sites.
-        # To acheive the required flexibility we will use a nested gridspec
-        # self.gs = self.fig.add_gridspec(24, 18, figure=self.fig,
-        #                                 height_ratios=[0.6 if (i % 4 == 0) else 1 for i in range(24)],
-        #                                 width_ratios=[1 for _ in range(18)])
         
         self.gs = gridspec.GridSpec(7, 6, figure=self.fig, height_ratios=([0.2, 1, 1, 1, 1, 1, 1]))
         self._plot_species_headers()
@@ -603,7 +600,6 @@ class StackedBarPlotter:
                 ax = self.fig.add_subplot(sub_gs[j])
                 ax.text(x=0.5, y=0.5, s=lab, ha='center', va='center')
                 self._remove_axes_but_allow_labels(ax)
-
 
     def _get_ordered_seq_name_list(self):
         coral_seq_abund_dict = compress_pickle.load(os.path.join(self.cache_dir, 'final_consolidated_host_seqs_rel_abundance_dict.p.bz'))
@@ -650,7 +646,7 @@ class StackedBarPlotter:
                     ax = self.fig.add_subplot(sub_gs[ax_row_index, ax_col_index])
                     # Do the plotting for a given island, site, species set of samples
                     sbip = StackedBarIndiPlot(parent=self, ax=ax, island=island, 
-                    site=site, species=species)
+                    site=site, species=species, in_sample_cutoff=self.in_sample_cutoff)
                     if sbip.samples:
                         sbip.do_plotting()
                     else:
@@ -659,10 +655,16 @@ class StackedBarPlotter:
         
 
         self.fig.suptitle(f'18s {self.plot_type}', fontsize=16)
-        svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
+        if self.in_sample_cutoff:
+            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.svg')
+        else:
+            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
         print(f'\nWriting .svg to {svg_path}')
         plt.savefig(svg_path)
-        png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
+        if self.in_sample_cutoff:
+            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.png')
+        else:
+            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
         print(f'Writing .png to {png_path}')
         plt.savefig(png_path, dpi=1200)
 
@@ -729,14 +731,19 @@ class StackedBarPlotter:
         ax.set_xticks([])
 
 
-class StackedBarIndiPlot:
-    def __init__(self, parent, ax, island, site, species):
+class StackedBarIndiPlot(EighteenSBase):
+    def __init__(self, parent, ax, island, site, species, in_sample_cutoff):
+        super().__init__()
         self.parent = parent
         self.ax = ax
         self.island = island
         self.site = site
         self.species = species
-        self.samples = self._get_sample_name_list()
+        self.in_sample_cutoff = in_sample_cutoff
+        # As well as the sample names, get the sample ids (i.e. C001).
+        # We will plot these very small underneath the plots so that
+        # we can see exactly which individual we are working with
+        self.samples, self.sample_ids = self._get_sample_name_list()
         self.patches_list = []
         self.ind = 0
         self.color_list = []
@@ -759,17 +766,28 @@ class StackedBarIndiPlot:
             raise NotImplementedError
         
     def _get_sample_name_list(self):
-        """TODO because we still have the taxa annotation running
-        here, we will screen the samples to be plotted to only plot those that
-        have already had the annotation analysis completed."""
         init_sample_list = self.parent.info_df[
             (self.parent.info_df['island'] == self.island) &
             (self.parent.info_df['site'] == self.site) &
             (self.parent.info_df['species'] == self.species)
         ].index.values.tolist()
 
-        # Filter out those samples that do not have the annotation dicts already created
-        return [sample_name for sample_name in init_sample_list if self._annotation_dicts_present(sample_name)]
+
+        id_list = []
+        for sample_name in init_sample_list:
+            if sample_name[-2] == '_':
+                # then this is a techrep
+                sample_base = '_'.join(sample_name.split('_')[:-1])
+                sample_base_id = self.sample_provenance_df.at[sample_base, 'C###, F###, MA##, SG##']
+                id_list.append(self._make_numeric(sample_base_id + '_' + sample_name.split('_')[-1]))
+            else:
+                id_list.append(self._make_numeric(self.sample_provenance_df.at[sample_name, 'C###, F###, MA##, SG##']))
+
+        return init_sample_list, sorted(id_list)
+
+    def _make_numeric(self, id):
+        # remove the CO_0 part from the name
+        return id.replace('C0', '')
 
     def _annotation_dicts_present(self, sample_name):
         sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
@@ -778,7 +796,27 @@ class StackedBarIndiPlot:
                 return True
         return False
 
+    def _get_seq_to_total_abund_dict(self):
+        if os.path.isfile(os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz')):
+            seq_to_total_abund_dict = compress_pickle.load(os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz'))
+        else:
+            seq_to_total_abund_dict = defaultdict(int)
+            for sample_name in self.info_df.index:
+                sample_qc_dir = os.path.join(self.qc_dir, sample_name)
+                consolidated_host_seqs_abund_dict = compress_pickle.load(
+                    os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+                for seq_name in consolidated_host_seqs_abund_dict.keys():
+                    seq_to_total_abund_dict[seq_name] += 1
+            compress_pickle.dump(seq_to_total_abund_dict, os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz'))
+        return seq_to_total_abund_dict
+
     def _make_abundance_dicts(self):
+        # If we are using an in_sample_cutoff (minimum number of samples a sequence must be found in)
+        # load up the master abundance dictionary and use this to screen the sample_consolidated_abund_dict
+        if self.in_sample_cutoff:
+            seq_to_total_abund_dict = self._get_seq_to_total_abund_dict()
+            threshold_set = {k for k, v in seq_to_total_abund_dict.items() if v > self.in_sample_cutoff}
+
         df_dict = {}
         for sample_name in self.samples:
             sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
@@ -789,6 +827,9 @@ class StackedBarIndiPlot:
             elif self.parent.plot_type == 'minor_coral_sequence':
                 # Remove the most abundant sequence from the dict
                 del sample_consolidated_abund_dict[max(sample_consolidated_abund_dict, key=sample_consolidated_abund_dict.get)]
+                if self.in_sample_cutoff:
+                    sample_consolidated_abund_dict = {
+                        k: v for k, v in sample_consolidated_abund_dict.items() if k in threshold_set}
                 tot = sum(sample_consolidated_abund_dict.values())
                 sample_consolidated_abund_dict = {k: v/tot for k, v in sample_consolidated_abund_dict.items()}
                 df_dict[sample_name] = sample_consolidated_abund_dict
@@ -937,17 +978,27 @@ class StackedBarIndiPlot:
         # make it so that the x axes is constant length
         self.ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
         self.ax.set_ylim(0,1)
-        self._remove_axes_but_allow_labels()
+        self._remove_axes_but_allow_labels(x_labels=self.sample_ids)
+        self.ax.set_ylabel(self.site, fontsize=5, labelpad=0)
 
-    def _remove_axes_but_allow_labels(self, ax=None):
+    def _remove_axes_but_allow_labels(self, ax=None, x_labels=None):
         if ax is None:
             self.ax.set_frame_on(False)
             self.ax.set_yticks([])
-            self.ax.set_xticks([])
+            if x_labels:
+                self.ax.set_xticks([])
+                self.ax.set_xticks([_-0.25 for _ in range(len(self.sample_ids))])
+                self.ax.set_xticklabels(self.sample_ids, fontsize=2, rotation=-90)
+                self.ax.xaxis.set_tick_params(which='major',  length=0, pad=0)
+            else:
+                self.ax.set_xticks([])
         else:
             ax.set_frame_on(False)
             ax.set_yticks([])
-            ax.set_xticks([])
+            if x_labels:
+                ax.set_xticks([x_labels])
+            else:
+                ax.set_xticks([])
 
 
 if __name__ == "__main__":
@@ -956,6 +1007,15 @@ if __name__ == "__main__":
     # all_coral_genus
     # all_coral_sequences
     # minor_coral_sequence
-    for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
-        EighteenSAnalysis().do_stacked_bar_plots(plot_type)
+    # You can also use the in_sample_cutoff argument to apply a cutoff that will be used when plotting
+    # It is the minimum number of samples a given sample must be found in, else it will not be used.
+    # This cutoff appears to have a big effect on the unifrac method in particular.
+    for cutoff in [150, 200, 250, 500, 1000 ]:
+        EighteenSAnalysis().do_stacked_bar_plots(plot_type='minor_coral_sequence', in_sample_cutoff=cutoff)
+    # for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
+    #     if plot_type == 'minor_coral_sequence':
+    #         for cutoff in [5,25,50,100]:
+    #             EighteenSAnalysis().do_stacked_bar_plots(plot_type=plot_type, in_sample_cutoff=cutoff)
+    #     else:
+    #         EighteenSAnalysis().do_stacked_bar_plots(plot_type)
     # EighteenSAnalysis().do_stacked_bar_plots('all_taxa')
