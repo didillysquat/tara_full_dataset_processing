@@ -25,7 +25,7 @@ other that the differences should be obvious.
 import os
 import sys
 import pandas as pd
-from collections import defaultdict
+from collections import defaultdict, Counter
 from multiprocessing import Pool
 import subprocess
 import compress_pickle
@@ -67,12 +67,12 @@ class EighteenSAnalysis(EighteenSBase):
             island_site_dict[island].add(site)
         return island_site_dict
 
-    def do_stacked_bar_plots(self, plot_type, in_sample_cutoff=None):
+    def do_stacked_bar_plots(self, plot_type, in_sample_cutoff=None, norm_abund=None, norm_method=None):
         sbp = StackedBarPlotter(
             plot_type=plot_type, islands=self.islands,
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
             fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, info_df=self.info_df, cache_dir=self.cache_dir,
-            in_sample_cutoff=in_sample_cutoff)
+            in_sample_cutoff=in_sample_cutoff, norm_abund=norm_abund, norm_method=norm_method)
         sbp.plot()
 
 
@@ -562,7 +562,7 @@ class StackedBarPlotter:
     """
     def __init__(
             self, plot_type, islands, island_site_dict, host_species,
-            fig_output_dir, qc_dir, info_df, cache_dir, in_sample_cutoff):
+            fig_output_dir, qc_dir, info_df, cache_dir, in_sample_cutoff, norm_abund, norm_method):
         # We will use this plot type variable to change between the different types of plots being produced
         # We will start with 'all_taxa' that can be all of the taxa in a single plot
         # We will now do 'all_coral_genus'. This will be a plot of only the coral sequences and to a genus
@@ -583,6 +583,8 @@ class StackedBarPlotter:
         self.host_species = host_species
         self.fig_output_dir = fig_output_dir
         self.in_sample_cutoff = in_sample_cutoff
+        self.norm_abund = norm_abund
+        self.norm_method = norm_method
         self.plotting_categories, self.color_dict = self._init_color_dict()
         if self.plot_type in ['all_coral_sequence','minor_coral_sequence']:
             self.ordered_seq_name_list = self._get_ordered_seq_name_list()
@@ -646,25 +648,39 @@ class StackedBarPlotter:
                     ax = self.fig.add_subplot(sub_gs[ax_row_index, ax_col_index])
                     # Do the plotting for a given island, site, species set of samples
                     sbip = StackedBarIndiPlot(parent=self, ax=ax, island=island, 
-                    site=site, species=species, in_sample_cutoff=self.in_sample_cutoff)
+                    site=site, species=species)
                     if sbip.samples:
                         sbip.do_plotting()
                     else:
                         self._remove_axes_but_allow_labels(ax)
 
-        
-
         self.fig.suptitle(f'18s {self.plot_type}', fontsize=16)
-        if self.in_sample_cutoff:
-            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.svg')
+        if self.plot_type == 'minor_coral_sequence':
+            if self.in_sample_cutoff and self.norm_abund:
+                svg_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}.svg')
+                png_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}.png')
+            elif self.in_sample_cutoff:
+                svg_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.svg')
+                png_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.png')
+            elif self.norm_abund:
+                svg_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}.svg')
+                png_path = os.path.join(self.fig_output_dir,
+                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}.png')
+            else:
+                # if no normalisation and no sample cutoff used
+                svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
+                png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
         else:
             svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
+            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
+
         print(f'\nWriting .svg to {svg_path}')
         plt.savefig(svg_path)
-        if self.in_sample_cutoff:
-            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.png')
-        else:
-            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
         print(f'Writing .png to {png_path}')
         plt.savefig(png_path, dpi=1200)
 
@@ -732,14 +748,13 @@ class StackedBarPlotter:
 
 
 class StackedBarIndiPlot(EighteenSBase):
-    def __init__(self, parent, ax, island, site, species, in_sample_cutoff):
+    def __init__(self, parent, ax, island, site, species):
         super().__init__()
         self.parent = parent
         self.ax = ax
         self.island = island
         self.site = site
         self.species = species
-        self.in_sample_cutoff = in_sample_cutoff
         # As well as the sample names, get the sample ids (i.e. C001).
         # We will plot these very small underneath the plots so that
         # we can see exactly which individual we are working with
@@ -783,7 +798,11 @@ class StackedBarIndiPlot(EighteenSBase):
             else:
                 id_list.append(self._make_numeric(self.sample_provenance_df.at[sample_name, 'C###, F###, MA##, SG##']))
 
-        return init_sample_list, sorted(id_list)
+        # Make a dict of sample_name to id and then use this to return a sorted order of the sample_names
+        # according to the sorted ids
+        sample_uid_to_name_dict = {uid: sample_name for sample_name, uid in zip(init_sample_list, id_list)}
+        sorted_sample_names = [sample_uid_to_name_dict[uid] for uid in sorted(id_list)]
+        return sorted_sample_names, sorted(id_list)
 
     def _make_numeric(self, id):
         # remove the CO_0 part from the name
@@ -813,9 +832,9 @@ class StackedBarIndiPlot(EighteenSBase):
     def _make_abundance_dicts(self):
         # If we are using an in_sample_cutoff (minimum number of samples a sequence must be found in)
         # load up the master abundance dictionary and use this to screen the sample_consolidated_abund_dict
-        if self.in_sample_cutoff:
+        if self.parent.in_sample_cutoff:
             seq_to_total_abund_dict = self._get_seq_to_total_abund_dict()
-            threshold_set = {k for k, v in seq_to_total_abund_dict.items() if v > self.in_sample_cutoff}
+            threshold_set = {k for k, v in seq_to_total_abund_dict.items() if v > self.parent.in_sample_cutoff}
 
         df_dict = {}
         for sample_name in self.samples:
@@ -827,7 +846,10 @@ class StackedBarIndiPlot(EighteenSBase):
             elif self.parent.plot_type == 'minor_coral_sequence':
                 # Remove the most abundant sequence from the dict
                 del sample_consolidated_abund_dict[max(sample_consolidated_abund_dict, key=sample_consolidated_abund_dict.get)]
-                if self.in_sample_cutoff:
+                # Now do normalisation if requested
+                if self.parent.norm_method:
+                    sample_consolidated_abund_dict = self._normalise_dict_abund(sample_consolidated_abund_dict, self.parent.norm_method)
+                if self.parent.in_sample_cutoff:
                     sample_consolidated_abund_dict = {
                         k: v for k, v in sample_consolidated_abund_dict.items() if k in threshold_set}
                 tot = sum(sample_consolidated_abund_dict.values())
@@ -836,6 +858,30 @@ class StackedBarIndiPlot(EighteenSBase):
             else:
                 raise NotImplementedError
         return df_dict
+
+    def _normalise_dict_abund(self, dict_to_norm, method):
+        # First normalise the dict so that it adds up to 1
+        tot = sum(dict_to_norm.values())
+        dict_to_norm = {k: v/tot for k, v in dict_to_norm.items()}
+
+        if method == 'relative':
+            # If relative then we simply want to multiply the relative abunds by the norm_abund and take the int
+            return {k: int(v*self.parent.norm_abund) for k, v in dict_to_norm.items() if int(v*self.parent.norm_abund) > 0}
+
+        elif method == 'subsample':
+            # If subsample, we will produce a list using np.random.choice
+            # https://docs.scipy.org/doc/numpy-1.16.0/reference/generated/numpy.random.choice.html
+            # We will then convert this to a dict using counter
+            # This dict will have absolute abundances. These will be converted to relaive abundances
+            # outside of this script.
+            seqs, probs = zip(*dict_to_norm.items())
+            seqs_list = np.random.choice(seqs, self.parent.norm_abund, p=probs)
+            return dict(Counter(seqs_list))
+
+        elif method == 'num_seqs':
+            # If num seqs then we want to only keep the nth most abundant sequence
+            sorted_dict_keys = sorted(dict_to_norm, key=dict_to_norm.get, reverse=True)[:self.parent.norm_abund]
+            return {k: dict_to_norm[k] for k in sorted_dict_keys}
 
     def _make_abundance_df(self):
         # Dict that we will populate and then use to make the abundance_df
@@ -1009,12 +1055,30 @@ if __name__ == "__main__":
     # You can also use the in_sample_cutoff argument to apply a cutoff that will be used when plotting
     # It is the minimum number of samples a given sample must be found in, else it will not be used.
     # This cutoff appears to have a big effect on the unifrac method in particular.
-    for cutoff in [150, 200, 250, 500, 1000 ]:
-        EighteenSAnalysis().do_stacked_bar_plots(plot_type='minor_coral_sequence', in_sample_cutoff=cutoff)
-    # for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
-    #     if plot_type == 'minor_coral_sequence':
-    #         for cutoff in [5,25,50,100]:
-    #             EighteenSAnalysis().do_stacked_bar_plots(plot_type=plot_type, in_sample_cutoff=cutoff)
-    #     else:
-    #         EighteenSAnalysis().do_stacked_bar_plots(plot_type)
-    # EighteenSAnalysis().do_stacked_bar_plots('all_taxa')
+    # norm_abund is the value that sequences should be normalised to
+    # norm_method is the method for normilisation.
+    # norm_method can be 'hard', 'subsample' or 'num_seqs'.
+    # Normalisation will only be applied when plotting minor_coral_sequences
+    # The Normalistaion will be applied AFTER the most abundant sequence has been removed.
+    # A hard normalisation will use the relative abundances of the sequences and do a pick without replacement
+    # A rel normalisation will multiply the normalisation abund by the relative abundance of each sequences and take
+    # an int() function of this result.
+    # The num_seqs normalisation will only use the ith most abundant sequences where the ith degree is defined by
+    # normalisation_abund
+
+    # Do all the plots
+    # NB the relative
+    for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
+        if plot_type == 'minor_coral_sequence':
+            for cutoff in [300, 500, 700, 1000]:
+                EighteenSAnalysis().do_stacked_bar_plots(
+                    plot_type=plot_type, in_sample_cutoff=cutoff,
+                    norm_abund=None, norm_method=None)
+            for norm_abund in [1, 5, 10, 20, 25, 50, 75, 100]:
+                EighteenSAnalysis().do_stacked_bar_plots(
+                    plot_type=plot_type, in_sample_cutoff=None,
+                    norm_abund=norm_abund, norm_method='num_seqs')
+        else:
+            EighteenSAnalysis().do_stacked_bar_plots(
+                plot_type=plot_type, in_sample_cutoff=None,
+                norm_abund=None, norm_method=None)
