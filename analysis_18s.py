@@ -638,6 +638,8 @@ class StackedBarPlotter:
             title_ax = self.fig.add_subplot(sub_gs[0, :])
             self._do_island_title_plot(island=island, ax=title_ax)
             for site in site_list:
+                if island == 'I12':
+                    foo = 'bar'
                 for species in self.host_species:
                     # The last part to the row index is to incorporate the plot that we will do the naming in.
                     # The row will be the site
