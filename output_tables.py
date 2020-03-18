@@ -96,10 +96,10 @@ class EighteenSOutputTables(EighteenSBase):
         else:
             total_abund_list = []
             print('Adding post_qc_seq_depth to info_df')
-            for sample_name in self.info_df.index:
-                sys.stdout.write(f'\r{sample_name}')
+            for sample_id in self.info_df.index:
+                sys.stdout.write(f'\r{sample_id}')
                 # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_name)
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
                 total_abund_list.append(sum(name_abs_abund_dict.values()))
             print('\nComplete')
             self.info_df['post_qc_seq_depth'] = total_abund_list
@@ -115,12 +115,12 @@ class EighteenSOutputTables(EighteenSBase):
         return primary_seq_dict
 
     def _populate_coral_meta_info_table_dict(self):
-        if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bzX')):
+        if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz')):
             return compress_pickle.load(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
         print('Populating coral meta info table dict')
-        for sample_name in self.info_df.index:
-            tbfour = TableFour(parent=self, sample_name=sample_name)
+        for sample_id in self.info_df.index:
+            tbfour = TableFour(parent=self, sample_id=sample_id)
             tbfour.populate_coral_meta_info_table_dict()
         compress_pickle.dump(self.coral_meta_info_table_dict, os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
@@ -140,7 +140,7 @@ class EighteenSOutputTables(EighteenSBase):
                 'island', 'site', 'individual', 'fastq_gz_pair']
         )
         print('Writing coral meta info output table')
-        df.to_csv(os.path.join(self.output_dir, 'coral_18S_meta_info_table.csv.bz'), index=True, compression='bz2')
+        df.to_csv(os.path.join(self.output_dir, 'coral_18S_meta_info_table.csv.bz'), index=True, compression='bz2', index_label='sample_id')
 
     def make_and_write_raw_abund_output_table(self):
         # Here we have the self.abundance_df_dict populated and we can now create the dataframe from this dict
@@ -151,7 +151,7 @@ class EighteenSOutputTables(EighteenSBase):
             columns=self.master_seq_abund_order_list
         )
         print('Writing raw abundance table')
-        df.to_csv(os.path.join(self.output_dir, 'raw_seq_abund.csv.bz'), index=True, compression='bz2')
+        df.to_csv(os.path.join(self.output_dir, 'raw_seq_abund.csv.bz'), index=True, compression='bz2', index_label='sample_id')
 
     def make_and_write_tax_output_table(self):
         print('Constructing taxonomy table')
@@ -161,7 +161,7 @@ class EighteenSOutputTables(EighteenSBase):
             columns=['order', 'family', 'genus']
         )
         print('Writing taxonomy table')
-        df.to_csv(os.path.join(self.output_dir, 'tax_annotation.csv.bz'), index=True, compression='bz2')
+        df.to_csv(os.path.join(self.output_dir, 'tax_annotation.csv.bz'), index=True, compression='bz2', index_label='sequence')
 
     def make_and_write_consolidated_host_output_table(self):
         print('Constructing consolidated host output table')
@@ -170,7 +170,7 @@ class EighteenSOutputTables(EighteenSBase):
             columns=self.host_only_master_seq_abund_order_list
         )
         print('Writing consolidated host output table')
-        df.to_csv(os.path.join(self.output_dir, 'consolidated_host.csv.bz'), index=True, compression='bz2')
+        df.to_csv(os.path.join(self.output_dir, 'consolidated_host.csv.bz'), index=True, compression='bz2', index_label='sample_id')
 
     def _populate_tax_annotation_df_dict(self):
         # The key should be sequence and the list should be order, family genus, in that order
@@ -185,13 +185,13 @@ class EighteenSOutputTables(EighteenSBase):
             self.abundance_df_dict = compress_pickle.load(os.path.join(self.cache_dir, 'abundance_df_table_output.p.bz'))
         else:
             print('Collecting sequence information (original_seqs): second pass')
-            for sample_name in self.info_df.index:
-                sys.stdout.write(f'\r{sample_name}')
+            for sample_id in self.info_df.index:
+                sys.stdout.write(f'\r{sample_id}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_name)
+                fasta_file = self._read_in_fasta_file(sample_id)
 
                 # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_name)
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
 
                 # create a seq_to_abs_abund dictionary
                 seq_to_abs_abund_dict = {
@@ -201,7 +201,7 @@ class EighteenSOutputTables(EighteenSBase):
                 # In the order of the self.master_seq_abund_order_list
                 # populate the abundances for the given sample
                 temp_abund_list = [seq_to_abs_abund_dict[seq] if seq in seq_to_abs_abund_dict else 0 for seq in self.master_seq_abund_order_list]
-                self.abundance_df_dict[sample_name] = temp_abund_list
+                self.abundance_df_dict[sample_id] = temp_abund_list
             compress_pickle.dump(self.abundance_df_dict, os.path.join(self.cache_dir, 'abundance_df_table_output.p.bz'))
 
     def _populate_host_only_master_seq_info_dict(self):
@@ -221,14 +221,14 @@ class EighteenSOutputTables(EighteenSBase):
             return compress_pickle.load(os.path.join(self.cache_dir, 'host_only_master_seq_info_dict.p.bz'))
         host_only_master_seq_info_dict = defaultdict(float)
         print('Collecting sequence information (consolidated seqs): first pass')
-        for sample_name in self.info_df.index:
-            sys.stdout.write(f'\r{sample_name}')
+        for sample_id in self.info_df.index:
+            sys.stdout.write(f'\r{sample_id}')
 
             # Dict that is sequence key to relative abundance in the sample (of only the given genus sequences)
             # I.e. dict adds up to one. We will use this only for the keys
             # to see which seqs we should be concerned with
             consolidated_host_seqs_abund_dict = compress_pickle.load(
-                os.path.join(self.qc_dir, sample_name, 'consolidated_host_seqs_abund_dict.p.bz'))
+                os.path.join(self.qc_dir, sample_id, 'consolidated_host_seqs_abund_dict.p.bz'))
 
             for seq, rel_abund in consolidated_host_seqs_abund_dict.items():
                 host_only_master_seq_info_dict[seq] += rel_abund
@@ -249,13 +249,13 @@ class EighteenSOutputTables(EighteenSBase):
             print('Collecting sequence information (consolidated seqs): second pass')
             coral_blasted_seq_to_consolidated_seq_dict = compress_pickle.load(
                 os.path.join(self.cache_dir, 'coral_blasted_seq_to_consolidated_seq_dict.p.bz'))
-            for sample_name in self.info_df.index:
-                sys.stdout.write(f'\r{sample_name}')
+            for sample_id in self.info_df.index:
+                sys.stdout.write(f'\r{sample_id}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_name)
+                fasta_file = self._read_in_fasta_file(sample_id)
                 fasta_seq_to_name_dict = {fasta_file[i+1]: fasta_file[i].split('\t')[0][1:] for i in range(0, len(fasta_file), 2)}
                 # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_name)
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
 
                 # the dict we are making for each sample that maps consolidated sequence to the
                 # original sequences it represents
@@ -271,7 +271,7 @@ class EighteenSOutputTables(EighteenSBase):
                         consol_seq_to_orig_seq_dict[seq].append(seq)
 
                 consolidated_host_seqs_abund_dict = compress_pickle.load(
-                    os.path.join(self.qc_dir, sample_name, 'consolidated_host_seqs_abund_dict.p.bz'))
+                    os.path.join(self.qc_dir, sample_id, 'consolidated_host_seqs_abund_dict.p.bz'))
 
                 temp_abund_list = []
                 for master_consolidated_seq in self.host_only_master_seq_abund_order_list:
@@ -279,7 +279,7 @@ class EighteenSOutputTables(EighteenSBase):
                         temp_abund_list.append(sum([name_abs_abund_dict[fasta_seq_to_name_dict[repped_seq]] for repped_seq in consol_seq_to_orig_seq_dict[master_consolidated_seq]]))
                     else:
                         temp_abund_list.append(0)
-                self.consolidated_df_dict[sample_name] = temp_abund_list
+                self.consolidated_df_dict[sample_id] = temp_abund_list
             compress_pickle.dump(self.consolidated_df_dict, os.path.join(self.cache_dir, 'consolidated_df_dict_output_tables.p.bz'))
 
     def _make_host_only_master_seq_abund_order_list(self):
@@ -296,17 +296,17 @@ class EighteenSOutputTables(EighteenSBase):
             self.master_seq_info_dict = compress_pickle.load(os.path.join(self.cache_dir, 'master_seq_info_dict.p.bz'))
         else:
             print('Collecting sequence information (original seqs): first pass')
-            for sample_name in self.info_df.index:
-                sys.stdout.write(f'\r{sample_name}')
+            for sample_id in self.info_df.index:
+                sys.stdout.write(f'\r{sample_id}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_name)
+                fasta_file = self._read_in_fasta_file(sample_id)
 
                 # read in the name file and make an abundance dictionary
-                name_rel_abund_dict = self._make_rel_abund_dict_from_names_path(sample_name)
+                name_rel_abund_dict = self._make_rel_abund_dict_from_names_path(sample_id)
 
                 # read in the sample taxonomy dictionary
                 sample_annotation_dict = compress_pickle.load(
-                    os.path.join(self.qc_dir, sample_name, 'sample_annotation_dict.p.bz'))
+                    os.path.join(self.qc_dir, sample_id, 'sample_annotation_dict.p.bz'))
 
                 # for each sequence in the fasta file
                 # if not already in the dict, init with the rel abund and tax info
@@ -325,28 +325,28 @@ class EighteenSOutputTables(EighteenSBase):
                                                                  'tax_annotation': tax_tup}
             compress_pickle.dump(self.master_seq_info_dict, os.path.join(self.cache_dir, 'master_seq_info_dict.p.bz'))
 
-    def _read_in_fasta_file(self, sample_name):
+    def _read_in_fasta_file(self, sample_id):
         with open(
-                os.path.join(self.qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'),
+                os.path.join(self.qc_dir, sample_id, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'),
                 'r') as f:
             return [line.rstrip() for line in f]
 
-    def _make_abs_abund_dict_from_names_path(self, sample_name):
-        with open(os.path.join(self.qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
+    def _make_abs_abund_dict_from_names_path(self, sample_id):
+        with open(os.path.join(self.qc_dir, sample_id, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
             name_file = [line.rstrip() for line in f]
         return  {line.split('\t')[0]: len(line.split('\t')[1].split(',')) for line in name_file}
 
-    def _make_rel_abund_dict_from_names_path(self, sample_name):
-        abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_name)
+    def _make_rel_abund_dict_from_names_path(self, sample_id):
+        abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
         tot = sum(abs_abund_dict.values())
         return {seq_name: abund/tot for seq_name, abund in abs_abund_dict.items()}
 
 class TableFour():
-    def __init__(self, parent, sample_name):
+    def __init__(self, parent, sample_id):
         self.parent = parent
-        self.sample_name = sample_name
+        self.sample_id = sample_id
         self.status = True
-        self.sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
+        self.sample_qc_dir = os.path.join(self.parent.qc_dir, sample_id)
         self.coral_annotation_dict = compress_pickle.load(os.path.join(self.sample_qc_dir, 'coral_annotation_dict.p.bz'))
         self.consolidated_host_seqs_abund_dict = compress_pickle.load(
             os.path.join(self.sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
@@ -355,7 +355,7 @@ class TableFour():
         self.coral_tax_rel_count_dd = self._make_coral_tax_rel_count_dd()
         self.sorted_coral_tax_dict_keys = sorted(self.coral_tax_rel_count_dd, key=self.coral_tax_rel_count_dd.get, reverse=True)
         self.primary_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
-        self.provenance_annotation = self.parent.info_df.at[sample_name, 'species']
+        self.provenance_annotation = self.parent.info_df.at[sample_id, 'species']
 
         # The remainder of the variables that we need to populate
         self.is_provenance_tax_annotation_correct = None
@@ -406,11 +406,11 @@ class TableFour():
         self._populate_coral_meta_info_table_dict()
 
     def _set_post_qc_seq_depth(self):
-        self.post_qc_seq_depth = self.parent.info_df.at[self.sample_name, 'post_qc_seq_depth']
+        self.post_qc_seq_depth = self.parent.info_df.at[self.sample_id, 'post_qc_seq_depth']
 
     def _set_fastq_gz_name(self):
-        fwd = self.parent.info_df.at[self.sample_name, 'fwd_path'].split('/')[-1]
-        rev = self.parent.info_df.at[self.sample_name, 'rev_path'].split('/')[-1]
+        fwd = self.parent.info_df.at[self.sample_id, 'fwd_path'].split('/')[-1]
+        rev = self.parent.info_df.at[self.sample_id, 'rev_path'].split('/')[-1]
         self.fastq_gz_name = ','.join([fwd, rev])
 
     def _set_is_representative_for_sample(self):
@@ -423,18 +423,18 @@ class TableFour():
         aboslute number of post-QC sequences (i.e. read depth) as the singular representative for the sample. To
         do this we will set this fastq.gz pair to True in the is_representative_of_sample. For the
         other fastq.gz pairs is_representative_of_sample will be False"""
-        if self.sample_name[-2] == '_':
+        if self.sample_id[-2] == '_':
             # Then this is a tech rep sample
             # Get the base name of the sample
-            base_name = '_'.join(self.sample_name.split('_')[:-1])
+            base_name = '_'.join(self.sample_id.split('_')[:-1])
             # Get a list of the sample names that share this base name and make a dict of their abundances
             abs_count_dict = {}
-            for sample_name in self.parent.info_df.index:
-                if base_name in sample_name:
-                    abs_count_dict[sample_name] = self.parent.info_df.at[sample_name, 'post_qc_seq_depth']
+            for sample_id in self.parent.info_df.index:
+                if base_name in sample_id:
+                    abs_count_dict[sample_id] = self.parent.info_df.at[sample_id, 'post_qc_seq_depth']
             # Here we have the abs_count_dict populated
-            # Now sort it by key and check to see if the current sample_name matches the most abundant
-            if self.sample_name == sorted(abs_count_dict, key=abs_count_dict.get, reverse=True)[0]:
+            # Now sort it by key and check to see if the current sample_id matches the most abundant
+            if self.sample_id == sorted(abs_count_dict, key=abs_count_dict.get, reverse=True)[0]:
                 self.is_representative_for_sample = True
             else:
                 self.is_representative_for_sample = False
@@ -442,7 +442,7 @@ class TableFour():
             self.is_representative_for_sample = True
 
     def _populate_coral_meta_info_table_dict(self):
-        self.parent.coral_meta_info_table_dict[self.sample_name] = [
+        self.parent.coral_meta_info_table_dict[self.sample_id] = [
             self.status, self.primary_taxonomic_annotation, self.provenance_annotation,
             self.is_provenance_tax_annotation_correct,
             self.inter_coral_contamination_rel_abund, self.is_inter_coral_contamination,
@@ -455,18 +455,20 @@ class TableFour():
 
     def _set_island_site_individual(self):
         # Add in the island and site information as well because this is useful to have
-        self.island = self.parent.info_df.at[self.sample_name, 'island']
-        self.site = self.parent.info_df.at[self.sample_name, 'site']
+        self.island = self.parent.info_df.at[self.sample_id, 'island']
+        self.site = self.parent.info_df.at[self.sample_id, 'site']
         # Get the individual
-        if self.sample_name[-2] == '_':
+        if self.sample_id[-2] == '_':
             # then this is a techrep
-            sample_base = '_'.join(self.sample_name.split('_')[:-1])
-            sample_base_id = self.parent.sample_provenance_df.at[sample_base, 'C###, F###, MA##, SG##'].replace('C0',
-                                                                                                                '')
-            self.individual = sample_base_id + '_' + self.sample_name.split('_')[-1]
+            sample_base = '_'.join(self.sample_id.split('_')[:-1])
+            sample_base_id = int(
+                self.parent.sample_provenance_df.at[
+                    sample_base, 'COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'].replace('C', ''))
+            self.individual = str(sample_base_id) + '_' + self.sample_id.split('_')[-1]
         else:
-            self.individual = self.parent.sample_provenance_df.at[self.sample_name, 'C###, F###, MA##, SG##'].replace(
-                'C0', '')
+            self.individual = str(int(
+                self.parent.sample_provenance_df.at[
+                    self.sample_id, 'COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'].replace('C', '')))
 
     def _set_intragenus(self):
         # Finally, to check for the putative intragenus contamination
@@ -509,7 +511,7 @@ class TableFour():
     def _set_primary_sequence(self):
         # Check to see if the sample has the primary sequences that the majority of samples of its genus have
         # if the sample annotates as other then make this true
-        self.primary_sequence = self.parent.info_df.at[self.sample_name, 'most_abund_seq_of_coral_genus']
+        self.primary_sequence = self.parent.info_df.at[self.sample_id, 'most_abund_seq_of_coral_genus']
         try:
             if self.primary_sequence == self.parent.primary_seq_dict[self.primary_taxonomic_annotation]:
                 self.is_different_primary_sequence = False
@@ -574,7 +576,7 @@ class TableFour():
         return all_tax_count_dd
 
     def _make_fasta_dict(self):
-        with open(os.path.join(self.parent.qc_dir, self.sample_name,
+        with open(os.path.join(self.parent.qc_dir, self.sample_id,
                                'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'), 'r') as f:
             fasta_file_as_list = [line.rstrip() for line in f]
             fasta_dict = {}
@@ -591,7 +593,11 @@ class TableFour():
         elif self.provenance_annotation == "Heliopora":
             self._pop_for_heliopora_sample()
         else:
-            raise RuntimeError("unexpected provenance_annotation")
+            if self.provenance_annotation.split(' ')[0] in ["Porites", "Millepora", "Pocillopora"]:
+                self.provenance_annotation = self.provenance_annotation.split(' ')[0]
+                self._pop_for_normal_sample()
+            else:
+                raise RuntimeError("unexpected provenance_annotation")
 
 
 

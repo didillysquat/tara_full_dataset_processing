@@ -16,7 +16,7 @@ class EighteenSBase:
         os.makedirs(self.qc_dir, exist_ok=True)
         self.cache_dir = os.path.join(self.root_dir, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
-        self.sample_provenance_path = os.path.join(self.root_dir, "tara_samples_provenance.csv")
+        self.sample_provenance_path = os.path.join(self.root_dir, "sample_provenance_20200201.csv")
         self.sample_provenance_df = self._make_sample_provenance_df()
         # The main info df that we will use
         # Sample name as key, fwd and rev path to seq files, coral species
@@ -32,9 +32,9 @@ class EighteenSBase:
 
     def _make_sample_provenance_df(self):
         # The SAMPLE ID is in the sequencing file name so we will be able to use this to get the latitute
-        df = pd.read_csv(self.sample_provenance_path)
+        df = pd.read_csv(self.sample_provenance_path, skiprows=[1])
         df.set_index(keys='SAMPLE ID', drop=True, inplace=True)
-        df.rename(columns={'EVENT latitude start (North)': 'lat', 'EVENT longitude start (East)': 'lon'}, inplace=True)
+        df.rename(columns={'EVENT LATITUDE START': 'lat', 'EVENT LONGITUDE START': 'lon'}, inplace=True)
         return df
 
 class MakeInfoDF:
@@ -57,18 +57,18 @@ class MakeInfoDF:
 
     def _return_info_df(self):
         info_df_dict = {}
-        for sample_name in self.paired_files_dict.keys():
-            species = self.sample_provenance_df.at[sample_name, 'SAMPLE MATERIAL taxonomy'].split(' ')[1]
-            path_lists = self.paired_files_dict[sample_name]
-            island = self.sample_provenance_df.at[sample_name, 'I##']
-            site = self.sample_provenance_df.at[sample_name, 'S##']
+        for sample_id in self.paired_files_dict.keys():
+            species = self.sample_provenance_df.at[sample_id, 'Sample Material label, organismal system level, taxonomic, nominal']
+            path_lists = self.paired_files_dict[sample_id]
+            island = self.sample_provenance_df.at[sample_id, 'ISLAND#']
+            site = self.sample_provenance_df.at[sample_id, 'SITE#']
             if len(path_lists) > 1:
                 for i in range(len(path_lists)):
                     fwd_path = os.path.join(self.seq_dir, path_lists[i][0])
                     rev_path = os.path.join(self.seq_dir, path_lists[i][1])
-                    info_df_dict[f'{sample_name}_{i}'] = [fwd_path, rev_path, species, island, site]
+                    info_df_dict[f'{sample_id}_{i}'] = [fwd_path, rev_path, species, island, site]
             else:
-                info_df_dict[sample_name] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species, island, site]
+                info_df_dict[sample_id] = [os.path.join(self.seq_dir, path_lists[0][0]), os.path.join(self.seq_dir, path_lists[0][1]), species, island, site]
         return pd.DataFrame.from_dict(info_df_dict, orient='index', columns=['fwd_path', 'rev_path', 'species', 'island', 'site'])
 
     def _find_sample_respective_seq_files(self):
@@ -97,3 +97,6 @@ class MakeInfoDF:
             sample_names.add('_'.join(seq_file.split('_')[:2]))
         sample_names = list(sample_names)
         return sample_names
+
+if __name__ == "__main__":
+    EighteenSBase()

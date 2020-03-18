@@ -77,9 +77,9 @@ class EighteenSDistance(EighteenSBase):
             print('updating info_df')
             most_abund_coral_genus_df_list = []
             most_abund_seq_of_coral_genus_df_list = []
-            for sample_name in self.info_df.index:
-                sys.stdout.write(f'\r{sample_name}')
-                sample_qc_dir = os.path.join(self.qc_dir, sample_name)
+            for sample_id in self.info_df.index:
+                sys.stdout.write(f'\r{sample_id}')
+                sample_qc_dir = os.path.join(self.qc_dir, sample_id)
                 rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
                 coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
                 most_abund_coral_genus_df_list.append(self._identify_most_abund_coral_genus(rel_all_seq_abundance_dict, coral_annotation_dict))
