@@ -57,6 +57,10 @@ class EighteenSOutputTables(EighteenSBase):
     def __init__(self):
         super().__init__()
         self.info_df = compress_pickle.load(os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz'))
+        # For doing the tables we want to add a column that is the total number of sequences post-qc.
+        # We will use this when sample replicates are available to see which replicate we want
+        # to mark as is_replicate.
+        self._add_total_seqs_info_to_info_df()
 
         # Produce the dictionary for making the coral meta info table
         # This will have sample name as key and a list in order of the df columns given in the comments
@@ -86,6 +90,21 @@ class EighteenSOutputTables(EighteenSBase):
         self._populated_consolidated_df_dict()
 
 
+    def _add_total_seqs_info_to_info_df(self):
+        if os.path.isfile(os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz')):
+            self.info_df = compress_pickle.load(os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz'))
+        else:
+            total_abund_list = []
+            print('Adding post_qc_seq_depth to info_df')
+            for sample_name in self.info_df.index:
+                sys.stdout.write(f'\r{sample_name}')
+                # read in the name file and make an abundance dictionary
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_name)
+                total_abund_list.append(sum(name_abs_abund_dict.values()))
+            print('\nComplete')
+            self.info_df['post_qc_seq_depth'] = total_abund_list
+            compress_pickle.dump(self.info_df, os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz'))
+
     def _make_primary_seq_dict(self):
         # Get the primary sequences for each of the genera
         primary_seq_dict = {}  # genus key to primary seq value
@@ -96,29 +115,32 @@ class EighteenSOutputTables(EighteenSBase):
         return primary_seq_dict
 
     def _populate_coral_meta_info_table_dict(self):
-        if os.path.isfile(os.path.join(self.cache_dir, 'coral_meta_info_table_dict.p.bzX')):
-            return compress_pickle.load(os.path.join(self.cache_dir, 'coral_meta_info_table_dict.p.bz'))
+        if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bzX')):
+            return compress_pickle.load(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
         print('Populating coral meta info table dict')
         for sample_name in self.info_df.index:
             tbfour = TableFour(parent=self, sample_name=sample_name)
             tbfour.populate_coral_meta_info_table_dict()
-        compress_pickle.dump(self.coral_meta_info_table_dict, os.path.join(self.cache_dir, 'coral_meta_info_table_dict.p.bz'))
+        compress_pickle.dump(self.coral_meta_info_table_dict, os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
     def make_and_write_coral_meta_info_output_table(self):
         print('Constructing coral meta info output table')
         df = pd.DataFrame.from_dict(
             self.coral_meta_info_table_dict,
             orient='index',
-            columns=['status', 'primary_taxonomic_annotation','provenance_annotation','is_provenance_tax_annotation_correct',
-                'is_inter_coral_contamination', 'inter_coral_contamination_rel_abund',
-                'is_different_primary_sequence', 'primary_sequence',
-                'is_low_host_rel_abund', 'host_rel_abund',
-                'is_putative_intra_genus_contamination', 'putative_intra_genus_contamination_ratio',
-                'island', 'site', 'individual']
+            columns=[
+                'status', 'primary_taxonomic_annotation','provenance_taxonomic_annotation',
+                'is_provenance_taxonomic_annotation_correct',
+                'inter_coral_contamination_rel_abund', 'is_inter_coral_contamination',
+                'primary_sequence', 'is_different_primary_sequence',
+                'host_rel_abund', 'is_low_host_rel_abund',
+                'putative_intra_genus_contamination_ratio', 'is_putative_intra_genus_contamination',
+                'is_representative_for_sample', 'post_qc_seq_depth',
+                'island', 'site', 'individual', 'fastq_gz_pair']
         )
         print('Writing coral meta info output table')
-        df.to_csv(os.path.join(self.output_dir, 'coral_meta_info_table.csv.bz'), index=True, compression='bz2')
+        df.to_csv(os.path.join(self.output_dir, 'coral_18S_meta_info_table.csv.bz'), index=True, compression='bz2')
 
     def make_and_write_raw_abund_output_table(self):
         # Here we have the self.abundance_df_dict populated and we can now create the dataframe from this dict
@@ -134,9 +156,9 @@ class EighteenSOutputTables(EighteenSBase):
     def make_and_write_tax_output_table(self):
         print('Constructing taxonomy table')
         df = pd.DataFrame.from_dict(
-            self.abundance_df_dict,
+            self.tax_annotation_df_dict,
             orient='index',
-            columns=self.master_seq_abund_order_list
+            columns=['order', 'family', 'genus']
         )
         print('Writing taxonomy table')
         df.to_csv(os.path.join(self.output_dir, 'tax_annotation.csv.bz'), index=True, compression='bz2')
@@ -323,7 +345,7 @@ class TableFour():
     def __init__(self, parent, sample_name):
         self.parent = parent
         self.sample_name = sample_name
-        self.use = True
+        self.status = True
         self.sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
         self.coral_annotation_dict = compress_pickle.load(os.path.join(self.sample_qc_dir, 'coral_annotation_dict.p.bz'))
         self.consolidated_host_seqs_abund_dict = compress_pickle.load(
@@ -343,6 +365,9 @@ class TableFour():
         self.host_rel_abund = None
         self.putative_intra_genus_contamination_ratio = None
         self.is_putative_intra_genus_contamination = None
+        self.is_representative_for_sample = None
+        self.fastq_gz_name = None
+        self.post_qc_seq_depth = None
 
         # Variables that are only associated with processing a Heliopora samples
         self.sample_annotation_dict = None
@@ -360,7 +385,7 @@ class TableFour():
         self.primary_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
         self._set_is_provenance_tax_annotation_correct()
         if self.primary_taxonomic_annotation not in ["Porites", "Millepora", "Pocillopora"]:
-            self.use = False
+            self.status = False
 
         self._set_inter_coral_contamination()
 
@@ -372,17 +397,60 @@ class TableFour():
 
         self._set_island_site_individual()
 
+        self._set_post_qc_seq_depth()
+
+        self._set_is_representative_for_sample()
+
+        self._set_fastq_gz_name()
+
         self._populate_coral_meta_info_table_dict()
+
+    def _set_post_qc_seq_depth(self):
+        self.post_qc_seq_depth = self.parent.info_df.at[self.sample_name, 'post_qc_seq_depth']
+
+    def _set_fastq_gz_name(self):
+        fwd = self.parent.info_df.at[self.sample_name, 'fwd_path'].split('/')[-1]
+        rev = self.parent.info_df.at[self.sample_name, 'rev_path'].split('/')[-1]
+        self.fastq_gz_name = ','.join([fwd, rev])
+
+    def _set_is_representative_for_sample(self):
+        """Some of the samples contained multiple pairs of fastq.gz files. We have kept these pairs separate.
+        But we want to be able to filter the output count table so that we can only consider one fastq.gz pair
+        per coral sample. To facilitate this we will have a is_representative_of_sample field.
+        This field will be True False.
+        For samples that  contain no tech replicates, the sample will automatically be True. If the sample
+        is a sample that contains sample replicates then we will use the fastq.gz pair that produced the greatest
+        aboslute number of post-QC sequences (i.e. read depth) as the singular representative for the sample. To
+        do this we will set this fastq.gz pair to True in the is_representative_of_sample. For the
+        other fastq.gz pairs is_representative_of_sample will be False"""
+        if self.sample_name[-2] == '_':
+            # Then this is a tech rep sample
+            # Get the base name of the sample
+            base_name = '_'.join(self.sample_name.split('_')[:-1])
+            # Get a list of the sample names that share this base name and make a dict of their abundances
+            abs_count_dict = {}
+            for sample_name in self.parent.info_df.index:
+                if base_name in sample_name:
+                    abs_count_dict[sample_name] = self.parent.info_df.at[sample_name, 'post_qc_seq_depth']
+            # Here we have the abs_count_dict populated
+            # Now sort it by key and check to see if the current sample_name matches the most abundant
+            if self.sample_name == sorted(abs_count_dict, key=abs_count_dict.get, reverse=True)[0]:
+                self.is_representative_for_sample = True
+            else:
+                self.is_representative_for_sample = False
+        else:
+            self.is_representative_for_sample = True
 
     def _populate_coral_meta_info_table_dict(self):
         self.parent.coral_meta_info_table_dict[self.sample_name] = [
-            self.use, self.primary_taxonomic_annotation, self.provenance_annotation,
+            self.status, self.primary_taxonomic_annotation, self.provenance_annotation,
             self.is_provenance_tax_annotation_correct,
-            self.is_inter_coral_contamination, self.inter_coral_contamination_rel_abund,
-            self.is_different_primary_sequence, self.primary_sequence,
-            self.is_low_host_rel_abund, self.host_rel_abund,
-            self.is_putative_intra_genus_contamination, self.putative_intra_genus_contamination_ratio,
-            self.island, self.site, self.individual
+            self.inter_coral_contamination_rel_abund, self.is_inter_coral_contamination,
+            self.primary_sequence, self.is_different_primary_sequence,
+            self.host_rel_abund, self.is_low_host_rel_abund,
+            self.putative_intra_genus_contamination_ratio, self.is_putative_intra_genus_contamination,
+            self.is_representative_for_sample, self.post_qc_seq_depth,
+            self.island, self.site, self.individual, self.fastq_gz_name
         ]
 
     def _set_island_site_individual(self):
@@ -411,7 +479,7 @@ class TableFour():
                 0]
             if self.putative_intra_genus_contamination_ratio > 0.3:
                 self.is_putative_intra_genus_contamination = True
-                self.use = False
+                self.status = False
             else:
                 self.is_putative_intra_genus_contamination = False
         else:
@@ -424,7 +492,7 @@ class TableFour():
         self.host_rel_abund = self.coral_tax_rel_count_dd[self.primary_taxonomic_annotation]
         if self.host_rel_abund < 0.3:
             self.is_low_host_rel_abund = True
-            self.use = False
+            self.status = False
         else:
             self.is_low_host_rel_abund = False
 
@@ -434,7 +502,7 @@ class TableFour():
         self.host_rel_abund = self.all_tax_count_dd[self.primary_taxonomic_annotation]
         if self.host_rel_abund < 0.3:
             self.is_low_host_rel_abund = True
-            self.use = False
+            self.status = False
         else:
             self.is_low_host_rel_abund = False
 
@@ -447,10 +515,10 @@ class TableFour():
                 self.is_different_primary_sequence = False
             else:
                 self.is_different_primary_sequence = True
-                self.use = False
+                self.status = False
         except KeyError:
             # If the primary taxonomic annotation is other
-            self.use = False
+            self.status = False
             self.is_different_primary_sequence = np.nan
 
     def _set_inter_coral_contamination(self):
@@ -460,12 +528,12 @@ class TableFour():
             [self.coral_tax_rel_count_dd[k] for k in self.sorted_coral_tax_dict_keys[1:]])
         if self.inter_coral_contamination_rel_abund > 0.01:
             self.is_inter_coral_contamination = True
-            self.use = False
+            self.status = False
         else:
             self.is_inter_coral_contamination = False
 
     def _pop_for_heliopora_sample(self):
-        self.use = False
+        self.status = False
         self.sample_annotation_dict = compress_pickle.load(
             os.path.join(self.sample_qc_dir, 'sample_annotation_dict.p.bz'))
         self.fasta_dict = self._make_fasta_dict()
@@ -486,6 +554,9 @@ class TableFour():
         self.putative_intra_genus_contamination_ratio = np.nan
         self.is_putative_intra_genus_contamination = np.nan
         self._set_island_site_individual()
+        self._set_post_qc_seq_depth()
+        self._set_is_representative_for_sample()
+        self._set_fastq_gz_name()
         self._populate_coral_meta_info_table_dict()
 
 
@@ -494,6 +565,7 @@ class TableFour():
             self.is_provenance_tax_annotation_correct = True
         else:
             self.is_provenance_tax_annotation_correct = False
+            self.status = False
 
     def _make_all_tax_count_dd(self):
         all_tax_count_dd = defaultdict(float)
@@ -526,6 +598,6 @@ class TableFour():
 if __name__ == "__main__":
     ot = EighteenSOutputTables()
     ot.make_and_write_coral_meta_info_output_table()
-    ot.make_and_write_raw_abund_output_table()
     ot.make_and_write_tax_output_table()
+    ot.make_and_write_raw_abund_output_table()
     ot.make_and_write_consolidated_host_output_table()

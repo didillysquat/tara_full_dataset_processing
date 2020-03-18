@@ -42,10 +42,6 @@ class SequenceQC:
         self.node_dict, self.name_dict = self._generate_taxa_and_name_dicts()
 
     def do_mothur_qc(self):
-        """ 
-        for each of the samples in the info df we will make a directory
-        in the qc_dir. We will produce all of qc files in this dir
-        """
         # For some reason the make.contigs doesn't seem to be using multiple processors and thus
         # this is wasting a lot of time. As such we should try to multiprocess this and use 1
         # process for each. Let's try to implement with Pool
