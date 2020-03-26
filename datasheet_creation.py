@@ -127,10 +127,15 @@ class ITS2Processing:
         # only the list.
         # Create a ReplicationWalker for every worker_base_dir
         rep_walker_list = []
-        for w_dir in worker_base_dirs:
+        for w_dir in worker_base_dirs[:2]:
             rep_walker_list.append(ReplicationWalkerWorker(w_dir))
         with Pool(20) as p:
             self.error_df_list_of_lists = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
+
+        # At this point we will have the info required to make the sp_data sheets and output the
+        # information dataframe
+        # Maybe let's run it using just one thread to start with to do an initial debug.
+        foo = 'bar'
 
     @staticmethod
     def _run_walk_on_rep_walker_item(rep_walker_class_instance):
@@ -151,7 +156,6 @@ class ReplicationWalkerWorker:
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
         self.sample_provenance_df = self._make_sample_provenance_df()
         self.current_remote_dir = self.remote_base_dir
-        self.error_df_lists = []
         self.done_list = set()
         self.done_and_empty_list = set()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
@@ -171,6 +175,21 @@ class ReplicationWalkerWorker:
         # The list that will hold the info for the information df to document which files we used and which we did not
         self.output_information_list = []
         self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
+        # For the seq files that were replicated due to different methodologies being used, i.e. red cases
+        # Julie gave us a list of the files that we should be using (one per barcode id). These files are listed here
+        # (fwd files only).
+        self.fwd_reads_to_keep = [
+            'TARA_CO-0000303_METAB-ITS2_HKNVMBCX2-12BA157-2_R1.fastq.gz',
+            'TARA_CO-0000141_METAB-ITS2_HGY2FBCX2-12BA013-1_R1.fastq.gz',
+            'TARA_CO-0000151_METAB-ITS2_HKNVMBCX2-12BA133-2_R1.fastq.gz',
+            'TARA_CO-0002044_METAB-ITS2_BG8KK-12BA056-1_R1.fastq.gz',
+            'TARA_CO-0004201_METAB-ITS2_BG8KK-12BA013-1_R1.fastq.gz',
+            'TARA_CO-0001661_METAB-ITS2_BG8KK-12BA293-1_R1.fastq.gz',
+            'TARA_IW-0000433_METAB-ITS2_BG8KK-12BA115-1_R1.fastq.gz'
+        ]
+        # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
+        # keep reads for are:
+        self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
 
     def _walk(self):
         # This is the core unit of logic processing. Here we are visiting directories one by one and gathering
@@ -224,7 +243,7 @@ class ReplicationWalkerWorker:
                     if self.walking_complete:
                         break
 
-        return self.error_df_lists
+        return (self.coral_sp_datasheet_df_dict, self.non_coral_sp_datasheet_df_dict, self.output_information_list)
 
     def _document_fastq_files(self):
         # Then we can count how many there are, add current dir to done
@@ -298,12 +317,13 @@ class ReplicationWalkerWorker:
             # https://stackoverflow.com/questions/14270698/get-file-size-using-python-requests-while-only-getting-the-header
             if not os.path.isfile(local_file_path):
                 print(f'downloading {read}')
-                r = self.s.get(os.path.join(self.current_remote_dir, read), stream=True)
-                with open(local_file_path, 'wb') as f:
-                    f.write(r.raw)
+                # r = self.s.get(os.path.join(self.current_remote_dir, read), stream=True)
+                # with open(local_file_path, 'wb') as f:
+                #     f.write(r.raw)
             # Then get the size of the file on disk
-            size = Path(local_file_path).stat().st_size
-            size_dict[read] = size
+            # size = Path(local_file_path).stat().st_size
+            # size_dict[read] = size
+            size_dict[read] = 10
         return size_dict
 
     def _populate_output_information_list(self, barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col):
@@ -348,6 +368,8 @@ class ReplicationWalkerWorker:
                 host_family = 'milleporidae'
                 host_genus = 'millepora'
                 host_species = 'dichotoma'
+            else:
+                raise NotImplementedError
 
             self.coral_sp_datasheet_df_dict[barcode_id] = [fwd_read, rev_read, 'coral', host_phylum, host_class,
                                                            host_order, host_family, host_genus, host_species, latitude,
@@ -445,20 +467,76 @@ class ReplicationWalkerWorker:
 
     def _log_unknown_replication(self, temp_error_list):
         # Then this a unknown_replication
+        # Here we want to do the same as when we were doing _process_seq_replication
+        # however, there may be more than two sets of sequences. We're looking to keep the biggest pair
+        # use the readset as a UID for key to a total size dict
+        size_dict = {}
         for temp_list in temp_error_list:
-            another_temp_list = []
-            for item in temp_list:
-                another_temp_list.append(item)
-            another_temp_list.extend(['unknown_replication', 'yellow', self.current_remote_dir])
-            self.error_df_lists.append(another_temp_list)
+            size_dict[temp_list[1]] = sum(self._get_sizes_trough_head_request(
+                fwd_read=temp_list[2], rev_read=temp_list[3]
+            ).values())
+        # now simply sort to get the largest readset and subit that as keep, submit all others as no keep
+        readset_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+        for i, temp_list in enumerate(temp_error_list):
+            if temp_list[1] == readset_to_keep:
+                # This is the keep
+                self._handle_one_pair_fastq_files(
+                    read_tup=(temp_list[2], temp_list[3]), use=True, is_rep=True,
+                    cat='unknown_replication', col='yellow'
+                )
+            else:
+                # this is a no keep
+                self._handle_one_pair_fastq_files(
+                    read_tup=(temp_list[2], temp_list[3]), use=False, is_rep=True,
+                    cat='unknown_replication', col='yellow'
+                )
 
     def _log_method_replication(self, temp_error_list):
         # then this is a 'method_replication'
-        # TODO We can use the elements in the temp_list to submit each of these
+        # We can use the elements in the temp_list to submit each of these
         # to the single fastq pair handler. But before we do that we need to identify readset (as this is the
         # UID essentially) that corresponds to the largest set of the files.
         # Actually TODO we need to check the do not use lists and check to see if we have identified the correct
         # TWO samples that Julie said we can check for.s
+
+        # First check whether we are dealing with one of the barcodes that we don't have keep information for
+        list_of_barcodes = [_[0] for _ in temp_error_list]
+        if len(set(self.no_keep_info_red_barcodes_list).union(set(list_of_barcodes))) != 1:
+            # Then we are working with one of the barcodes that we don't have keep info for.
+            # We need to caculate the size and keep the biggest. Same as the sediment
+            fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use = self._get_reads_to_keep()
+            self._handle_one_pair_fastq_files(
+                read_tup=(fwd_read_use, rev_read_use), use=True, is_rep=True,
+                cat='method_replication', col='red', size_dict_passed=size_dict_use
+            )
+            self._handle_one_pair_fastq_files(
+                read_tup=(fwd_read_no_use, rev_read_no_use), use=False, is_rep=True,
+                cat='method_replication', col='red', size_dict_passed=size_dict_no_use
+            )
+        else:
+            # Then one of the fwd fastq files should be in the self.keep list
+            fwd_fastq_files = [_[2] for _ in temp_error_list]
+            if len(set(fwd_fastq_files).union(set(self.fwd_reads_to_keep))) != 1:
+                # Then we have a problem
+                raise RuntimeError('something wrong with the red to keep list')
+            else:
+                # Then we work out the index of the temp list to keep and log and no keep the others
+                fwd_fastq_to_keep = list(set(fwd_fastq_files).union(set(self.fwd_reads_to_keep)))[0]
+                for i, temp_list in enumerate(temp_error_list):
+                    if temp_list[2] == fwd_fastq_to_keep:
+                        # process as keep
+                        self._handle_one_pair_fastq_files(
+                            read_tup=(temp_list[2], temp_list[3]), use=True, is_rep=True,
+                            cat='method_replication', col='red'
+                        )
+                    else:
+                        # process as no keep
+                        self._handle_one_pair_fastq_files(
+                            read_tup=(temp_list[2], temp_list[3]), use=False, is_rep=True,
+                            cat='method_replication', col='red'
+                        )
+
+
         for temp_list in temp_error_list:
             another_temp_list = []
             for item in temp_list:
@@ -472,9 +550,19 @@ class ReplicationWalkerWorker:
         # The readset should contain two bits of information
         # in the fastq and it should containing the -1 or -2
         # This is a pain in the arse!
+        fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use = self._get_reads_to_keep()
+        self._handle_one_pair_fastq_files(
+            read_tup=(fwd_read_use, rev_read_use), use=True, is_rep=True,
+            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_use
+        )
+        self._handle_one_pair_fastq_files(
+            read_tup=(fwd_read_no_use, rev_read_no_use), use=False, is_rep=True,
+            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_no_use
+        )
+
+    def _get_reads_to_keep(self):
         if len(self.fastq_gz_list_current) != 4:
             raise NotImplementedError
-
         # Probably easiest here to just get the sizes of the two pairs,
         # Then send the larger of the two pairs into the normal handler
         # with keep as true.
@@ -500,15 +588,7 @@ class ReplicationWalkerWorker:
             rev_read_no_use = [_ for _ in lane_one_reads if 'R2' in _][0]
             size_dict_use = size_dicts[1]
             size_dict_no_use = size_dicts[0]
-        self._handle_one_pair_fastq_files(
-            read_tup=(fwd_read_use, rev_read_use), use=True, is_rep=True,
-            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_use
-        )
-        self._handle_one_pair_fastq_files(
-            read_tup=(fwd_read_no_use, rev_read_no_use), use=False, is_rep=True,
-            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_no_use
-        )
-
+        return fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use
 
     def _make_auth_tup(self):
         auth_path = os.path.join(self.exe_path, 'auth.txt')
@@ -1280,5 +1360,5 @@ def human_readable_size(size, decimal_places=3):
         size /= 1024.0
     return f"{size:.{decimal_places}f}{unit}"
 
-its2processing = ITS2Processing()
-its2processing.seq_and_profile_results_figure(fig_type='genera')
+its2processing = ITS2Processing().start_walking()
+
