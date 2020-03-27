@@ -127,9 +127,9 @@ class ITS2Processing:
         # only the list.
         # Create a ReplicationWalker for every worker_base_dir
         rep_walker_list = []
-        for w_dir in worker_base_dirs[:2]:
+        for w_dir in worker_base_dirs[:5]:
             rep_walker_list.append(ReplicationWalkerWorker(w_dir))
-        with Pool(20) as p:
+        with Pool(5) as p:
             self.error_df_list_of_lists = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
 
         # At this point we will have the info required to make the sp_data sheets and output the
@@ -177,15 +177,17 @@ class ReplicationWalkerWorker:
         self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
         # For the seq files that were replicated due to different methodologies being used, i.e. red cases
         # Julie gave us a list of the files that we should be using (one per barcode id). These files are listed here
-        # (fwd files only).
-        self.fwd_reads_to_keep = [
-            'TARA_CO-0000303_METAB-ITS2_HKNVMBCX2-12BA157-2_R1.fastq.gz',
-            'TARA_CO-0000141_METAB-ITS2_HGY2FBCX2-12BA013-1_R1.fastq.gz',
-            'TARA_CO-0000151_METAB-ITS2_HKNVMBCX2-12BA133-2_R1.fastq.gz',
-            'TARA_CO-0002044_METAB-ITS2_BG8KK-12BA056-1_R1.fastq.gz',
-            'TARA_CO-0004201_METAB-ITS2_BG8KK-12BA013-1_R1.fastq.gz',
-            'TARA_CO-0001661_METAB-ITS2_BG8KK-12BA293-1_R1.fastq.gz',
-            'TARA_IW-0000433_METAB-ITS2_BG8KK-12BA115-1_R1.fastq.gz'
+        # (fwd files only). These are the strings from the readsets that we need to keep. They are not exact
+        # UID of readsets, and there may be serveral sequencing replicates. We will have to search for the biggest to
+        # keep.
+        self.fwd_readset_strings_to_keep = [
+            'HKNVMBCX2.12BA157',
+            'HGY2FBCX2.12BA013',
+            'HKNVMBCX2.12BA133',
+            'BG8KK.12BA056',
+            'BG8KK.12BA013',
+            'BG8KK.12BA293',
+            'BG8KK.12BA115'
         ]
         # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
         # keep reads for are:
@@ -272,12 +274,20 @@ class ReplicationWalkerWorker:
         barcode_id = fwd_read.split('_')[1]
         # There may be more than one set of reads in the readset df for a given barcode id even
         # if there is only one set of fastq in the genoscope site
-        element_one = fwd_read.split('-')[-2]
-        element_two = fwd_read.split('-')[-3].split('_')[-1]
-        readset_str = f'{element_two}.{element_one}'
+        if 'BID' in fwd_read:
+            element_one = fwd_read.split('-')[-3]
+            element_two = fwd_read.split('-')[-4].split('_')[-1]
+            read_int = int(fwd_read.split('_')[-2][-1])
+            bid_element = fwd_read.split('-')[-2]
+            readset_str = f'{read_int}_{element_two}.{element_one}-{bid_element}'
+        else:
+            element_one = fwd_read.split('-')[-2]
+            element_two = fwd_read.split('-')[-3].split('_')[-1]
+            read_int = int(fwd_read.split('_')[-2][-1])
+            readset_str = f'{read_int}_{element_two}.{element_one}'
         # now we need to look for this string in the indices
         # if we find more than one then raise error
-        index_list = [_ for _ in self.readset_df.index if readset_str in _]
+        index_list = [_ for _ in self.readset_df[self.readset_df['barcode_id'] == barcode_id].index if readset_str in _]
         if len(index_list) != 1:
             raise RuntimeError
         else:
@@ -368,6 +378,12 @@ class ReplicationWalkerWorker:
                 host_family = 'milleporidae'
                 host_genus = 'millepora'
                 host_species = 'dichotoma'
+            elif nominal_tax_name == 'Pocillopora eydouxi':
+                host_class = 'anthozoa'
+                host_order = 'scleractinia'
+                host_family = 'pocilloporidae'
+                host_genus = 'pocillopora'
+                host_species = 'eydouxi'
             else:
                 raise NotImplementedError
 
@@ -422,76 +438,65 @@ class ReplicationWalkerWorker:
         # of the PCR or DNA names are different.
         pcr_names_set = set()
         dna_names_set = set()
-        temp_error_list = []
-        for i, base_name in enumerate(base_names):
-            barcode_id = base_name.split('_')[1]
-            if 'BID' in base_name:
-                element_one = base_name.split('-')[-2]
-                element_two = base_name.split('-')[-3].split('_')[-1]
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            barcode_id = fastq_fwd.split('_')[1]
+            if 'BID' in fastq_fwd:
+                element_one = fastq_fwd.split('-')[-3]
+                element_two = fastq_fwd.split('-')[-4].split('_')[-1]
+                read_int = int(fastq_fwd.split('_')[-2][-1])
+                bid_element = fastq_fwd.split('-')[-2]
+                readset_str = f'{read_int}_{element_two}.{element_one}-{bid_element}'
             else:
-                element_one = base_name.split('-')[-1]
-                element_two = base_name.split('-')[-2].split('_')[-1]
-
-            for j in range(10):
-                readset_str = f'{j}_{element_two}.{element_one}'
-                index_list = [_ for _ in self.readset_df[self.readset_df['sample_id'] == barcode_id].index if
-                              readset_str in _]
-                if len(index_list) == 1:
-                    readset = index_list[0]
-                    break
-                if len(index_list) > 1:
-                    bid_name = base_name.split('-')[-1]
-                    new_index_list = [_ for _ in index_list if bid_name in _]
-                    if len(new_index_list) == 1:
-                        readset = new_index_list[0]
-                        break
-                if j == 9:
-                    raise RuntimeError
-
+                element_one = fastq_fwd.split('-')[-2]
+                element_two = fastq_fwd.split('-')[-3].split('_')[-1]
+                read_int = int(fastq_fwd.split('_')[-2][-1])
+                readset_str = f'{read_int}_{element_two}.{element_one}'
+            readset_list = [_ for _ in self.readset_df[self.readset_df['barcode_id'] == barcode_id].index if
+                          readset_str in _]
+            if len(readset_list) == 1:
+                readset = readset_list[0]
+            else:
+                raise RuntimeError
             pcr_sample_name = self.readset_df.at[readset, 'pcr_sample_name']
             dna_sample_name = self.readset_df.at[readset, 'dna_sample_name']
-            pcr_fl_sample_name = self.readset_df.at[readset, 'pcr_fl_sample_name']
+
 
             pcr_names_set.add(pcr_sample_name)
             dna_names_set.add(dna_sample_name)
-            fwd_read = [_ for _ in self.fastq_gz_list_current if (base_name in _) and ('R1' in _)][0]
-            temp_error_list.append(
-                [barcode_id, readset, fwd_read, fwd_read.replace('R1', 'R2'), pcr_sample_name,
-                 pcr_fl_sample_name, dna_sample_name])
 
         # print(fastq_gz_list)
         if (len(pcr_names_set) != len(dna_names_set)) or (len(pcr_names_set) > len(sample_id_set)):
-            self._log_method_replication(temp_error_list)
+            self._log_method_replication()
         else:
-            self._log_unknown_replication(temp_error_list)
+            self._log_unknown_replication()
 
-    def _log_unknown_replication(self, temp_error_list):
+    def _log_unknown_replication(self):
         # Then this a unknown_replication
         # Here we want to do the same as when we were doing _process_seq_replication
         # however, there may be more than two sets of sequences. We're looking to keep the biggest pair
         # use the readset as a UID for key to a total size dict
         size_dict = {}
-        for temp_list in temp_error_list:
-            size_dict[temp_list[1]] = sum(self._get_sizes_trough_head_request(
-                fwd_read=temp_list[2], rev_read=temp_list[3]
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(
+                fwd_read=fastq_fwd, rev_read=fastq_fwd.replace('R1', 'R2')
             ).values())
         # now simply sort to get the largest readset and subit that as keep, submit all others as no keep
-        readset_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
-        for i, temp_list in enumerate(temp_error_list):
-            if temp_list[1] == readset_to_keep:
+        fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            if fastq_fwd == fwd_fastq_to_keep:
                 # This is the keep
                 self._handle_one_pair_fastq_files(
-                    read_tup=(temp_list[2], temp_list[3]), use=True, is_rep=True,
+                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
                     cat='unknown_replication', col='yellow'
                 )
             else:
                 # this is a no keep
                 self._handle_one_pair_fastq_files(
-                    read_tup=(temp_list[2], temp_list[3]), use=False, is_rep=True,
+                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
                     cat='unknown_replication', col='yellow'
                 )
 
-    def _log_method_replication(self, temp_error_list):
+    def _log_method_replication(self):
         # then this is a 'method_replication'
         # We can use the elements in the temp_list to submit each of these
         # to the single fastq pair handler. But before we do that we need to identify readset (as this is the
@@ -500,49 +505,80 @@ class ReplicationWalkerWorker:
         # TWO samples that Julie said we can check for.s
 
         # First check whether we are dealing with one of the barcodes that we don't have keep information for
-        list_of_barcodes = [_[0] for _ in temp_error_list]
-        if len(set(self.no_keep_info_red_barcodes_list).union(set(list_of_barcodes))) != 1:
+        set_of_barcodes = set([_.split('_')[1] for _ in self.fastq_gz_list_current])
+        if not len(set_of_barcodes) == 1:
+            raise RuntimeError
+        if list(set_of_barcodes)[0] in self.no_keep_info_red_barcodes_list:
             # Then we are working with one of the barcodes that we don't have keep info for.
             # We need to caculate the size and keep the biggest. Same as the sediment
-            fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use = self._get_reads_to_keep()
-            self._handle_one_pair_fastq_files(
-                read_tup=(fwd_read_use, rev_read_use), use=True, is_rep=True,
-                cat='method_replication', col='red', size_dict_passed=size_dict_use
-            )
-            self._handle_one_pair_fastq_files(
-                read_tup=(fwd_read_no_use, rev_read_no_use), use=False, is_rep=True,
-                cat='method_replication', col='red', size_dict_passed=size_dict_no_use
-            )
+            # We need to take into account that there may also be seq reps.
+            size_dict = {}
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+                size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).value())
+            # Now we just want to keep the largest fastq_fwd in the size dict.
+            fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+                if fastq_fwd == fwd_fastq_to_keep:
+                    # This is the keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                        cat='method_replication', col='red'
+                    )
+                else:
+                    # this is a no keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                        cat='method_replication', col='red'
+                    )
         else:
-            # Then one of the fwd fastq files should be in the self.keep list
-            fwd_fastq_files = [_[2] for _ in temp_error_list]
-            if len(set(fwd_fastq_files).union(set(self.fwd_reads_to_keep))) != 1:
-                # Then we have a problem
-                raise RuntimeError('something wrong with the red to keep list')
-            else:
-                # Then we work out the index of the temp list to keep and log and no keep the others
-                fwd_fastq_to_keep = list(set(fwd_fastq_files).union(set(self.fwd_reads_to_keep)))[0]
-                for i, temp_list in enumerate(temp_error_list):
-                    if temp_list[2] == fwd_fastq_to_keep:
-                        # process as keep
-                        self._handle_one_pair_fastq_files(
-                            read_tup=(temp_list[2], temp_list[3]), use=True, is_rep=True,
-                            cat='method_replication', col='red'
-                        )
-                    else:
-                        # process as no keep
-                        self._handle_one_pair_fastq_files(
-                            read_tup=(temp_list[2], temp_list[3]), use=False, is_rep=True,
-                            cat='method_replication', col='red'
-                        )
+            # Then one of the fwd fastq files should be in the self.fwd_readset_strings_to_keep list
+            # For each of the read pairs we need to grab the readset strings and see if one of the keeps
+            # is in that list
+            readset_string_list = []
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+                if 'BID' in fastq_fwd:
+                    element_one = fastq_fwd.split('-')[-3]
+                    element_two = fastq_fwd.split('-')[-4].split('_')[-1]
 
+                else:
+                    element_one = fastq_fwd.split('-')[-2]
+                    element_two = fastq_fwd.split('-')[-3].split('_')[-1]
 
-        for temp_list in temp_error_list:
-            another_temp_list = []
-            for item in temp_list:
-                another_temp_list.append(item)
-            another_temp_list.extend(['method_replication', 'red', self.current_remote_dir])
-            self.error_df_lists.append(another_temp_list)
+                readset_str = f'{element_two}.{element_one}'
+                readset_string_list.append(readset_str)
+            # There should be exactly one match
+            if not len(set(readset_string_list).intersection(set(self.fwd_readset_strings_to_keep))) == 1:
+                # Then we are not finding a read that matches one of the keepers given by Juli
+                raise RuntimeError
+            # If we get here, then go back through and get the sizes of those seq pairs that have a readset that
+            # matches the one given by Julies
+            size_dict = {}
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+                if 'BID' in fastq_fwd:
+                    element_one = fastq_fwd.split('-')[-3]
+                    element_two = fastq_fwd.split('-')[-4].split('_')[-1]
+                else:
+                    element_one = fastq_fwd.split('-')[-2]
+                    element_two = fastq_fwd.split('-')[-3].split('_')[-1]
+                readset_str = f'{element_two}.{element_one}'
+                if readset_str in self.fwd_readset_strings_to_keep:
+                    size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
+            #TODO we are here.
+            # Now we just want to keep the largest fastq_fwd in the size dict.
+            fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+                if fastq_fwd == fwd_fastq_to_keep:
+                    # This is the keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                        cat='method_replication', col='red'
+                    )
+                else:
+                    # this is a no keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                        cat='method_replication', col='red'
+                    )
 
     def _process_seq_replication(self):
         # Then this is a case of sequence_replication
@@ -550,45 +586,24 @@ class ReplicationWalkerWorker:
         # The readset should contain two bits of information
         # in the fastq and it should containing the -1 or -2
         # This is a pain in the arse!
-        fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use = self._get_reads_to_keep()
-        self._handle_one_pair_fastq_files(
-            read_tup=(fwd_read_use, rev_read_use), use=True, is_rep=True,
-            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_use
-        )
-        self._handle_one_pair_fastq_files(
-            read_tup=(fwd_read_no_use, rev_read_no_use), use=False, is_rep=True,
-            cat='sequencing_replicate', col='green', size_dict_passed=size_dict_no_use
-        )
-
-    def _get_reads_to_keep(self):
-        if len(self.fastq_gz_list_current) != 4:
-            raise NotImplementedError
-        # Probably easiest here to just get the sizes of the two pairs,
-        # Then send the larger of the two pairs into the normal handler
-        # with keep as true.
-        lane_one_reads = [_ for _ in self.fastq_gz_list_current if '-1_R' in _]
-        lane_two_reads = [_ for _ in self.fastq_gz_list_current if '-2_R' in _]
-        size_dicts = []
-        for reads in [lane_one_reads, lane_two_reads]:
-            fwd_read = [_ for _ in reads if 'R1' in _][0]
-            rev_read = [_ for _ in reads if 'R2' in _][0]
-            size_dicts.append(self._get_sizes_trough_head_request(fwd_read, rev_read))
-        if sum(size_dicts[0].values()) > sum(size_dicts[1].values()):
-            # Then the lane_one reads are bigger and they should be sent as 'use' and the others as not
-            fwd_read_use = [_ for _ in lane_one_reads if 'R1' in _][0]
-            rev_read_use = [_ for _ in lane_one_reads if 'R2' in _][0]
-            fwd_read_no_use = [_ for _ in lane_two_reads if 'R1' in _][0]
-            rev_read_no_use = [_ for _ in lane_two_reads if 'R2' in _][0]
-            size_dict_use = size_dicts[0]
-            size_dict_no_use = size_dicts[1]
-        else:
-            fwd_read_use = [_ for _ in lane_two_reads if 'R1' in _][0]
-            rev_read_use = [_ for _ in lane_two_reads if 'R2' in _][0]
-            fwd_read_no_use = [_ for _ in lane_one_reads if 'R1' in _][0]
-            rev_read_no_use = [_ for _ in lane_one_reads if 'R2' in _][0]
-            size_dict_use = size_dicts[1]
-            size_dict_no_use = size_dicts[0]
-        return fwd_read_no_use, fwd_read_use, rev_read_no_use, rev_read_use, size_dict_no_use, size_dict_use
+        size_dict = {}
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
+        # Now we just want to keep the largest fastq_fwd in the size dict.
+        fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            if fastq_fwd == fwd_fastq_to_keep:
+                # This is the keep
+                self._handle_one_pair_fastq_files(
+                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                    cat='sequencing_replicate', col='green'
+                )
+            else:
+                # this is a no keep
+                self._handle_one_pair_fastq_files(
+                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                    cat='sequencing_replicate', col='green'
+                )
 
     def _make_auth_tup(self):
         auth_path = os.path.join(self.exe_path, 'auth.txt')
@@ -599,18 +614,18 @@ class ReplicationWalkerWorker:
     def _make_readset_info_dir(self):
         # read in the three sepearate csv files
         coral_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "coral_readset_info.csv"), skiprows=[0],
-                                       names=['readset', 'primers', 'sample_id', 'pcr_sample_name',
+                                       names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
                                               'dna_sample_name'])
         sed_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "ssed_readset_info.csv"), skiprows=[0],
-                                     names=['readset', 'primers', 'sample_id', 'pcr_sample_name',
+                                     names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
                                             'dna_sample_name'])
         fish_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "fish_readset_info.csv"))
         # fish_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        fish_readset_df.columns = ['readset', 'primers', 'sample_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+        fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
                                    'dna_sample_name']
         plankton_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "plankton_readset_info.csv"))
         # plankton_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        plankton_readset_df.columns = ['readset', 'primers', 'sample_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+        plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
                                        'dna_sample_name']
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
         return df.set_index('readset', drop=True)
