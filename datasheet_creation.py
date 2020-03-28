@@ -84,6 +84,8 @@ class ITS2Processing:
         os.makedirs(self.output_dir, exist_ok=True)
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
         self.sample_provenance_df = self._make_sample_provenance_df()
+        self.readset_info_dir = "/home/humebc/projects/tara/replication_testing/readset_csvs"
+        self.readset_df = self._make_readset_info_dir()
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
         # symportal datasheets for doing the loading
@@ -99,6 +101,27 @@ class ITS2Processing:
         self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
+
+    def _make_readset_info_dir(self):
+        # read in the three sepearate csv files
+        coral_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "coral_readset_info.csv"), skiprows=[0],
+                                       names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
+                                              'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str})
+        sed_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "ssed_readset_info.csv"), skiprows=[0],
+                                     names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
+                                            'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str})
+        fish_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "fish_readset_info.csv"), names=['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+                                   'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str, 'pcr_fl_sample_name': str})
+        # fish_readset_df.drop(columns='PCR FL sample name', inplace=True)
+        # fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+        #                            'dna_sample_name']
+        plankton_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "plankton_readset_info.csv"), names=['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+                                   'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str, 'pcr_fl_sample_name': str})
+        # # plankton_readset_df.drop(columns='PCR FL sample name', inplace=True)
+        # plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
+        #                                'dna_sample_name']
+        df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
+        return df.set_index('readset', drop=True)
 
     def _make_auth_tup(self):
         auth_path = os.path.join(self.exe_path, 'auth.txt')
@@ -127,9 +150,9 @@ class ITS2Processing:
         # only the list.
         # Create a ReplicationWalker for every worker_base_dir
         rep_walker_list = []
-        for w_dir in worker_base_dirs[:5]:
-            rep_walker_list.append(ReplicationWalkerWorker(w_dir))
-        with Pool(5) as p:
+        for w_dir in worker_base_dirs:
+            rep_walker_list.append(ReplicationWalkerWorker(w_dir, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
+        with Pool(20) as p:
             self.error_df_list_of_lists = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
 
         # At this point we will have the info required to make the sp_data sheets and output the
@@ -148,13 +171,19 @@ class ITS2Processing:
         return df
 
 class ReplicationWalkerWorker:
-    def __init__(self, remote_base_dir):
+    def __init__(self, remote_base_dir, prov_df=None, readset_df=None):
         self.remote_base_dir = remote_base_dir
         self.readset_info_dir = "/home/humebc/projects/tara/replication_testing/readset_csvs"
-        self.readset_df = self._make_readset_info_dir()
+        if not readset_df is None:
+            self.readset_df = readset_df
+        else:
+            self.readset_df = self._make_readset_info_dir()
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
-        self.sample_provenance_df = self._make_sample_provenance_df()
+        if not prov_df is None:
+            self.sample_provenance_df = prov_df
+        else:
+            self.sample_provenance_df = self._make_sample_provenance_df()
         self.current_remote_dir = self.remote_base_dir
         self.done_list = set()
         self.done_and_empty_list = set()
@@ -326,15 +355,27 @@ class ReplicationWalkerWorker:
             # Download the file if it is not already downloaded
             # https://stackoverflow.com/questions/14270698/get-file-size-using-python-requests-while-only-getting-the-header
             if not os.path.isfile(local_file_path):
-                print(f'downloading {read}')
-                # r = self.s.get(os.path.join(self.current_remote_dir, read), stream=True)
-                # with open(local_file_path, 'wb') as f:
-                #     f.write(r.raw)
-            # Then get the size of the file on disk
-            # size = Path(local_file_path).stat().st_size
-            # size_dict[read] = size
-            size_dict[read] = 10
+                self._download_fastq_gz(local_file_path, read)
+                size_local = Path(local_file_path).stat().st_size
+            else:
+                #Check to see that the file on disk is as it should be
+                response = self.s.head(os.path.join(self.current_remote_dir, read))
+                size_remote = int(response.headers['content-length'])
+                size_local = Path(local_file_path).stat().st_size
+                if size_remote != size_local:
+                    self._download_fastq_gz(local_file_path, read)
+                    size_local = Path(local_file_path).stat().st_size
+                    if size_remote != size_local:
+                        raise RuntimeError('there seems to be size compatability issue')
+            size_dict[read] = size_local
+
         return size_dict
+
+    def _download_fastq_gz(self, local_file_path, read):
+        print(f'downloading {read}')
+        r = self.s.get(os.path.join(self.current_remote_dir, read), stream=True)
+        with open(local_file_path, 'wb') as f:
+            f.write(r.raw.data)
 
     def _populate_output_information_list(self, barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col):
         # First the output information dict
@@ -366,6 +407,12 @@ class ReplicationWalkerWorker:
                 host_family = 'poritidae'
                 host_genus = 'porites'
                 host_species = 'lobata'
+            elif nominal_tax_name == 'Porites panamensis':
+                host_class = 'anthozoa'
+                host_order = 'scleractinia'
+                host_family = 'poritidae'
+                host_genus = 'porites'
+                host_species = 'panamensis'
             elif nominal_tax_name == 'Pocillopora':
                 host_class = 'anthozoa'
                 host_order = 'scleractinia'
@@ -384,6 +431,18 @@ class ReplicationWalkerWorker:
                 host_family = 'pocilloporidae'
                 host_genus = 'pocillopora'
                 host_species = 'eydouxi'
+            elif nominal_tax_name == 'Millepora platyphylla':
+                host_class = 'hydrozoa'
+                host_order = 'anthoathecata'
+                host_family = 'milleporidae'
+                host_genus = 'millepora'
+                host_species = 'platyphylla'
+            elif nominal_tax_name == 'Heliopora':
+                host_class = 'anthozoa'
+                host_order = 'heliopracea'
+                host_family = 'helioporidae'
+                host_genus = 'heliopora'
+                host_species = 'unknown'
             else:
                 raise NotImplementedError
 
@@ -428,7 +487,7 @@ class ReplicationWalkerWorker:
                 rev_read = [_ for _ in barcode_reads if 'R2' in _][0]
                 self._handle_one_pair_fastq_files(read_tup=(fwd_read, rev_read))
 
-    def _process_unkn_method_replication(self, base_names, sample_id_set):
+    def _process_unkn_method_replication(self, base_names, barcode_id_set):
         # Then we need to check their PCR_sample_name and DNA_sample_name
         # To see if they are different.
         # This will produce two classes of seq difference
@@ -465,7 +524,7 @@ class ReplicationWalkerWorker:
             dna_names_set.add(dna_sample_name)
 
         # print(fastq_gz_list)
-        if (len(pcr_names_set) != len(dna_names_set)) or (len(pcr_names_set) > len(sample_id_set)):
+        if (len(pcr_names_set) != len(dna_names_set)) or (len(pcr_names_set) > len(barcode_id_set)):
             self._log_method_replication()
         else:
             self._log_unknown_replication()
@@ -474,13 +533,13 @@ class ReplicationWalkerWorker:
         # Then this a unknown_replication
         # Here we want to do the same as when we were doing _process_seq_replication
         # however, there may be more than two sets of sequences. We're looking to keep the biggest pair
-        # use the readset as a UID for key to a total size dict
+
         size_dict = {}
         for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
             size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(
                 fwd_read=fastq_fwd, rev_read=fastq_fwd.replace('R1', 'R2')
             ).values())
-        # now simply sort to get the largest readset and subit that as keep, submit all others as no keep
+        # now simply sort to get the largest fwd read and submit that as keep, submit all others as no keep
         fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
         for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
             if fastq_fwd == fwd_fastq_to_keep:
@@ -514,7 +573,7 @@ class ReplicationWalkerWorker:
             # We need to take into account that there may also be seq reps.
             size_dict = {}
             for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
-                size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).value())
+                size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
             # Now we just want to keep the largest fastq_fwd in the size dict.
             fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
             for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
