@@ -29,6 +29,7 @@ from multiprocessing import Pool, current_process
 import requests
 import datetime
 from pathlib import Path
+import compress_pickle
 
 class ITS2Processing:
     # This whole process became a little complicated when we realised that there were sometimes multiple sets
@@ -89,10 +90,19 @@ class ITS2Processing:
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
         # symportal datasheets for doing the loading
-        self.coral_sp_datasheet_df_dict = {}
+        dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z")
+        self.df_dict = {}
+        self.sp_coral_datasheet_path = os.path.join(self.output_dir, f'sp_coral_datasheet_{dat_string}.csv')
         self.non_coral_sp_datasheet_df_dict = {}
+        self.sp_non_coral_datasheet_path = os.path.join(self.output_dir, f'sp_non_coral_datasheet_{dat_string}.csv')
         # The dict that will hold the info for the information df to document which files we used and which we did not
         self.output_information_df = {}
+        self.output_information_df_path = os.path.join(
+            self.output_dir, f'output_information_df_all_fastqs_its2_{dat_string}.csv')
+        self. output_information_df_cols = [
+            'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
+            'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
+            'rev_read_size_compressed_bytes']
         # We can download the files that we are going to keep while we're at it
         # We should save them to a single directory
         self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
@@ -101,6 +111,12 @@ class ITS2Processing:
         self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
+        # Var to collect the output of the MP processing
+        self.mp_output_list_of_tups = None
+        self.sp_datasheet_cols = ['fastq_fwd_file_name', 'fastq_rev_file_name', 'sample_type', 'host_phylum',
+         'host_class', 'host_order', 'host_family', 'host_genus', 'host_species', 'collection_latitude',
+         'collection_longitude',
+         'collection_date', 'collection_depth']
 
     def _make_readset_info_dir(self):
         # read in the three sepearate csv files
@@ -130,35 +146,76 @@ class ITS2Processing:
         return (auth_lines[0], auth_lines[1])
 
     def start_walking(self):
-        soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
-                             features="html.parser", )
-        worker_base_dirs = [link.string for link in soup.find_all('a') if ((link.string not in ['Name', 'Last modified',
-                                                                                                'Size', 'Description',
-                                                                                                'Parent Directory',
-                                                                                                'NEGATIVE_CONTROLS/',
-                                                                                                'NEGATIVE_CONTROL/']) and (
-                                                                                       '/'.join([
-                                                                                                    self.remote_base_dir.strip(
-                                                                                                        '/'),
-                                                                                                    link.string]) not in self.remote_base_dir))]
-        worker_base_dirs = [os.path.join(self.remote_base_dir, _) for _ in worker_base_dirs]
+        if os.path.isfile(os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz')):
+            self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz'))
+        else:
+            soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
+                                 features="html.parser", )
+            worker_base_dirs = [link.string for link in soup.find_all('a') if ((link.string not in ['Name', 'Last modified',
+                                                                                                    'Size', 'Description',
+                                                                                                    'Parent Directory',
+                                                                                                    'NEGATIVE_CONTROLS/',
+                                                                                                    'NEGATIVE_CONTROL/']) and (
+                                                                                           '/'.join([
+                                                                                                        self.remote_base_dir.strip(
+                                                                                                            '/'),
+                                                                                                        link.string]) not in self.remote_base_dir))]
+            worker_base_dirs = [os.path.join(self.remote_base_dir, _) for _ in worker_base_dirs]
 
-        # NB We were originally mapping the rep_walker_list directly to the ReplicationWalkerWork class and running
-        # its _walk function from within the __init__. However this was causing problems when running
-        # for some of the markers and giving us an issue about errors returning the error and recursion (Pool error).
-        # Instead we now pass in instances of the ReplicationWalkerWorker class and then run its _walk method, returning
-        # only the list.
-        # Create a ReplicationWalker for every worker_base_dir
-        rep_walker_list = []
-        for w_dir in worker_base_dirs:
-            rep_walker_list.append(ReplicationWalkerWorker(w_dir, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
-        with Pool(20) as p:
-            self.error_df_list_of_lists = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
+            # NB We were originally mapping the rep_walker_list directly to the ReplicationWalkerWork class and running
+            # its _walk function from within the __init__. However this was causing problems when running
+            # for some of the markers and giving us an issue about errors returning the error and recursion (Pool error).
+            # Instead we now pass in instances of the ReplicationWalkerWorker class and then run its _walk method, returning
+            # only the list.
+            # Create a ReplicationWalker for every worker_base_dir
+            rep_walker_list = []
+            for w_dir in worker_base_dirs:
+                rep_walker_list.append(ReplicationWalkerWorker(w_dir, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
+            with Pool(20) as p:
+                self.mp_output_list_of_tups = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
+            compress_pickle.dump(self.mp_output_list_of_tups, os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz'))
 
         # At this point we will have the info required to make the sp_data sheets and output the
         # information dataframe
-        # Maybe let's run it using just one thread to start with to do an initial debug.
-        foo = 'bar'
+        # The information comes out as a single list, each element in the list is a tuple of three elements
+        # The three elements are in the order of
+        # self.coral_sp_datasheet_df_dict, self.non_coral_sp_datasheet_df_dict, self.output_information_list
+
+        # SP coral datasheet
+        self._sp_df_to_csv(tup_index=0, csv_path=self.sp_coral_datasheet_path)
+
+        # SP non-coral datasheet
+        self._sp_df_to_csv(tup_index=1, csv_path=self.sp_non_coral_datasheet_path)
+
+        # output information dataframe
+        self._output_output_information_df()
+
+    def _output_output_information_df(self):
+        self.output_information_df = pd.DataFrame(
+            [_ for t in self.mp_output_list_of_tups for _ in t[2]], columns=self.output_information_df_cols
+        )
+        self.output_information_df.to_csv(self.output_information_df_path, index=False)
+
+    def _sp_df_to_csv(self, tup_index, csv_path):
+        self.df_dict = {k: v for t in self.mp_output_list_of_tups for k, v in t[tup_index].items()}
+        sp_datasheet_df = pd.DataFrame.from_dict(
+            self.df_dict, columns=self.sp_datasheet_cols, orient='index'
+        )
+        sp_datasheet_df.index.name = 'sample_name'
+        sp_datasheet_df.to_csv(csv_path, index=True)
+        self._add_master_headers_to_sp_datasheet(csv_path)
+
+    def _add_master_headers_to_sp_datasheet(self, output_path):
+        # Read in the csv file and add the top two rows that contain the master headers and headers
+        with open(output_path, 'r') as f:
+            lines = [line.rstrip() for line in f]
+        # insert in reverse order
+        header_row_one = ',,,,host_info if applicable,,,,,,sampling info if applicable,,,'
+        lines.insert(0, header_row_one)
+        # Write out the csv with the new headers added
+        with open(output_path, 'w') as f:
+            for line in lines:
+                f.write(f'{line}\n')
 
     @staticmethod
     def _run_walk_on_rep_walker_item(rep_walker_class_instance):
@@ -445,7 +502,6 @@ class ReplicationWalkerWorker:
                 host_species = 'unknown'
             else:
                 raise NotImplementedError
-
             self.coral_sp_datasheet_df_dict[barcode_id] = [fwd_read, rev_read, 'coral', host_phylum, host_class,
                                                            host_order, host_family, host_genus, host_species, latitude,
                                                            longitude, collection_date, collection_depth]
