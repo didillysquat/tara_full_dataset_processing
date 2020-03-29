@@ -62,7 +62,7 @@ class ITS2Processing:
     # two that we do not have info for. For these two we will keep the largest pair. For all yellow and green cases
     # we will just keep largest of the fastq files.
 
-    #TODO we need to update so that we are using the new tara_sample_provenance table.
+    # We need to update so that we are using the new tara_sample_provenance table.
     # We also need to make sure that we are collecting the data from the provenance table
     # rather than from the directory structure as the directory structure may be wrong.
     # We have made a decision to keep only one of the sequencing files if there are multiple
@@ -77,7 +77,9 @@ class ITS2Processing:
     # here, there are some specific sequencing files that we should not be using in some cases. However, in other cases
     # Julie has said that we can use either of the sequencing sets. In these cases, we will use the largest pair again
     # if there are still mutiple fastq pairs after not considering the pairs that Julie said not to use.
-    def __init__(self):
+
+
+    def __init__(self, marker):
         self.base_directory_of_sequencing_data = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200116_tara_pacific_its2/"
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
         self.output_dir = os.path.abspath(os.path.join('.', 'output'))
@@ -90,24 +92,45 @@ class ITS2Processing:
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
         # symportal datasheets for doing the loading
-        dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z")
+        dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
         self.df_dict = {}
         self.sp_coral_datasheet_path = os.path.join(self.output_dir, f'sp_coral_datasheet_{dat_string}.csv')
         self.non_coral_sp_datasheet_df_dict = {}
         self.sp_non_coral_datasheet_path = os.path.join(self.output_dir, f'sp_non_coral_datasheet_{dat_string}.csv')
         # The dict that will hold the info for the information df to document which files we used and which we did not
         self.output_information_df = {}
+        self.marker = marker
         self.output_information_df_path = os.path.join(
-            self.output_dir, f'output_information_df_all_fastqs_its2_{dat_string}.csv')
+            self.output_dir, f'output_information_df_all_fastqs_{self.marker}_{dat_string}.csv')
         self. output_information_df_cols = [
             'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
             'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
             'rev_read_size_compressed_bytes']
         # We can download the files that we are going to keep while we're at it
         # We should save them to a single directory
-        self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
-        # Here we need to start our walk of the remote directories and
-        self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/ITS2/ITS2_SYM_VAR_5.8S2_SYM_VAR_REV/"
+
+        if self.marker == 'its2':
+            self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/ITS2/ITS2_SYM_VAR_5.8S2_SYM_VAR_REV/"
+            self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
+            self.download_data = True
+            self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
+        elif self.marker == '18s':
+            self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/18S_V9/18S_V9_1389F_1510R/"
+            self.download_data = False
+            self.no_keep_info_red_barcodes_list = [
+                'AW-0000001', 'AW-0000015', 'AW-0000029', 'AW-0000032', 'AW-0000042', 'AW-0000048', 'AW-0000136',
+                'CO-0001018', 'CO-0001954', 'CO-0001958', 'CO-0003055', 'CO-0003361', 'CO-0005681', 'CO-0005914',
+                'CO-1014469', 'CO-1014900', 'CO-1018002', 'CO-1018836', 'CO-1018837',
+                'IW-0000009', 'IW-0000034', 'IW-0000039', 'IW-0000045', 'IW-0000047', 'IW-0000072', 'IW-0000077',
+                'OA-0000011', 'OA-0000027', 'OA-0002159', 'OA-0002546'
+            ]
+        elif self.marker == '16s_45':
+            self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/16S_V4V5/Fuhrman_primers/"
+            self.download_data = False
+            self.no_keep_info_red_barcodes_list = []
+        elif self.marker == '16s_full_45':
+            self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/16S_Full_Length_plus_16S_V4V5/16S_FL_27F_1492R_plus_Fuhrman_primers/"
+            self.download_data = False
         self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
@@ -146,8 +169,8 @@ class ITS2Processing:
         return (auth_lines[0], auth_lines[1])
 
     def start_walking(self):
-        if os.path.isfile(os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz')):
-            self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz'))
+        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz')):
+            self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
         else:
             soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
                                  features="html.parser", )
@@ -170,10 +193,10 @@ class ITS2Processing:
             # Create a ReplicationWalker for every worker_base_dir
             rep_walker_list = []
             for w_dir in worker_base_dirs:
-                rep_walker_list.append(ReplicationWalkerWorker(w_dir, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
+                rep_walker_list.append(ReplicationWalkerWorker(w_dir, marker=self.marker, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
             with Pool(20) as p:
                 self.mp_output_list_of_tups = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
-            compress_pickle.dump(self.mp_output_list_of_tups, os.path.join(self.cache_dir, 'mp_output_list_of_tups.p.bz'))
+            compress_pickle.dump(self.mp_output_list_of_tups, os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
 
         # At this point we will have the info required to make the sp_data sheets and output the
         # information dataframe
@@ -181,14 +204,27 @@ class ITS2Processing:
         # The three elements are in the order of
         # self.coral_sp_datasheet_df_dict, self.non_coral_sp_datasheet_df_dict, self.output_information_list
 
-        # SP coral datasheet
-        self._sp_df_to_csv(tup_index=0, csv_path=self.sp_coral_datasheet_path)
+        # Firstly, do sanity check to  make sure that all of the barcodes that we don't have keep info for
+        # have been visited
+        visited = [list_item for tup in self.mp_output_list_of_tups for list_item in tup[3]]
+        if set(visited) != set(self.no_keep_info_red_barcodes_list):
+            raise RuntimeError('no_keep lists do not match')
+        if self.marker == 'its2':
+            # SP coral datasheet
+            self._sp_df_to_csv(tup_index=0, csv_path=self.sp_coral_datasheet_path)
 
-        # SP non-coral datasheet
-        self._sp_df_to_csv(tup_index=1, csv_path=self.sp_non_coral_datasheet_path)
+            # SP non-coral datasheet
+            self._sp_df_to_csv(tup_index=1, csv_path=self.sp_non_coral_datasheet_path)
 
         # output information dataframe
         self._output_output_information_df()
+
+        # Finally output a list of the barcodes that are on the server but not in Julies tables
+        problem_b_codes = [list_item for tup in self.mp_output_list_of_tups for list_item in tup[4]]
+        if problem_b_codes:
+            print('barcode_id s that were on server but not in Julie tables:')
+            for b_code in problem_b_codes:
+                print(b_code)
 
     def _output_output_information_df(self):
         self.output_information_df = pd.DataFrame(
@@ -228,7 +264,8 @@ class ITS2Processing:
         return df
 
 class ReplicationWalkerWorker:
-    def __init__(self, remote_base_dir, prov_df=None, readset_df=None):
+    def __init__(self, remote_base_dir, marker, prov_df=None, readset_df=None):
+        self.marker = marker
         self.remote_base_dir = remote_base_dir
         self.readset_info_dir = "/home/humebc/projects/tara/replication_testing/readset_csvs"
         if not readset_df is None:
@@ -254,30 +291,85 @@ class ReplicationWalkerWorker:
         self.s = requests.Session()
         self.s.auth = self.authorisation_tup
         self.s.headers = self.headers
-        # Two dictionaries that will hold the information for creating the dataframes form that will become the
-        # symportal datasheets for doing the loading
+        self.no_keep_info_red_barcodes_list_visited = []
         self.coral_sp_datasheet_df_dict = {}
         self.non_coral_sp_datasheet_df_dict = {}
+        if self.marker == 'its2':
+            # Two dictionaries that will hold the information for creating the dataframes form that will become the
+            # symportal datasheets for doing the loading
+
+            self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
+            # For the seq files that were replicated due to different methodologies being used, i.e. red cases
+            # Julie gave us a list of the files that we should be using (one per barcode id). These files are listed here
+            # (fwd files only). These are the strings from the readsets that we need to keep. They are not exact
+            # UID of readsets, and there may be serveral sequencing replicates. We will have to search for the biggest to
+            # keep.
+            self.fwd_readset_strings_to_keep = [
+                'HKNVMBCX2.12BA157',
+                'HGY2FBCX2.12BA013',
+                'HKNVMBCX2.12BA133',
+                'BG8KK.12BA056',
+                'BG8KK.12BA013',
+                'BG8KK.12BA293',
+                'BG8KK.12BA115'
+            ]
+            # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
+            # keep reads for are:
+            self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
+            self.download_data = True
+        elif self.marker == '18s':
+            self.download_data = False
+            # For the 18S things are a little tricker than the ITS2. For some barcodes,
+            # there are multiple not to use and multiple that we can use.
+            # As such we'll have to adapt the code to look for multiple readsets
+            self.fwd_readset_strings_to_keep = [
+                'HMNC2BBXX.12BA193',
+                'BWFDM.12BA159-BID05',
+                'BWFDM.12BA159-BID09',
+                'HMLTWBBXX.12BA258',
+                'HCYFJBBXX.12BA111',
+                'HCYFJBBXX.12BA135',
+                'BWFDM.12BA171-BID08',
+                'BWFDM.12BA171-BID06',
+                'BWFDM.12BA171-BID09',
+                'HGWFYBCX2.12BA001',
+                'H2NNHBCX3.12BA289-BID01',
+                'HGWFYBCX2.12BA002',
+                'H2TTMBCX3.12BA001-BID01',
+                'H2NNHBCX3.12BA295-BID01',
+                'HGWFYBCX2.12BA003',
+                'BWFDM.12BA159-BID08'
+            ]
+            # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
+            # keep reads for are:
+            self.no_keep_info_red_barcodes_list = [
+                'AW-0000001', 'AW-0000015', 'AW-0000029', 'AW-0000032', 'AW-0000042', 'AW-0000048', 'AW-0000136',
+                'CO-0001018', 'CO-0001954', 'CO-0001958', 'CO-0003055', 'CO-0003361', 'CO-0005681', 'CO-0005914',
+                'CO-1014469', 'CO-1014900', 'CO-1018002', 'CO-1018836', 'CO-1018837',
+                'IW-0000009', 'IW-0000034', 'IW-0000039', 'IW-0000045', 'IW-0000047', 'IW-0000072', 'IW-0000077',
+                'OA-0000011', 'OA-0000027', 'OA-0002159', 'OA-0002546'
+            ]
+        elif self.marker == '16s_45':
+            self.download_data = False
+            self.fwd_readset_strings_to_keep = [
+                'HHHYMDRXX.12BA104-BID11',
+                'HHKFGDRXX.12BA313-BID08',
+                'H3J7FBCX2.12BA194',
+                'H3J7FBCX2.12BA193',
+                'H3J7FBCX2.12BA253',
+                'H3J7FBCX2.12BA277',
+                'H3J7FBCX2.12BA265',
+                'H3J7FBCX2.12BA217',
+                'H3J7FBCX2.12BA229',
+            ]
+            self.no_keep_info_red_barcodes_list = []
+        # TODO write code to sanity check to make sure that all of the no_keep info barcodes have been visited
         # The list that will hold the info for the information df to document which files we used and which we did not
         self.output_information_list = []
-        self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
-        # For the seq files that were replicated due to different methodologies being used, i.e. red cases
-        # Julie gave us a list of the files that we should be using (one per barcode id). These files are listed here
-        # (fwd files only). These are the strings from the readsets that we need to keep. They are not exact
-        # UID of readsets, and there may be serveral sequencing replicates. We will have to search for the biggest to
-        # keep.
-        self.fwd_readset_strings_to_keep = [
-            'HKNVMBCX2.12BA157',
-            'HGY2FBCX2.12BA013',
-            'HKNVMBCX2.12BA133',
-            'BG8KK.12BA056',
-            'BG8KK.12BA013',
-            'BG8KK.12BA293',
-            'BG8KK.12BA115'
-        ]
-        # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
-        # keep reads for are:
-        self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
+        # Keep track of the barcode ids that are on the genoscope webstie but are not in the Julie tables
+        # and will not be considered in the outputs of this script.
+        self.not_in_julie_tables_barcode_list = []
+
 
     def _walk(self):
         # This is the core unit of logic processing. Here we are visiting directories one by one and gathering
@@ -330,8 +422,7 @@ class ReplicationWalkerWorker:
                             break
                     if self.walking_complete:
                         break
-
-        return (self.coral_sp_datasheet_df_dict, self.non_coral_sp_datasheet_df_dict, self.output_information_list)
+        return (self.coral_sp_datasheet_df_dict, self.non_coral_sp_datasheet_df_dict, self.output_information_list, self.no_keep_info_red_barcodes_list_visited, self.not_in_julie_tables_barcode_list)
 
     def _document_fastq_files(self):
         # Then we can count how many there are, add current dir to done
@@ -356,7 +447,7 @@ class ReplicationWalkerWorker:
             (fwd_read, rev_read) = read_tup
         else:
             fwd_read = [_ for _ in self.fastq_gz_list_current if 'R1' in _][0]
-            rev_read = [_ for _ in self.fastq_gz_list_current if 'R1' in _][0]
+            rev_read = [_ for _ in self.fastq_gz_list_current if 'R2' in _][0]
         barcode_id = fwd_read.split('_')[1]
         # There may be more than one set of reads in the readset df for a given barcode id even
         # if there is only one set of fastq in the genoscope site
@@ -375,11 +466,21 @@ class ReplicationWalkerWorker:
         # if we find more than one then raise error
         index_list = [_ for _ in self.readset_df[self.readset_df['barcode_id'] == barcode_id].index if readset_str in _]
         if len(index_list) != 1:
-            raise RuntimeError
+            # For the 18S ther are some atmosphere samples eg. barcode G-0000185, that are not listed in Julie's
+            # tables. I will write into the code to ignore these. If we fail to find an good index_list I will
+            # check to see if the barcode_id is found in the Julies tables. If it is found, then we have a logic
+            # problem. But if its not find, then we know that this is simply a sample that isn't in Julies
+            # tables and so we should simply return from this method
+            if len(self.readset_df[self.readset_df['barcode_id'] == barcode_id].index) == 0:
+                print(f'barcode_id {barcode_id} does not appear to be in the Julie tables but is on the genoscope server')
+                self.not_in_julie_tables_barcode_list.append(barcode_id)
+                return
+            else:
+                raise RuntimeError
         else:
             readset = index_list[0]
 
-        if use:
+        if use and self.download_data:
             size_dict = self._download_file_if_necessary(fwd_read, rev_read)
         else:
             if size_dict_passed:
@@ -390,7 +491,7 @@ class ReplicationWalkerWorker:
         # Now we can populate the output information dict and the sp_datasheet
         self._populate_output_information_list(barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col)
 
-        if use:
+        if use and self.marker == 'its2':
             self._populate_sp_datasheet_dict_item(barcode_id, fwd_read, rev_read)
 
     def _get_sizes_trough_head_request(self, fwd_read, rev_read):
@@ -530,7 +631,7 @@ class ReplicationWalkerWorker:
                 print(self.fastq_gz_list_current)
                 foo = 'bar'
             if len(base_names) > 1:
-                self._process_unkn_method_replication(base_names, barcode_id_set)
+                self._process_unkn_method_replication(barcode_id_set)
             else:
                 self._process_seq_replication()
         else:
@@ -543,7 +644,7 @@ class ReplicationWalkerWorker:
                 rev_read = [_ for _ in barcode_reads if 'R2' in _][0]
                 self._handle_one_pair_fastq_files(read_tup=(fwd_read, rev_read))
 
-    def _process_unkn_method_replication(self, base_names, barcode_id_set):
+    def _process_unkn_method_replication(self, barcode_id_set):
         # Then we need to check their PCR_sample_name and DNA_sample_name
         # To see if they are different.
         # This will produce two classes of seq difference
@@ -623,8 +724,10 @@ class ReplicationWalkerWorker:
         set_of_barcodes = set([_.split('_')[1] for _ in self.fastq_gz_list_current])
         if not len(set_of_barcodes) == 1:
             raise RuntimeError
-        if list(set_of_barcodes)[0] in self.no_keep_info_red_barcodes_list:
+        barcode_id = list(set_of_barcodes)[0]
+        if barcode_id in self.no_keep_info_red_barcodes_list:
             # Then we are working with one of the barcodes that we don't have keep info for.
+            self.no_keep_info_red_barcodes_list_visited.append(barcode_id)
             # We need to caculate the size and keep the biggest. Same as the sediment
             # We need to take into account that there may also be seq reps.
             size_dict = {}
@@ -648,25 +751,28 @@ class ReplicationWalkerWorker:
         else:
             # Then one of the fwd fastq files should be in the self.fwd_readset_strings_to_keep list
             # For each of the read pairs we need to grab the readset strings and see if one of the keeps
-            # is in that list
+            # is in that list.
+            # For the 18S things are a little more complicated. It is possible that there are a choice of serveral
+            # readsets that can be kept. As such, we need to look for AT LEAST one matching readset.
+            # Otherwise, the code actually doesn't need to change.
             readset_string_list = []
             for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
                 if 'BID' in fastq_fwd:
                     element_one = fastq_fwd.split('-')[-3]
                     element_two = fastq_fwd.split('-')[-4].split('_')[-1]
-
+                    bid_element = fastq_fwd.split('-')[-2]
+                    readset_str = f'{element_two}.{element_one}-{bid_element}'
                 else:
                     element_one = fastq_fwd.split('-')[-2]
                     element_two = fastq_fwd.split('-')[-3].split('_')[-1]
-
-                readset_str = f'{element_two}.{element_one}'
+                    readset_str = f'{element_two}.{element_one}'
                 readset_string_list.append(readset_str)
-            # There should be exactly one match
-            if not len(set(readset_string_list).intersection(set(self.fwd_readset_strings_to_keep))) == 1:
+            # There should be at least one match
+            if not len(set(readset_string_list).intersection(set(self.fwd_readset_strings_to_keep))) >= 1:
                 # Then we are not finding a read that matches one of the keepers given by Juli
                 raise RuntimeError
             # If we get here, then go back through and get the sizes of those seq pairs that have a readset that
-            # matches the one given by Julies
+            # matches the one given by Julie's
             size_dict = {}
             for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
                 if 'BID' in fastq_fwd:
@@ -1490,5 +1596,6 @@ def human_readable_size(size, decimal_places=3):
         size /= 1024.0
     return f"{size:.{decimal_places}f}{unit}"
 
-its2processing = ITS2Processing().start_walking()
+ITS2Processing(marker='its2').start_walking()
+ITS2Processing(marker='18s').start_walking()
 
