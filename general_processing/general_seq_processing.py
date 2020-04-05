@@ -79,8 +79,7 @@ class ITS2Processing:
     # if there are still mutiple fastq pairs after not considering the pairs that Julie said not to use.
 
 
-    def __init__(self, marker, date_string=None):
-        self.base_directory_of_sequencing_data = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200116_tara_pacific_its2/"
+    def __init__(self, marker, seq_file_download_directory=None, date_string=None, download=False):
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
         self.output_dir = os.path.abspath(os.path.join('.', 'output'))
         os.makedirs(self.input_dir, exist_ok=True)
@@ -114,12 +113,19 @@ class ITS2Processing:
 
         if self.marker == 'its2':
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/ITS2/ITS2_SYM_VAR_5.8S2_SYM_VAR_REV/"
-            self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
-            self.download_data = True
+            self.seq_file_download_directory = seq_file_download_directory
+            if not download:
+                self.download_data = False
+            else:
+                self.download_data = True
             self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
         elif self.marker == '18s':
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/18S_V9/18S_V9_1389F_1510R/"
-            self.download_data = False
+            if download:
+                self.download_data = True
+                self.seq_file_download_directory = seq_file_download_directory
+            else:
+                self.download_data = False
             self.no_keep_info_red_barcodes_list = [
                 'AW-0000001', 'AW-0000015', 'AW-0000029', 'AW-0000032', 'AW-0000042', 'AW-0000048', 'AW-0000136',
                 'CO-0001018', 'CO-0001954', 'CO-0001958', 'CO-0003055', 'CO-0003361', 'CO-0005681', 'CO-0005914',
@@ -1073,8 +1079,8 @@ def human_readable_size(size, decimal_places=3):
     return f"{size:.{decimal_places}f}{unit}"
 
 dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
-ITS2Processing(marker='its2', date_string=dat_string).start_walking()
-ITS2Processing(marker='18s', date_string=dat_string).start_walking()
+ITS2Processing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=True).start_walking()
+ITS2Processing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=False).start_walking()
 ITS2Processing(marker='16s_45', date_string=dat_string).start_walking()
 ITS2Processing(marker='16s_full_45', date_string=dat_string).start_walking()
 
