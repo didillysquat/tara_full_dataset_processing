@@ -79,7 +79,7 @@ class ITS2Processing:
     # if there are still mutiple fastq pairs after not considering the pairs that Julie said not to use.
 
 
-    def __init__(self, marker):
+    def __init__(self, marker, date_string=None):
         self.base_directory_of_sequencing_data = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200116_tara_pacific_its2/"
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
         self.output_dir = os.path.abspath(os.path.join('.', 'output'))
@@ -92,7 +92,10 @@ class ITS2Processing:
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
         # symportal datasheets for doing the loading
-        dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
+        if date_string:
+            dat_string = date_string
+        else:
+            dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
         self.df_dict = {}
         self.sp_coral_datasheet_path = os.path.join(self.output_dir, f'sp_coral_datasheet_{dat_string}.csv')
         self.non_coral_sp_datasheet_df_dict = {}
@@ -105,7 +108,7 @@ class ITS2Processing:
         self. output_information_df_cols = [
             'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
             'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
-            'rev_read_size_compressed_bytes']
+            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genescope_comment_1', 'genescope_comment_2']
         # We can download the files that we are going to keep while we're at it
         # We should save them to a single directory
 
@@ -131,6 +134,13 @@ class ITS2Processing:
         elif self.marker == '16s_full_45':
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/16S_Full_Length_plus_16S_V4V5/16S_FL_27F_1492R_plus_Fuhrman_primers/"
             self.download_data = False
+            self.no_keep_info_red_barcodes_list = [
+                'CO-0002037', 'CO-0002038', 'CO-0002039', 'CO-0002040', 'CO-0002043', 'CO-0002046',
+                'CO-0002048', 'CO-0002049', 'CO-0002050', 'CO-0002051', 'CO-0002052', 'CO-0002053',
+                'CO-0002059', 'CO-0002060', 'CO-0002061', 'CO-0002062', 'CO-0002063', 'CO-0002064', 'CO-0002065',
+                'FH-0000297', 'FH-0000303', 'FH-0000308', 'FH-0000313', 'FH-0000318', 'FH-0000323',
+                'FH-0000328', 'FH-0000333', 'FH-0000338', 'FH-0000343', 'FH-0000348', 'FH-0000353',
+            ]
         self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
@@ -144,23 +154,27 @@ class ITS2Processing:
     def _make_readset_info_dir(self):
         # read in the three sepearate csv files
         coral_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "coral_readset_info.csv"), skiprows=[0],
-                                       names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
-                                              'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str})
+                                       names=['readset', 'primers', 'barcode_id', 'pcr_code',
+                                              'dna_extraction_code'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_code': str, 'dna_extraction_code': str})
         sed_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "ssed_readset_info.csv"), skiprows=[0],
-                                     names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
-                                            'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str})
-        fish_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "fish_readset_info.csv"), names=['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-                                   'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str, 'pcr_fl_sample_name': str})
+                                     names=['readset', 'primers', 'barcode_id', 'pcr_code',
+                                            'dna_extraction_code'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_code': str, 'dna_extraction_code': str})
+        fish_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "fish_readset_info.csv"), skiprows=[0], names=['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+                                   'dna_extraction_code'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_code': str, 'dna_extraction_code': str, 'pcr_fl_sample_name': str})
         # fish_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        # fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-        #                            'dna_sample_name']
-        plankton_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "plankton_readset_info.csv"), names=['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-                                   'dna_sample_name'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_sample_name': str, 'dna_sample_name': str, 'pcr_fl_sample_name': str})
+        # fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+        #                            'dna_extraction_code']
+        plankton_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "plankton_readset_info.csv"), skiprows=[0], names=['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+                                   'dna_extraction_code'], dtype={'readset': str, 'primers': str, 'barcode_id': str, 'pcr_code': str, 'dna_extraction_code': str, 'pcr_fl_sample_name': str})
         # # plankton_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        # plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-        #                                'dna_sample_name']
+        # plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+        #                                'dna_extraction_code']
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
-        return df.set_index('readset', drop=True)
+        df = df.set_index('readset', drop=True)
+        # Here add in the comments for Julie.
+        juli_comment_df = pd.read_csv('comments_from_julie.csv', index_col=0)
+        new_df = pd.concat([df, juli_comment_df], axis=1)
+        return new_df
 
     def _make_auth_tup(self):
         auth_path = os.path.join(self.exe_path, 'auth.txt')
@@ -169,7 +183,7 @@ class ITS2Processing:
         return (auth_lines[0], auth_lines[1])
 
     def start_walking(self):
-        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz')):
+        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}X.p.bz')):
             self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
         else:
             soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
@@ -184,6 +198,7 @@ class ITS2Processing:
                                                                                                             '/'),
                                                                                                         link.string]) not in self.remote_base_dir))]
             worker_base_dirs = [os.path.join(self.remote_base_dir, _) for _ in worker_base_dirs]
+            # worker_base_dirs = [_ for _ in worker_base_dirs if 'ISLAND06' in _]
 
             # NB We were originally mapping the rep_walker_list directly to the ReplicationWalkerWork class and running
             # its _walk function from within the __init__. However this was causing problems when running
@@ -284,7 +299,11 @@ class ReplicationWalkerWorker:
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
         self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
-        self.fastq_gz_list_current = []
+        # Two versions of the fastq_gz_list_current
+        # This one refers to the list in the directory
+        self.fastq_gz_list_current_dir = []
+        # This one refers to the list that belong to a specific barcode within the directory (updated dynamically)
+        self.fastq_gz_list_current_barcode = []
         self.links_to_visit_current = []
         self.last_fork_location = None
         self.home_dir_reached = None
@@ -360,9 +379,28 @@ class ReplicationWalkerWorker:
                 'H3J7FBCX2.12BA277',
                 'H3J7FBCX2.12BA265',
                 'H3J7FBCX2.12BA217',
-                'H3J7FBCX2.12BA229',
+                'H3J7FBCX2.12BA229'
             ]
             self.no_keep_info_red_barcodes_list = []
+        elif self.marker == '16s_full_45':
+            self.download_data = False
+            self.fwd_readset_strings_to_keep = [
+                'HFK2KBCX2.12BA172',
+                'H7H7CBCX2.12BA106',
+                'H7H7CBCX2.12BA118',
+                'HFK2KBCX2.12BA101',
+                'H7H7CBCX2.12BA130',
+                'H7H7CBCX2.12BA142',
+                'C8W52.12BA124',
+                'C8W52.12BA123'
+            ]
+            self.no_keep_info_red_barcodes_list = [
+                'CO-0002037', 'CO-0002038', 'CO-0002039', 'CO-0002040', 'CO-0002043', 'CO-0002046',
+                'CO-0002048', 'CO-0002049', 'CO-0002050', 'CO-0002051', 'CO-0002052', 'CO-0002053',
+                'CO-0002059', 'CO-0002060', 'CO-0002061', 'CO-0002062', 'CO-0002063', 'CO-0002064', 'CO-0002065',
+                'FH-0000297', 'FH-0000303', 'FH-0000308', 'FH-0000313', 'FH-0000318', 'FH-0000323',
+                'FH-0000328', 'FH-0000333', 'FH-0000338', 'FH-0000343', 'FH-0000348', 'FH-0000353',
+            ]
         # TODO write code to sanity check to make sure that all of the no_keep info barcodes have been visited
         # The list that will hold the info for the information df to document which files we used and which we did not
         self.output_information_list = []
@@ -382,10 +420,10 @@ class ReplicationWalkerWorker:
                                                                  'Parent Directory', 'NEGATIVE_CONTROLS/']) and
                                             ('/'.join([self.current_remote_dir.strip('/'),
                                                        link.string]) not in self.done_list))]
-            self.fastq_gz_list_current = [link.string for link in self.links_to_visit_current if
+            self.fastq_gz_list_current_dir = [link.string for link in self.links_to_visit_current if
                                           'fastq.gz' in link.string]
             self.links_to_visit_current = [link for link in self.links_to_visit_current if
-                                           link not in self.fastq_gz_list_current]
+                                           link not in self.fastq_gz_list_current_dir]
             if len(self.links_to_visit_current) > 1:
                 self.last_fork_location = self.current_remote_dir
             else:
@@ -393,7 +431,7 @@ class ReplicationWalkerWorker:
             if self.current_remote_dir == self.remote_base_dir and not self.links_to_visit_current:
                 break
 
-            if self.fastq_gz_list_current:
+            if self.fastq_gz_list_current_dir:
                 try:
                     self._document_fastq_files()
                 except IndexError as e:
@@ -427,13 +465,19 @@ class ReplicationWalkerWorker:
     def _document_fastq_files(self):
         # Then we can count how many there are, add current dir to done
         # and continue walking the directories
-        if len(self.fastq_gz_list_current) > 2:
-            self._handle_multiple_fastq_files()
+        if len(self.fastq_gz_list_current_dir) > 2:
+            try:
+                self._handle_multiple_fastq_files()
+            except IndexError as e:
+                foo = 'bar'
         else:
-            if not len(self.fastq_gz_list_current) == 2:
+            if not len(self.fastq_gz_list_current_dir) == 2:
                 raise RuntimeError('Odd number of fastq files')
             # Here we have only two files for a given barcode id and we can process accorrdingly
-            self._handle_one_pair_fastq_files()
+            try:
+                self._handle_one_pair_fastq_files()
+            except IndexError as e:
+                foo = 'bar'
 
     def _handle_one_pair_fastq_files(self, read_tup=None, use=True, is_rep=False, cat=np.nan, col=np.nan, size_dict_passed=None):
         """ Columns for the information dict
@@ -446,8 +490,8 @@ class ReplicationWalkerWorker:
         if read_tup:
             (fwd_read, rev_read) = read_tup
         else:
-            fwd_read = [_ for _ in self.fastq_gz_list_current if 'R1' in _][0]
-            rev_read = [_ for _ in self.fastq_gz_list_current if 'R2' in _][0]
+            fwd_read = [_ for _ in self.fastq_gz_list_current_dir if 'R1' in _][0]
+            rev_read = [_ for _ in self.fastq_gz_list_current_dir if 'R2' in _][0]
         barcode_id = fwd_read.split('_')[1]
         # There may be more than one set of reads in the readset df for a given barcode id even
         # if there is only one set of fastq in the genoscope site
@@ -487,9 +531,11 @@ class ReplicationWalkerWorker:
                 size_dict = size_dict_passed
             else:
                 size_dict = self._get_sizes_trough_head_request(fwd_read, rev_read)
-
+        #TODO add the pcr name and extraction nme
+        pcr_code = self.readset_df.at[readset, 'pcr_code']
+        dna_extraction_code = self.readset_df.at[readset, 'dna_extraction_code']
         # Now we can populate the output information dict and the sp_datasheet
-        self._populate_output_information_list(barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col)
+        self._populate_output_information_list(barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col, pcr_code, dna_extraction_code)
 
         if use and self.marker == 'its2':
             self._populate_sp_datasheet_dict_item(barcode_id, fwd_read, rev_read)
@@ -535,12 +581,15 @@ class ReplicationWalkerWorker:
         with open(local_file_path, 'wb') as f:
             f.write(r.raw.data)
 
-    def _populate_output_information_list(self, barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col):
+    def _populate_output_information_list(self, barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col, pcr_code, dna_extraction_code):
         # First the output information dict
         dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z")
+        genescope_comment_1 = self.readset_df.at[readset, 'genescope_comment_1']
+        genescope_comment_2 = self.readset_df.at[readset, 'genescope_comment_2']
         temp_list = [
             barcode_id, readset, fwd_read, rev_read, use, self.current_remote_dir,
-            is_rep, dat_string, cat, col, size_dict[fwd_read], size_dict[rev_read]
+            is_rep, dat_string, cat, col, size_dict[fwd_read], size_dict[rev_read], pcr_code, dna_extraction_code,
+            genescope_comment_1, genescope_comment_2
         ]
         self.output_information_list.append(temp_list)
 
@@ -616,35 +665,52 @@ class ReplicationWalkerWorker:
         # For the sediments there are multiple sample IDs worth of fastq
         # files in a single directory so we need to check for the ratio
         # of fastq files to sample IDs.
-        barcode_id_set = set([_.split('_')[1] for _ in self.fastq_gz_list_current])
-        if len(self.fastq_gz_list_current) > len(barcode_id_set) * 2:
-            # This is where we need to categorise the replication as
-            # one of three different categories,
-            # When all seq files have the same base_name, then we will call
-            # this 'sequencing_replication'.
-            # Where the base_name is different, but the pcr and dna names are the
-            # same, we will call this 'unknown_replication'
-            # Finally where there are any differences in pcr or dna names
-            # I will call these 'method_replication'
-            base_names = {'-'.join(_.split('-')[:-1]) for _ in self.fastq_gz_list_current}
-            if '' in base_names:
-                print(self.fastq_gz_list_current)
-                foo = 'bar'
-            if len(base_names) > 1:
-                self._process_unkn_method_replication(barcode_id_set)
-            else:
-                self._process_seq_replication()
+        barcode_id_set = set([_.split('_')[1] for _ in self.fastq_gz_list_current_dir])
+        if 'CO-0004552' in barcode_id_set:
+            foo = 'bar'
+        if len(self.fastq_gz_list_current_dir) > len(barcode_id_set) * 2:
+            # We should be careful to run this on a barcode_id basis
+            # As there may be more than one barcode in a directory
+            # And there may be different replication statuses per barcode
+            for barcode_id in barcode_id_set:
+                if len(barcode_id_set) > 1:
+                    foo = 'bar'
+                # Hopefully it is enough to simply change the fastq_gz list as this is what we
+                # infre all other information from
+                self.fastq_gz_list_current_barcode = [_ for _ in self.fastq_gz_list_current_dir if barcode_id in _]
+                # This is where we need to categorise the replication as
+                # one of three different categories,
+                # When all seq files have the same base_name, then we will call
+                # this 'sequencing_replicate_same_run'.
+                # Where the base_name is different, but the pcr and dna names are the
+                # same, we will call this 'sequencing_replicate_different_run'
+                # Finally where there are any differences in pcr or dna names
+                # I will call these 'method_replicate'
+                base_names = {'-'.join(_.split('-')[:-1]) for _ in self.fastq_gz_list_current_barcode}
+                if '' in base_names:
+                    print(self.fastq_gz_list_current_barcode)
+                    foo = 'bar'
+                if len(base_names) > 1:
+                    try:
+                        self._process_unkn_method_replicate(barcode_id_set)
+                    except IndexError as e:
+                        foo = 'bar'
+                else:
+                    try:
+                        self._process_sequencing_replication_same_run()
+                    except IndexError as e:
+                        foo = 'bar'
         else:
             # here we have a case of multiple barcode ids worth of fastq pairs
             # The easiest way to treat this situation is to is to split it up into pairs of fastq
             # files and send these into the
             for barcode_id in barcode_id_set:
-                barcode_reads = [_ for _ in self.fastq_gz_list_current if barcode_id in _]
+                barcode_reads = [_ for _ in self.fastq_gz_list_current_dir if barcode_id in _]
                 fwd_read = [_ for _ in barcode_reads if 'R1' in _][0]
                 rev_read = [_ for _ in barcode_reads if 'R2' in _][0]
                 self._handle_one_pair_fastq_files(read_tup=(fwd_read, rev_read))
 
-    def _process_unkn_method_replication(self, barcode_id_set):
+    def _process_unkn_method_replicate(self, barcode_id_set):
         # Then we need to check their PCR_sample_name and DNA_sample_name
         # To see if they are different.
         # This will produce two classes of seq difference
@@ -654,7 +720,7 @@ class ReplicationWalkerWorker:
         # of the PCR or DNA names are different.
         pcr_names_set = set()
         dna_names_set = set()
-        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
             barcode_id = fastq_fwd.split('_')[1]
             if 'BID' in fastq_fwd:
                 element_one = fastq_fwd.split('-')[-3]
@@ -673,55 +739,79 @@ class ReplicationWalkerWorker:
                 readset = readset_list[0]
             else:
                 raise RuntimeError
-            pcr_sample_name = self.readset_df.at[readset, 'pcr_sample_name']
-            dna_sample_name = self.readset_df.at[readset, 'dna_sample_name']
+            pcr_code = self.readset_df.at[readset, 'pcr_code']
+            dna_extraction_code = self.readset_df.at[readset, 'dna_extraction_code']
 
 
-            pcr_names_set.add(pcr_sample_name)
-            dna_names_set.add(dna_sample_name)
+            pcr_names_set.add(pcr_code)
+            dna_names_set.add(dna_extraction_code)
 
         # print(fastq_gz_list)
         if (len(pcr_names_set) != len(dna_names_set)) or (len(pcr_names_set) > len(barcode_id_set)):
-            self._log_method_replication()
+            self._log_method_replicate()
         else:
-            self._log_unknown_replication()
+            self._log_sequencing_replication_different_run()
 
-    def _log_unknown_replication(self):
-        # Then this a unknown_replication
+    def _log_sequencing_replication_different_run(self):
+        # Then this a sequencing_replicate_different_run
         # Here we want to do the same as when we were doing _process_seq_replication
         # however, there may be more than two sets of sequences. We're looking to keep the biggest pair
+        # TODO, there can only be a case of yellow/green if there are more than 3 sets of fastqfiles
+        # so we will check for this
 
         size_dict = {}
-        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
             size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(
                 fwd_read=fastq_fwd, rev_read=fastq_fwd.replace('R1', 'R2')
             ).values())
         # now simply sort to get the largest fwd read and submit that as keep, submit all others as no keep
         fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
-        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
-            if fastq_fwd == fwd_fastq_to_keep:
-                # This is the keep
-                self._handle_one_pair_fastq_files(
-                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
-                    cat='unknown_replication', col='yellow'
-                )
-            else:
-                # this is a no keep
-                self._handle_one_pair_fastq_files(
-                    read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
-                    cat='unknown_replication', col='yellow'
-                )
+        list_of_fwd_reads = [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]
+        list_of_fwd_base_names = ['-'.join(_.split('-')[:-1]) for _ in list_of_fwd_reads]
+        for fastq_fwd in list_of_fwd_reads:
+            individual_fwd_base_name = '-'.join(fastq_fwd.split('-')[:-1])
+            if list_of_fwd_base_names.count(individual_fwd_base_name) > 1:
+                # Then this is a sequencing replicate same run
+                if fastq_fwd == fwd_fastq_to_keep:
+                    # This is the keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                        cat='sequencing_replicate_different_run/sequencing_replicate_same_run', col='yellow/green'
+                    )
+                else:
+                    # this is a no keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                        cat='sequencing_replicate_different_run/sequencing_replicate_same_run', col='yellow/green'
+                    )
+            elif list_of_fwd_base_names.count(individual_fwd_base_name) == 1:
+                # Then this is not a sequencing replicate same run
+                if fastq_fwd == fwd_fastq_to_keep:
+                    # This is the keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                        cat='sequencing_replicate_different_run', col='yellow'
+                    )
+                else:
+                    # this is a no keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                        cat='sequencing_replicate_different_run', col='yellow'
+                    )
 
-    def _log_method_replication(self):
-        # then this is a 'method_replication'
+    def _log_method_replicate(self):
+        # then this is a 'method_replicate'
         # We can use the elements in the temp_list to submit each of these
         # to the single fastq pair handler. But before we do that we need to identify readset (as this is the
         # UID essentially) that corresponds to the largest set of the files.
-        # Actually TODO we need to check the do not use lists and check to see if we have identified the correct
+        # Actually we need to check the do not use lists and check to see if we have identified the correct
         # TWO samples that Julie said we can check for.s
+        # TODO in the case where there is sequence replication as well as method replication
+        # we will mark as red/green and method_replicate/sequencing_replicate
+        # TODO check to see if there are anycases of red/yellow. and yellow/green
 
         # First check whether we are dealing with one of the barcodes that we don't have keep information for
-        set_of_barcodes = set([_.split('_')[1] for _ in self.fastq_gz_list_current])
+        set_of_barcodes = set([_.split('_')[1] for _ in self.fastq_gz_list_current_barcode])
         if not len(set_of_barcodes) == 1:
             raise RuntimeError
         barcode_id = list(set_of_barcodes)[0]
@@ -731,23 +821,19 @@ class ReplicationWalkerWorker:
             # We need to caculate the size and keep the biggest. Same as the sediment
             # We need to take into account that there may also be seq reps.
             size_dict = {}
-            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
                 size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
+
             # Now we just want to keep the largest fastq_fwd in the size dict.
-            fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
-            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
-                if fastq_fwd == fwd_fastq_to_keep:
-                    # This is the keep
-                    self._handle_one_pair_fastq_files(
-                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
-                        cat='method_replication', col='red'
-                    )
-                else:
-                    # this is a no keep
-                    self._handle_one_pair_fastq_files(
-                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
-                        cat='method_replication', col='red'
-                    )
+            # We also want to infer whether this is a sequencing replicate as well
+            # This is not so easy as we may have several method sets that Julie has said we can keep.
+            # Perhaps the best way to check whether there is a seq replicate
+            # is to get the base name for the fastq_fwd in quetsion and then see how many of these are
+            # in a list of basenames generated from the fastq_gz_list_current.
+            # We will likely need to take into account BID. Let me check.
+            # No we will not need to take into account BID.
+            self._process_red_keep_no_keep(size_dict)
+
         else:
             # Then one of the fwd fastq files should be in the self.fwd_readset_strings_to_keep list
             # For each of the read pairs we need to grab the readset strings and see if one of the keeps
@@ -756,7 +842,7 @@ class ReplicationWalkerWorker:
             # readsets that can be kept. As such, we need to look for AT LEAST one matching readset.
             # Otherwise, the code actually doesn't need to change.
             readset_string_list = []
-            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
                 if 'BID' in fastq_fwd:
                     element_one = fastq_fwd.split('-')[-3]
                     element_two = fastq_fwd.split('-')[-4].split('_')[-1]
@@ -774,56 +860,83 @@ class ReplicationWalkerWorker:
             # If we get here, then go back through and get the sizes of those seq pairs that have a readset that
             # matches the one given by Julie's
             size_dict = {}
-            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
                 if 'BID' in fastq_fwd:
                     element_one = fastq_fwd.split('-')[-3]
                     element_two = fastq_fwd.split('-')[-4].split('_')[-1]
+                    bid_element = fastq_fwd.split('-')[-2]
+                    readset_str = f'{element_two}.{element_one}-{bid_element}'
                 else:
                     element_one = fastq_fwd.split('-')[-2]
                     element_two = fastq_fwd.split('-')[-3].split('_')[-1]
-                readset_str = f'{element_two}.{element_one}'
+                    readset_str = f'{element_two}.{element_one}'
                 if readset_str in self.fwd_readset_strings_to_keep:
                     size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
-            #TODO we are here.
             # Now we just want to keep the largest fastq_fwd in the size dict.
-            fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
-            for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+            self._process_red_keep_no_keep(size_dict)
+
+    def _process_red_keep_no_keep(self, size_dict):
+        fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
+        list_of_fwd_reads = [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]
+        list_of_fwd_base_names = ['-'.join(_.split('-')[:-1]) for _ in list_of_fwd_reads]
+        for fastq_fwd in list_of_fwd_reads:
+            individual_fwd_base_name = '-'.join(fastq_fwd.split('-')[:-1])
+            if list_of_fwd_base_names.count(individual_fwd_base_name) > 1:
+                # Then this is a sequencing replicate same run
                 if fastq_fwd == fwd_fastq_to_keep:
                     # This is the keep
                     self._handle_one_pair_fastq_files(
                         read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
-                        cat='method_replication', col='red'
+                        cat='method_replicate/sequencing_replicate_same_run', col='red/green'
                     )
                 else:
                     # this is a no keep
                     self._handle_one_pair_fastq_files(
                         read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
-                        cat='method_replication', col='red'
+                        cat='method_replicate/sequencing_replicate_same_run', col='red/green'
                     )
+            elif list_of_fwd_base_names.count(individual_fwd_base_name) == 1:
+                # Then this is not a sequencing replicate same run
+                if fastq_fwd == fwd_fastq_to_keep:
+                    # This is the keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
+                        cat='method_replicate', col='red'
+                    )
+                else:
+                    # this is a no keep
+                    self._handle_one_pair_fastq_files(
+                        read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
+                        cat='method_replicate', col='red'
+                    )
+            else:
+                # Then something has gone wrong as we are not finding the base name in the list
+                # of base names
+                raise RuntimeError('inidividual base name not found in list of base names')
 
-    def _process_seq_replication(self):
-        # Then this is a case of sequence_replication
+    def _process_sequencing_replication_same_run(self):
+        # Then this is a case of sequencing_replicate_same_run
         # We should be able to find a readset per fastq.
         # The readset should contain two bits of information
         # in the fastq and it should containing the -1 or -2
         # This is a pain in the arse!
         size_dict = {}
-        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
             size_dict[fastq_fwd] = sum(self._get_sizes_trough_head_request(fastq_fwd, fastq_fwd.replace('R1', 'R2')).values())
         # Now we just want to keep the largest fastq_fwd in the size dict.
         fwd_fastq_to_keep = sorted(size_dict, key=size_dict.get, reverse=True)[0]
-        for fastq_fwd in [_ for _ in self.fastq_gz_list_current if 'R1' in _]:
+        for fastq_fwd in [_ for _ in self.fastq_gz_list_current_barcode if 'R1' in _]:
             if fastq_fwd == fwd_fastq_to_keep:
                 # This is the keep
                 self._handle_one_pair_fastq_files(
                     read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=True, is_rep=True,
-                    cat='sequencing_replicate', col='green'
+                    cat='sequencing_replicate_same_run', col='green'
                 )
             else:
                 # this is a no keep
                 self._handle_one_pair_fastq_files(
                     read_tup=(fastq_fwd, fastq_fwd.replace('R1', 'R2')), use=False, is_rep=True,
-                    cat='sequencing_replicate', col='green'
+                    cat='sequencing_replicate_same_run', col='green'
                 )
 
     def _make_auth_tup(self):
@@ -835,19 +948,19 @@ class ReplicationWalkerWorker:
     def _make_readset_info_dir(self):
         # read in the three sepearate csv files
         coral_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "coral_readset_info.csv"), skiprows=[0],
-                                       names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
-                                              'dna_sample_name'])
+                                       names=['readset', 'primers', 'barcode_id', 'pcr_code',
+                                              'dna_extraction_code'])
         sed_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "ssed_readset_info.csv"), skiprows=[0],
-                                     names=['readset', 'primers', 'barcode_id', 'pcr_sample_name',
-                                            'dna_sample_name'])
+                                     names=['readset', 'primers', 'barcode_id', 'pcr_code',
+                                            'dna_extraction_code'])
         fish_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "fish_readset_info.csv"))
         # fish_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-                                   'dna_sample_name']
+        fish_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+                                   'dna_extraction_code']
         plankton_readset_df = pd.read_csv(os.path.join(self.readset_info_dir, "plankton_readset_info.csv"))
         # plankton_readset_df.drop(columns='PCR FL sample name', inplace=True)
-        plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_sample_name', 'pcr_fl_sample_name',
-                                       'dna_sample_name']
+        plankton_readset_df.columns = ['readset', 'primers', 'barcode_id', 'pcr_code', 'pcr_fl_sample_name',
+                                       'dna_extraction_code']
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
         return df.set_index('readset', drop=True)
 
@@ -877,504 +990,6 @@ class ReplicationWalkerWorker:
         spsh = SPDataSheet(info_df=self.info_df, out_dir=self.output_dir)
         return spsh.create_sp_df()
 
-class SequenceAndProfilePlotterCoralOnly:
-    def __init__(self, info_df, sp_datasheet, seq_meta_info_df, seq_color_dict, prof_color_dict,
-            sample_uid_to_name_dict,
-            seq_absolute_abundance_df,
-            seq_relative_abundance_df,
-            prof_meta_info_df,
-            prof_uid_to_name_dict,
-            prof_absolute_abundance_df,
-            prof_relative_abundance_df, output_dir, fig_type):
-        self.info_df = info_df
-        self.sp_datasheet = sp_datasheet
-        self.seq_meta_info_df = seq_meta_info_df
-        self.sample_uid_to_name_dict = sample_uid_to_name_dict
-        self.seq_absolute_abundance_df = seq_absolute_abundance_df
-        self.seq_relative_abundance_df = seq_relative_abundance_df
-        self.prof_meta_info_df = prof_meta_info_df
-        self.prof_uid_to_name_dict = prof_uid_to_name_dict
-        self.prof_absolute_abundance_df = prof_absolute_abundance_df
-        self.prof_relative_abundance_df = prof_relative_abundance_df
-        self.output_dir = output_dir
-        self.fig_type = fig_type
-        self.species = ['PORITES', 'POCILLOPORA', 'MILLEPORA']
-        # Get list of islands
-        # Dict that will have island names as key and a list of sites as value
-        self.island_site_dict = self._determine_sites_and_island()
-        self.islands = sorted(list(self.island_site_dict.keys()))
-        # Get the colour dicts that we will use for plotting
-        self.seq_color_dict = seq_color_dict
-        self.prof_color_dict = prof_color_dict
-        if self.fig_type == 'genera':
-            # Convert the seq_color_dict to genera colours
-            temp_dict = {}
-            for k, v in self.seq_color_dict.items():
-                if k.startswith('A') or k.endswith('A'):
-                    temp_dict[k] = "#DCDCDC"
-                elif k.startswith('C') or k.endswith('C'):
-                    temp_dict[k] = "#A9A9A9"
-                elif k.startswith('D') or k.endswith('D'):
-                    temp_dict[k] = "#696969"
-                else:
-                    temp_dict[k] = "#FF0000"
-            self.seq_color_dict = temp_dict
-        # Setup the plot
-        self.fig = plt.figure(figsize=(14, 10))
-        self.gs = self.fig.add_gridspec(18, 18, figure=self.fig, height_ratios=[1 for _ in range(18)],
-                                        width_ratios=[1 for _ in range(18)])
-        # The axis list that has been linearised
-        # we will go in order of: for island, for site, for species
-        # we will linearize the axes and go in order of for island, for site, for species
-        for island in self.islands:
-            site_list = sorted(list(self.island_site_dict[island]))[:3]
-            for site in site_list:
-                for species in self.species:
-                    ax_row_index = int((int(self.islands.index(island)/6)*3) + site_list.index(site))
-                    ax_col_index = int(((self.islands.index(island)%6)*3) + self.species.index(species))
-                    # In here we can do the actual plotting
-                    single_sp_time_start = time.time()
-                    ax = self.fig.add_subplot(self.gs[ax_row_index, ax_col_index])
-                    spip = SeqProfIndiPlot(parent=self, ax=ax, island=island, site=site, species=species, fig_type=self.fig_type)
-                    spip.do_plotting()
-                    single_sp_time_tot = time.time() - single_sp_time_start
-                    print(f'The whole single took {single_sp_time_tot}')
-        print('Writing .svg')
-        plt.savefig(os.path.join(self.output_dir, f'seq_and_profile_fig_{self.fig_type}.svg'))
-        print('Writing .png')
-        plt.savefig(os.path.join(self.output_dir, f'seq_and_profile_fig_{self.fig_type}.png'), dpi=1200)
-        foo = 'bar'
-
-
-    def _determine_sites_and_island(self):
-        # For each sample pull out the island and site from the info_df
-        # Dict that will have island names as key and a list of sites as value
-        island_site_dict = defaultdict(set)
-        for sample_index in self.sp_datasheet.index:
-            island = self.info_df.at[sample_index, 'location']
-            site = self.info_df.at[sample_index, 'site']
-            island_site_dict[island].add(site)
-        return island_site_dict
-        
-class SeqProfIndiPlot:
-    def __init__(self, parent, ax, island, site, species, fig_type):
-        self.parent = parent
-        self.ax = ax
-        self.island = island
-        self.site = site
-        self.species = species
-        self.fig_type = fig_type
-        self.samples = self.parent.info_df[
-            (self.parent.info_df['location'] == self.island) &
-            (self.parent.info_df['site'] == self.site) &
-            (self.parent.info_df['spp_water'] == self.species) &
-            (self.parent.info_df['coral_plankton'] == 'CORAL') &
-            (self.parent.info_df['spp_water'] != 'HELIOPORA') &
-            (self.parent.info_df['spp_water'] != 'PORITES_PANAMENSIS')
-        ].index.values.tolist()
-        foo = 'bar'
-        self.patches_list = []
-        self.ind = 0
-        self.color_list = []
-        self.num_smp_in_this_subplot = len(self.samples)
-
-    def do_plotting(self):
-        div_over_total = 0
-        type_under_total = 0
-        for sample_to_plot in self.samples:
-            sys.stdout.write(f'\rPlotting sample: {self.island} {self.site} {self.species} {sample_to_plot}')
-
-            # PLOT DIVs
-            div_over_start = time.time()
-            self._plot_div_over_type(sample_to_plot)
-            div_over_stop = time.time()
-            div_over_total += (div_over_stop - div_over_start)
-
-            # PLOT type
-            if self.fig_type == 'all':
-                type_under_start = time.time()
-                self._plot_type_under_div(sample_to_plot)
-                type_under_stop = time.time()
-                type_under_total += (type_under_stop - type_under_start)
-            self.ind += 1
-        paint_start = time.time()
-        self._paint_rect_to_axes_div_and_type()
-        paint_stop = time.time()
-        paint_total = paint_stop - paint_start
-
-        print(f'\n\ndiv_over took {div_over_total}')
-        print(f'type_under took {type_under_total}')
-        print(f'paint took {paint_total}')
-
-
-
-    def _plot_div_over_type(self, sample_to_plot):
-        bottom_div = 0
-        # In order that the sequences are listed in the seq_relative_abundance_df for those that are
-        # present in the sample, plot a rectangle.
-        smp_series = self.parent.seq_relative_abundance_df.loc[sample_to_plot]
-        non_zero_series = smp_series.iloc[smp_series.to_numpy().nonzero()[0]]
-        for seq_name, seq_rel_abund in non_zero_series.iteritems():
-            # class matplotlib.patches.Rectangle(xy, width, height, angle=0.0, **kwargs)
-            self.patches_list.append(Rectangle((self.ind - 0.5, bottom_div), 1, seq_rel_abund, color=self.parent.seq_color_dict[seq_name]))
-            self.color_list.append(self.parent.seq_color_dict[seq_name])
-            bottom_div += seq_rel_abund
-
-    def _plot_type_under_div(self, sample_to_plot):
-        # the idea of the type is to put it as a reflection below the y=0 line
-        # as such we should just want to make everything negative
-        bottom_prof = 0
-        # for each sequence, create a rect patch
-        # the rect will be 1 in width and centered about the ind value.
-        # we want to plot the rects so that they add to 1. As such we want to divide
-        # each value by the total for that sample.
-        non_zero_indices = self.parent.prof_absolute_abundance_df.loc[sample_to_plot].to_numpy().nonzero()[0]
-        non_zero_series = self.parent.prof_absolute_abundance_df.loc[sample_to_plot].iloc[non_zero_indices]
-        total = sum(non_zero_series.values)
-        non_zero_series_relative = non_zero_series / total
-        for profile_uid, profile_rel_abund in non_zero_series_relative.iteritems():
-            # We will scale the profile so that it is 0.2 of the length of the seq info
-            depth = -0.2 * profile_rel_abund
-            self.patches_list.append(
-                Rectangle((self.ind - 0.5, bottom_prof), 1, depth,
-                            color=self.parent.prof_color_dict[profile_uid]))
-            # axarr.add_patch(Rectangle((ind-0.5, bottom), 1, rel_abund, color=colour_dict[seq]))
-            self.color_list.append(self.parent.prof_color_dict[profile_uid])
-            bottom_prof += depth
-
-    def _paint_rect_to_axes_div_and_type(self, max_num_smpls_in_subplot=10):
-        # We can try making a custom colour map
-        # https://matplotlib.org/api/_as_gen/matplotlib.colors.ListedColormap.html
-        this_cmap = ListedColormap(self.color_list)
-        
-        # here we should have a list of Rectangle patches
-        # now create the PatchCollection object from the patches_list
-        patches_collection = PatchCollection(self.patches_list, cmap=this_cmap)
-        patches_collection.set_array(np.arange(len(self.patches_list)))
-        # if n_subplots is only 1 then we can refer directly to the axarr object
-        # else we will need ot reference the correct set of axes with i
-        # Add the pathces to the axes
-        self.ax.add_collection(patches_collection)
-        self.ax.autoscale_view()
-        # self.ax.figure.canvas.draw()
-        # also format the axes.
-        # make it so that the x axes is constant length
-        self.ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
-        if self.fig_type == 'all':
-            self.ax.set_ylim(-0.2, 1)
-        else:
-            self.ax.set_ylim(0,1)
-        self._remove_axes_but_allow_labels()
-
-        # as well as getting rid of the top and right axis splines
-        # I'd also like to restrict the bottom spine to where there are samples plotted but also
-        # maintain the width of the samples
-        # I think the easiest way to do this is to hack a bit by setting the x axis spines to invisible
-        # and then drawing on a line at y = 0 between the smallest and largest ind (+- 0.5)
-        # ax.spines['bottom'].set_visible(False)
-        if self.fig_type == 'all':
-            self.ax.add_line(Line2D((0 - 0.5, self.num_smp_in_this_subplot - 0.5), (0, 0), linewidth=0.5, color='black'))
-
-    def _remove_axes_but_allow_labels(self):
-        self.ax.set_frame_on(False)
-        self.ax.set_yticks([])
-        self.ax.set_xticks([])
-
-class QCPlotterCoralOnly:
-    def __init__(self, info_df, sp_datasheet, seq_meta_info_df, output_dir):
-        self.info_df = info_df
-        self.sp_datasheet = sp_datasheet
-        self.seq_meta_info_df = seq_meta_info_df
-        self.output_dir = output_dir
-        # Dict that will have island names as key and a list of sites as value
-        self.island_site_dict = self._determine_sites_and_island()
-        self.islands = sorted(list(self.island_site_dict.keys()))
-        self.num_coral_islands = len(self.island_site_dict.keys())
-        self.num_coral_sites = 0
-        for k, v in self.island_site_dict.items():
-            self.num_coral_sites += len(v)
-        self.fig = plt.figure(figsize=(14, 10))
-        self.gs = self.fig.add_gridspec(3, 32, figure=self.fig, height_ratios=[1, 1, 1], width_ratios=[1 for _ in range(32)])
-
-        # setup each of the axes in separate lists for raw_contgs, non_symbiodiniaceae and symbiodiniaceae
-        self.raw_contig_ax_list = []
-        for i in range(32):
-            self.raw_contig_ax_list.append(self.fig.add_subplot(self.gs[0,i]))
-        self.non_sym_ax_list = []
-        for i in range(32):
-            self.non_sym_ax_list.append(self.fig.add_subplot(self.gs[1, i]))
-        self.sym_ax_list = []
-        for i in range(32):
-            self.sym_ax_list.append(self.fig.add_subplot(self.gs[2, i]))
-
-        # Here we have each of the axes setup. Now we just need to plot in them
-        
-        foo = 'bar'
-
-
-    def _determine_sites_and_island(self):
-        # For each sample pull out the island and site from the info_df
-        # Dict that will have island names as key and a list of sites as value
-        island_site_dict = defaultdict(set)
-        for sample_index in self.sp_datasheet.index:
-            island = self.info_df.at[sample_index, 'location']
-            site = self.info_df.at[sample_index, 'site']
-            island_site_dict[island].add(site)
-        return island_site_dict
-
-    def plot_qc_data(self):
-        # We can go island by island.
-        # For each island get the sites and sort
-        # For each site of island get the samples
-        # Then for each sample plot
-
-        # We will need to keep track of some grand maximums so that we can scale
-        # each of the subplot axes to the same values
-        raw_contig_max = int(self.seq_meta_info_df['raw_contigs'].max())
-        raw_contig_min = int(self.seq_meta_info_df['raw_contigs'].min())
-        non_sym_total_max = int(self.seq_meta_info_df['post_taxa_id_absolute_non_symbiodinium_seqs'].max())
-        non_sym_total_min = int(self.seq_meta_info_df['post_taxa_id_absolute_non_symbiodinium_seqs'].min())
-        non_sym_distinct_max = int(self.seq_meta_info_df['post_taxa_id_unique_non_symbiodinium_seqs'].max())
-        non_sym_distinct_min = int(self.seq_meta_info_df['post_taxa_id_unique_non_symbiodinium_seqs'].min())
-        sym_total_max = int(self.seq_meta_info_df['post_taxa_id_absolute_symbiodinium_seqs'].max())
-        sym_total_min = int(self.seq_meta_info_df['post_taxa_id_absolute_symbiodinium_seqs'].min())
-        sym_distinct_max = int(self.seq_meta_info_df['post_taxa_id_unique_symbiodinium_seqs'].max())
-        sym_distinct_min = int(self.seq_meta_info_df['post_taxa_id_unique_symbiodinium_seqs'].min())
-
-        # We want to output a few stats to go with this figure. It would also be good to annotate these stats on
-        # the figure. I think it would be good to do this using a horizonatl line
-        print(f'Number of samples = {len(self.seq_meta_info_df.index)}')
-        print(f'\tPorites lobata: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "lobata"].index)}')
-        print(f'\tPocillopora meandrina: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "meandrina"].index)}')
-        print(f'\tMillepora dichotoma: {len(self.sp_datasheet[self.sp_datasheet["host_species"] == "dichotoma"].index)}')
-        average_raw_contigs_per_sample = int(self.seq_meta_info_df['raw_contigs'].mean())
-        print(f'average_raw_contigs_per_sample: {average_raw_contigs_per_sample}')
-        average_non_sym_total = int(self.seq_meta_info_df['post_taxa_id_absolute_non_symbiodinium_seqs'].mean())
-        print(f'average_non_sym_total: {average_non_sym_total}')
-        average_non_sym_distinct = int(self.seq_meta_info_df['post_taxa_id_unique_non_symbiodinium_seqs'].mean())
-        print(f'average_non_sym_distinct: {average_non_sym_distinct}')
-        average_sym_total = int(self.seq_meta_info_df['post_taxa_id_absolute_symbiodinium_seqs'].mean())
-        print(f'average_sym_total: {average_sym_total}')
-        average_sym_distinct = int(self.seq_meta_info_df['post_taxa_id_unique_symbiodinium_seqs'].mean())
-        print(f'average_sym_distinct: {average_sym_distinct}')
-        print(f'\n\ntotal_raw_contigs: {self.seq_meta_info_df["raw_contigs"].sum()}')
-
-        for island_to_plot in self.islands:
-            sites = sorted(list(self.island_site_dict[island_to_plot]))
-            # For each of the subplots we will treat them as a single scatter plot
-            # We will work with the x axis being limited to 0-->1
-            # x axis coordinates will depend on the number of sites
-            # we will want four plotting points per site,
-            # one for the individual points and one for the avergae for total seqs
-            # and then we'll want one for distnct sequences
-            num_sites = len(sites)
-            x_space = 1 / ((num_sites * 4) + 1)
-            x_coord_vals = [i * x_space for i in range(1, num_sites*4 + 1, 1)]
-            # Pair up the x_coord_vals so that they are easier to index
-            # one pair per site. 0 will be for individual datapoints, 1 for the mean
-            x_coord_vals = [(x_coord_vals[i], x_coord_vals[i + 1], x_coord_vals[i + 2], x_coord_vals[i + 3]) for i in range(0, num_sites*4, 4)]
-
-            raw_contigs_ax = self.raw_contig_ax_list[self.islands.index(island_to_plot)]
-            raw_contigs_ax.set_xlim(0, 1)
-            raw_contigs_ax.set_ylim(10000, raw_contig_max)
-            # set all x axes labels off
-            raw_contigs_ax.set_xticks([])
-
-            non_sym_ax = self.non_sym_ax_list[self.islands.index(island_to_plot)]
-            non_sym_ax.set_xlim(0, 1)
-            non_sym_ax.set_ylim(non_sym_total_min, non_sym_total_max)
-            non_sym_ax.set_xticks([])
-            non_sym_ax_distinct = non_sym_ax.twinx()
-            non_sym_ax_distinct.set_ylim(non_sym_distinct_min, non_sym_distinct_max)
-
-            sym_ax = self.sym_ax_list[self.islands.index(island_to_plot)]
-            sym_ax.set_xlim(0, 1)
-            sym_ax.set_ylim(sym_total_min, sym_total_max)
-            sym_ax.set_xticks([])
-            sym_ax_distinct = sym_ax.twinx()
-            sym_ax_distinct.set_ylim(100, sym_distinct_max)
-            # place the island label on the x axis rotated
-            sym_ax.set_xlabel(island_to_plot, rotation='vertical')
-
-            if self.islands.index(island_to_plot) == 0:
-                # If first plot then only remove top and right
-                # and we only want to remove the right y axis
-                raw_contigs_ax.spines['right'].set_visible(False)
-                raw_contigs_ax.spines['top'].set_visible(False)
-                raw_contigs_ax.set_yscale('symlog')
-                raw_contigs_ax.spines['left'].set_color(c='blue')
-                raw_contigs_ax.tick_params('y', colors='blue')
-
-                # plot average line
-                raw_contigs_ax.axhline(y=average_raw_contigs_per_sample, xmin=0, xmax=1, c='blue')
-
-                non_sym_ax.spines['right'].set_visible(False)
-                non_sym_ax.spines['top'].set_visible(False)
-                non_sym_ax.set_yscale('symlog')
-                non_sym_ax.spines['left'].set_color(c='blue')
-                non_sym_ax.tick_params('y', colors='blue')
-
-                non_sym_ax_distinct.spines['right'].set_visible(False)
-                non_sym_ax_distinct.spines['top'].set_visible(False)
-                non_sym_ax_distinct.set_yscale('symlog')
-                non_sym_ax_distinct.set_yticks([])
-                non_sym_ax_distinct.minorticks_off()
-                non_sym_ax_distinct.spines['left'].set_color(c='blue')
-
-                sym_ax.spines['right'].set_visible(False)
-                sym_ax.spines['top'].set_visible(False)
-                sym_ax.set_yscale('symlog')
-                sym_ax.spines['left'].set_color(c='blue')
-                sym_ax.tick_params('y', colors='blue')
-
-                sym_ax_distinct.spines['right'].set_visible(False)
-                sym_ax_distinct.spines['top'].set_visible(False)
-                sym_ax_distinct.set_yscale('symlog')
-                sym_ax_distinct.set_yticks([])
-                sym_ax_distinct.minorticks_off()
-                sym_ax_distinct.spines['left'].set_color(c='blue')
-
-            elif self.islands.index(island_to_plot) == 31:
-                # If the last plot then we want to annotate the right y axis
-                raw_contigs_ax.spines['left'].set_visible(False)
-                raw_contigs_ax.spines['top'].set_visible(False)
-                raw_contigs_ax.spines['right'].set_visible(False)
-                raw_contigs_ax.set_yscale('symlog')
-                raw_contigs_ax.set_yticks([])
-                raw_contigs_ax.minorticks_off()
-
-
-                non_sym_ax.spines['left'].set_visible(False)
-                non_sym_ax.spines['top'].set_visible(False)
-                non_sym_ax.set_yscale('symlog')
-                non_sym_ax.set_yticks([])
-                non_sym_ax.minorticks_off()
-                non_sym_ax.spines['right'].set_color(c='red')
-
-
-                non_sym_ax_distinct.spines['left'].set_visible(False)
-                non_sym_ax_distinct.spines['top'].set_visible(False)
-                non_sym_ax_distinct.set_yscale('symlog')
-                non_sym_ax_distinct.spines['right'].set_color(c='red')
-                non_sym_ax_distinct.tick_params('y', colors='red')
-
-
-                sym_ax.spines['left'].set_visible(False)
-                sym_ax.spines['top'].set_visible(False)
-                sym_ax.set_yscale('symlog')
-                sym_ax.set_yticks([])
-                sym_ax.minorticks_off()
-                sym_ax.spines['right'].set_color(c='red')
-
-                sym_ax_distinct.spines['left'].set_visible(False)
-                sym_ax_distinct.spines['top'].set_visible(False)
-                sym_ax_distinct.set_yscale('symlog')
-                sym_ax_distinct.spines['right'].set_color(c='red')
-                sym_ax_distinct.tick_params('y', colors='red')
-            else:
-                raw_contigs_ax.spines['left'].set_visible(False)
-                raw_contigs_ax.spines['top'].set_visible(False)
-                raw_contigs_ax.spines['right'].set_visible(False)
-                raw_contigs_ax.set_yscale('symlog')
-                raw_contigs_ax.set_yticks([])
-                raw_contigs_ax.minorticks_off()
-
-                non_sym_ax.spines['left'].set_visible(False)
-                non_sym_ax.spines['top'].set_visible(False)
-                non_sym_ax.spines['right'].set_visible(False)
-                non_sym_ax.set_yscale('symlog')
-                non_sym_ax.set_yticks([])
-                non_sym_ax.minorticks_off()
-
-                non_sym_ax_distinct.spines['left'].set_visible(False)
-                non_sym_ax_distinct.spines['top'].set_visible(False)
-                non_sym_ax_distinct.spines['right'].set_visible(False)
-                non_sym_ax_distinct.set_yscale('symlog')
-                non_sym_ax_distinct.set_yticks([])
-                non_sym_ax_distinct.minorticks_off()
-
-                sym_ax.spines['left'].set_visible(False)
-                sym_ax.spines['top'].set_visible(False)
-                sym_ax.spines['right'].set_visible(False)
-                sym_ax.set_yscale('symlog')
-                sym_ax.set_yticks([])
-                sym_ax.minorticks_off()
-
-                sym_ax_distinct.spines['left'].set_visible(False)
-                sym_ax_distinct.spines['top'].set_visible(False)
-                sym_ax_distinct.spines['right'].set_visible(False)
-                sym_ax_distinct.set_yscale('symlog')
-                sym_ax_distinct.set_yticks([])
-                sym_ax_distinct.minorticks_off()
-
-
-            for site in sites:
-                samples = self.info_df[(self.info_df['location'] == island_to_plot) & (self.info_df['site'] == site) & (self.info_df['coral_plankton'] == 'CORAL') & (self.info_df['spp_water'] != 'HELIOPORA') & (self.info_df['spp_water'] != 'PORITES_PANAMENSIS')]
-                # Now we can populate the sample information for each of the plots
-                # lists that we will create the avergae and stdev points from
-                raw_contigs_vals = []
-                non_sym_vals_total = []
-                non_sym_vals_distinct = []
-                sym_vals_total = []
-                sym_vals_distinct = []
-
-
-
-                # the x_coordinates
-                indi_data_point_x_total = x_coord_vals[sites.index(site)][0]
-                mean_data_point_x_total = x_coord_vals[sites.index(site)][1]
-                indi_data_point_x_distinct = x_coord_vals[sites.index(site)][2]
-                mean_data_point_x_distinct = x_coord_vals[sites.index(site)][3]
-
-                # Now plot up the individual points and collect for calculating the mean
-                for sample_name, sample_ser in samples.iterrows():
-                    # raw_contigs
-                    y_raw_contig = self.seq_meta_info_df.at[sample_name, 'raw_contigs']
-                    raw_contigs_vals.append(y_raw_contig)
-                    raw_contigs_ax.scatter(x=indi_data_point_x_total, y=y_raw_contig, marker='.', s=1, c='b')
-
-                    # non_sym_vals total and distinct
-                    y_non_sym_total = self.seq_meta_info_df.at[sample_name, 'post_taxa_id_absolute_non_symbiodinium_seqs']
-                    non_sym_vals_total.append(y_non_sym_total)
-                    non_sym_ax.scatter(x=indi_data_point_x_total, y=y_non_sym_total, marker='.', s=1, c='b')
-                    y_non_sym_distinct = self.seq_meta_info_df.at[sample_name, 'post_taxa_id_unique_non_symbiodinium_seqs']
-                    non_sym_vals_distinct.append(y_non_sym_distinct)
-                    non_sym_ax_distinct.scatter(x=indi_data_point_x_distinct, y=y_non_sym_distinct, marker='.', s=1, c='r')
-
-                    # sym counts total and distinct
-                    y_sym_total = self.seq_meta_info_df.at[
-                        sample_name, 'post_taxa_id_absolute_symbiodinium_seqs']
-                    sym_vals_total.append(y_sym_total)
-                    sym_ax.scatter(x=indi_data_point_x_total, y=y_sym_total, marker='.', s=1, c='b')
-                    y_sym_distinct = self.seq_meta_info_df.at[
-                        sample_name, 'post_taxa_id_unique_symbiodinium_seqs']
-                    sym_vals_distinct.append(y_sym_distinct)
-                    sym_ax_distinct.scatter(x=indi_data_point_x_distinct, y=y_sym_distinct, marker='.', s=1, c='r')
-
-                # Here we should have all of the individual data points plotted up
-                # We should also have collected all of the opints in a list so that we can now
-                # calculate the mean and the standard deviations
-                # For the time being just plot the mean and worry about stdev bars later
-                mean_point_size = 40
-                raw_contigs_ax.scatter(x=mean_data_point_x_total, y=sum(raw_contigs_vals)/len(raw_contigs_vals), marker='.', s=mean_point_size, c='b')
-                non_sym_ax.scatter(x=mean_data_point_x_total, y=sum(non_sym_vals_total)/len(non_sym_vals_total), marker='.', s=mean_point_size, c='b')
-                non_sym_ax_distinct.scatter(x=mean_data_point_x_distinct, y=sum(non_sym_vals_distinct)/len(non_sym_vals_distinct), marker='.', s=mean_point_size, c='r')
-                sym_ax.scatter(x=mean_data_point_x_total, y=sum(sym_vals_total) / len(sym_vals_total), marker='.', s=mean_point_size, c='b')
-                sym_ax_distinct.scatter(x=mean_data_point_x_distinct,
-                                   y=sum(sym_vals_distinct) / len(sym_vals_distinct), marker='.', s=mean_point_size, c='r')
-
-            # plot up the total average lines that will be extended by hand
-            # plot on the 0 and 1 so that we can still see both lines despite overlap.
-            if self.islands.index(island_to_plot) == 0:
-                raw_contigs_ax.axhline(y=average_raw_contigs_per_sample, xmin=0, xmax=1, c='blue')
-                non_sym_ax.axhline(y=average_non_sym_total, xmin=0, xmax=1, c='blue')
-                sym_ax.axhline(y=average_sym_total, xmin=0, xmax=1, c='blue')
-            if self.islands.index(island_to_plot) == 1:
-                non_sym_ax_distinct.axhline(y=average_non_sym_distinct, xmin=0, xmax=1, c='red')
-                sym_ax_distinct.axhline(y=average_sym_distinct, xmin=0, xmax=1, c='red')
-
-        plt.savefig(os.path.join(self.output_dir, 'coral_only_qc_fig.svg'))
-        plt.savefig(os.path.join(self.output_dir, 'coral_only_qc_fig.png'), dpi=1200)
 
 class SPDataSheet:
     """Class to make the SPDataSheet from the sample info dataframe."""
@@ -1449,145 +1064,6 @@ class SPDataSheet:
         df.set_index(keys='sample_name', drop=True, inplace=True)
         return df
 
-class GenerateInfoCollectionDF:
-    """Class concerned with creating the information dataframe"""
-    def __init__(self, base_dir, provenance_df):
-        self.base_dir = base_dir
-        self.provenance_df = provenance_df
-        self.rows = []
-
-    def generate_df(self):
-        self._create_data_rows()
-        return pd.DataFrame(data=self.rows, columns=['sample_name', 'fastq_fwd_file_path', 'fastq_rev_file_path', 'coral_plankton', 'spp_water', 'location', 'site', 'lat', 'lon']).set_index(keys='sample_name')
-    
-    def _create_data_rows(self):
-        """ Parse through the seq data file structure gathering 
-        inferring the info for each sequecning file pair as we descend the structure/
-        Collect a single row of data for each sample"""
-        for location in os.listdir(self.base_dir):
-            if 'ISLAND' in location:
-                parsing_dir_loc = os.path.join(self.base_dir, location)
-                for site in os.listdir(parsing_dir_loc):
-                    parsing_dir_site = os.path.join(parsing_dir_loc, site)
-                    for sample_type in os.listdir(parsing_dir_site):
-                        parsing_dir_sample_type = os.path.join(parsing_dir_site, sample_type)
-                        if sample_type == 'CORAL':
-                            for species in os.listdir(parsing_dir_sample_type):
-                                parsing_dir_species = os.path.join(parsing_dir_sample_type, species)
-                                for individual in os.listdir(parsing_dir_species):
-                                    parsing_dir_indi = os.path.join(parsing_dir_species, individual, 'CS4L')
-                                    # now we are in the directory that contains the actual paired fastq.gz files for a
-                                    # given coral individual
-                                    # collect the information we need
-                                    srg = SampleRowGenerator(location=location, parsing_dir=parsing_dir_indi, sample_type=sample_type, site=site, water_species=species, provenance_df=self.provenance_df)
-                                    self.rows.append(srg.create_sample_row())
-                                    print(f'Processed: {parsing_dir_indi}')
-
-                        elif sample_type == 'PLANKTON':
-                            for water_type in os.listdir(parsing_dir_sample_type):
-                                if water_type == 'CSW':
-                                    parsing_dir_water_type = os.path.join(parsing_dir_sample_type, water_type)
-                                    for individual in os.listdir(parsing_dir_water_type):
-                                        parsing_dir_indi = os.path.join(parsing_dir_water_type, individual, 'S320')
-                                        # now we are in the directory that contains the actual paired fastq.gz files for a
-                                        # given water sample
-                                        # collect the information we need
-                                        srg = SampleRowGenerator(location=location, parsing_dir=parsing_dir_indi, sample_type=sample_type, site=site, water_species=water_type, provenance_df=self.provenance_df)
-                                        self.rows.append(srg.create_sample_row())
-                                        print(f'Processed: {parsing_dir_indi}')
-
-                                elif water_type == 'SURFACE':
-                                    # then this is a SURFACE sample and there are no individuals
-                                    parsing_dir_water_type = os.path.join(parsing_dir_sample_type, water_type, 'S320')
-                                    # collect the information we need
-                                    srg = SampleRowGenerator(location=location, parsing_dir=parsing_dir_water_type, sample_type=sample_type, site=site, water_species=water_type, provenance_df=self.provenance_df)
-                                    self.rows.append(srg.create_sample_row())
-                                    print(f'Processed: {parsing_dir_water_type}')
-
-            elif 'OA' in location:
-                parsing_dir_loc = os.path.join(self.base_dir, location, 'PLANKTON', 'SURFACE', 'S320')
-                # NB the arguments are a little messed up here on purpose as we don't have seperate site and location
-                srg = SampleRowGenerator(location=location, parsing_dir=parsing_dir_loc, sample_type='OA', site=location, water_species='PLANKTON', provenance_df=self.provenance_df)
-                self.rows.append(srg.create_sample_row())
-                print(f'Processed: {parsing_dir_loc}')
-
-
-class SampleRowGenerator:
-    def __init__(self, location, parsing_dir, sample_type, site, water_species, provenance_df):
-        self.parsing_dir = parsing_dir
-        self.location = location
-        self.sample_type = sample_type
-        self.site = site
-        self.water_type = water_species
-        self.provenance_df=provenance_df
-        self.sample_name = '_'.join(os.listdir(self.parsing_dir)[0].split('_')[:2])
-        self.lat = self.provenance_df.at[self.sample_name, 'lat']
-        self.lon = self.provenance_df.at[self.sample_name, 'lon']
-        self.files = os.listdir(self.parsing_dir)
-        if len(self.files) != 2:
-            self._concatenate_seq_files()
-            self.files = os.listdir(self.parsing_dir)
-            if len(self.files) != 2:
-                raise RuntimeError(f'Error in concatenation of seq files in {self.parsing_dir}')
-        self.fwd_found = False
-        self.rev_found = False
-        self.fwd_path = None
-        self.rev_path = None
-        self._get_seq_paths()
-
-    def _concatenate_seq_files(self):
-        """ Sometime there is more than 1 set of sequencing files. In this case
-        we want to concatenate all of the R1 reads together and all of the R2 reads
-        together. Importantly we want to merge the respective memebers of the sequencing
-        pairs in the same order.
-        We will get a list of R1 files in the director (arbitrary order)
-        We will then get a corresponding list of R2 files in the same realtive order
-        by doing a replace function on the R1 list.
-        We will then concatenate each list of files. Importantly, we will do this
-        directly on the .gz files as this is apparently OK.
-        https://www.biostars.org/p/81924/
-        """
-        # get files
-        r1_files_list = [file_name for file_name in self.files if 'R1' in file_name]
-        r2_files_list = [file_name.replace("R1", "R2") for file_name in r1_files_list]
-        
-        # Create the list that holds the cat command and the arguments
-        exe_1 = [os.path.join(self.parsing_dir, _) for _ in r1_files_list]
-        exe_1.insert(0, 'cat')
-        exe_2 = [os.path.join(self.parsing_dir, _) for _ in r2_files_list]
-        exe_2.insert(0, 'cat')
-        
-        # outpaths that will be used to create a stream that will be passed as stdout
-        out_path_1 = os.path.join(self.parsing_dir, r1_files_list[0].replace("R1.fastq.gz", "merged.R1.fastq.gz"))
-        out_path_2 = os.path.join(self.parsing_dir, r2_files_list[0].replace("R2.fastq.gz", "merged.R2.fastq.gz"))
-
-        # do cat
-        with open(out_path_1, 'wb') as f:
-            subprocess.run(exe_1, stdout=f)
-        with open(out_path_2, 'wb') as f:
-            subprocess.run(exe_2, stdout=f)
-        
-        # rm the old files that have now been concatenated
-        for file_path in exe_1[1:]:
-            os.remove(file_path)
-        for file_path in exe_2[1:]:
-            os.remove(file_path)
-
-    def _get_seq_paths(self):
-        for file_name in self.files:
-                if 'R1' in file_name:
-                    self.fwd_path = os.path.join(self.parsing_dir, file_name)
-                    self.fwd_found = True
-                elif 'R2' in file_name:
-                    self.rev_path = os.path.join(self.parsing_dir, file_name)
-                    self.rev_found = True
-
-    def create_sample_row(self):
-        if not self.fwd_found or not self.rev_found:
-            print('fwd or rev read not found')
-            sys.exit(1)
-        else:
-            return [self.sample_name, self.fwd_path, self.rev_path, self.sample_type, self.water_type, self.location, self.site, self.lat, self.lon]
 
 def human_readable_size(size, decimal_places=3):
     for unit in ['B','KiB','MiB','GiB','TiB']:
@@ -1596,6 +1072,10 @@ def human_readable_size(size, decimal_places=3):
         size /= 1024.0
     return f"{size:.{decimal_places}f}{unit}"
 
-ITS2Processing(marker='its2').start_walking()
-ITS2Processing(marker='18s').start_walking()
+dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
+ITS2Processing(marker='its2', date_string=dat_string).start_walking()
+ITS2Processing(marker='18s', date_string=dat_string).start_walking()
+ITS2Processing(marker='16s_45', date_string=dat_string).start_walking()
+ITS2Processing(marker='16s_full_45', date_string=dat_string).start_walking()
+
 
