@@ -1,0 +1,12 @@
+18s_data/
+*.png
+*.svg
+*.txt
+*.pickle
+.idea/
+.ncbirc
+individual_info
+throw_awayseqs/
+input/
+cache/
+output/
