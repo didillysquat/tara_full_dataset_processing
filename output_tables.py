@@ -18,7 +18,7 @@ class EighteenSOutputTables(EighteenSBase):
 
     status - This will be binary as use OR do_not_use
 
-    primary_taxonomic_annotation - This will be either Pocrites, Millepora, Pocillopora or other.
+    genus_18S_taxonomic_annotation - This will be either Pocrites, Millepora, Pocillopora or other.
         It will be the cummulatively most abundant of the categories in the sample.
         If this is 'other', it will cause the sample to have a do_not_use status.
 
@@ -32,10 +32,10 @@ class EighteenSOutputTables(EighteenSBase):
 
     is_different_primary_sequence Boolean. Whether the most abundant sequence of the genus in
         question is different to the 'usual' most abundant sequence for the genus in question
-        (considering all other samples). This will only apply to samples that have a primary_taxonomic_annotation
+        (considering all other samples). This will only apply to samples that have a genus_18S_taxonomic_annotation
         as one of our three target genera. (~50 samples will have this true). Causes do_not_use.
 
-    primary_sequence. The most abundant sequence of the sample that annotates as the primary_taxonomic_annotation.
+    primary_sequence. The most abundant sequence of the sample that annotates as the genus_18S_taxonomic_annotation.
 
     low_host_rel_abund. Boolean. If the relative abundance of the host genus in question sequences is
         below 30% as a proportion of all sequence in the sample, this will be true. Will cause do_not_use.
@@ -66,6 +66,11 @@ class EighteenSOutputTables(EighteenSBase):
         # This will have sample name as key and a list in order of the df columns given in the comments
         self.primary_seq_dict = self._make_primary_seq_dict()
         self.coral_meta_info_table_dict = {}
+        #TODO We need to incorporate the changes requested by Stephane. These are largely
+        # aimed at keeping the same terms that are given in the provenance table
+        # in our output table. This is a good point.
+        # We had originally hoped to be able to get rid of technical replicates but we will need to include
+        # these as there are still technical replicates hosted on the genoscope server.
         self._populate_coral_meta_info_table_dict()
 
         # This will be a dict where full sequence is the key
@@ -115,7 +120,7 @@ class EighteenSOutputTables(EighteenSBase):
         return primary_seq_dict
 
     def _populate_coral_meta_info_table_dict(self):
-        if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz')):
+        if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dictX.p.bz')):
             return compress_pickle.load(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
         print('Populating coral meta info table dict')
@@ -130,7 +135,7 @@ class EighteenSOutputTables(EighteenSBase):
             self.coral_meta_info_table_dict,
             orient='index',
             columns=[
-                'status', 'primary_taxonomic_annotation','provenance_taxonomic_annotation',
+                'status', 'genus_18S_taxonomic_annotation','provenance_taxonomic_annotation',
                 'is_provenance_taxonomic_annotation_correct',
                 'inter_coral_contamination_rel_abund', 'is_inter_coral_contamination',
                 'primary_sequence', 'is_different_primary_sequence',
@@ -345,6 +350,13 @@ class TableFour():
     def __init__(self, parent, sample_id):
         self.parent = parent
         self.sample_id = sample_id
+        # If this is one of multiple technical replicates
+        self.is_tech_rep = (self.sample_id[-2] == '_')
+        if self.is_tech_rep:
+            self.sample_base_id = '_'.join(self.sample_id.split('_')[:-1])
+            self.tech_rep_num = int(self.sample_id.split('_')[-1])
+        else:
+            self.sample_base_id = self.sample_id
         self.status = True
         self.sample_qc_dir = os.path.join(self.parent.qc_dir, sample_id)
         self.coral_annotation_dict = compress_pickle.load(os.path.join(self.sample_qc_dir, 'coral_annotation_dict.p.bz'))
@@ -354,8 +366,8 @@ class TableFour():
             os.path.join(self.sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
         self.coral_tax_rel_count_dd = self._make_coral_tax_rel_count_dd()
         self.sorted_coral_tax_dict_keys = sorted(self.coral_tax_rel_count_dd, key=self.coral_tax_rel_count_dd.get, reverse=True)
-        self.primary_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
-        self.provenance_annotation = self.parent.info_df.at[sample_id, 'species']
+        self.genus_18S_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
+        self.provenance_annotation = self.parent.sample_provenance_df.at[sample_id, 'Sample Material label, organismal system level, taxonomic, nominal']
 
         # The remainder of the variables that we need to populate
         self.is_provenance_tax_annotation_correct = None
@@ -382,9 +394,9 @@ class TableFour():
         return coral_tax_rel_count_dd
 
     def _pop_for_normal_sample(self):
-        self.primary_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
+        self.genus_18S_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
         self._set_is_provenance_tax_annotation_correct()
-        if self.primary_taxonomic_annotation not in ["Porites", "Millepora", "Pocillopora"]:
+        if self.genus_18S_taxonomic_annotation not in ["Porites", "Millepora", "Pocillopora"]:
             self.status = False
 
         self._set_inter_coral_contamination()
@@ -443,7 +455,7 @@ class TableFour():
 
     def _populate_coral_meta_info_table_dict(self):
         self.parent.coral_meta_info_table_dict[self.sample_id] = [
-            self.status, self.primary_taxonomic_annotation, self.provenance_annotation,
+            self.status, self.genus_18S_taxonomic_annotation, self.provenance_annotation,
             self.is_provenance_tax_annotation_correct,
             self.inter_coral_contamination_rel_abund, self.is_inter_coral_contamination,
             self.primary_sequence, self.is_different_primary_sequence,
@@ -491,7 +503,7 @@ class TableFour():
     def _set_host_rel_abund_normal(self):
         # Check to see what proportion the sample sequences the host sequences (of the primary_taxonomic annotation)
         # represent. If less than 0.3, mark low_host_rel_abund as True
-        self.host_rel_abund = self.coral_tax_rel_count_dd[self.primary_taxonomic_annotation]
+        self.host_rel_abund = self.coral_tax_rel_count_dd[self.genus_18S_taxonomic_annotation]
         if self.host_rel_abund < 0.3:
             self.is_low_host_rel_abund = True
             self.status = False
@@ -501,7 +513,7 @@ class TableFour():
     def _set_host_rel_abund_heliopora(self):
         # Check to see what proportion the sample sequences the host sequences (of the primary_taxonomic annotation)
         # represent. If less than 0.3, mark low_host_rel_abund as True
-        self.host_rel_abund = self.all_tax_count_dd[self.primary_taxonomic_annotation]
+        self.host_rel_abund = self.all_tax_count_dd[self.genus_18S_taxonomic_annotation]
         if self.host_rel_abund < 0.3:
             self.is_low_host_rel_abund = True
             self.status = False
@@ -513,7 +525,7 @@ class TableFour():
         # if the sample annotates as other then make this true
         self.primary_sequence = self.parent.info_df.at[self.sample_id, 'most_abund_seq_of_coral_genus']
         try:
-            if self.primary_sequence == self.parent.primary_seq_dict[self.primary_taxonomic_annotation]:
+            if self.primary_sequence == self.parent.primary_seq_dict[self.genus_18S_taxonomic_annotation]:
                 self.is_different_primary_sequence = False
             else:
                 self.is_different_primary_sequence = True
@@ -525,7 +537,7 @@ class TableFour():
 
     def _set_inter_coral_contamination(self):
         # Check to see whether the summed relative abundances of the coral sequences (other than the
-        # sequences orginating from the primary_taxonomic_annotation are above 1% of the total coral sample
+        # sequences orginating from the genus_18S_taxonomic_annotation are above 1% of the total coral sample
         self.inter_coral_contamination_rel_abund = sum(
             [self.coral_tax_rel_count_dd[k] for k in self.sorted_coral_tax_dict_keys[1:]])
         if self.inter_coral_contamination_rel_abund > 0.01:
@@ -540,7 +552,7 @@ class TableFour():
             os.path.join(self.sample_qc_dir, 'sample_annotation_dict.p.bz'))
         self.fasta_dict = self._make_fasta_dict()
         self.all_tax_count_dd = self._make_all_tax_count_dd()
-        self.primary_taxonomic_annotation = sorted(self.all_tax_count_dd, key=self.all_tax_count_dd.get, reverse=True)[0]
+        self.genus_18S_taxonomic_annotation = sorted(self.all_tax_count_dd, key=self.all_tax_count_dd.get, reverse=True)[0]
         self._set_is_provenance_tax_annotation_correct()
 
         # set inter coral contamination fields to nan
@@ -563,7 +575,7 @@ class TableFour():
 
 
     def _set_is_provenance_tax_annotation_correct(self):
-        if self.primary_taxonomic_annotation == self.provenance_annotation:
+        if self.genus_18S_taxonomic_annotation == self.provenance_annotation:
             self.is_provenance_tax_annotation_correct = True
         else:
             self.is_provenance_tax_annotation_correct = False
