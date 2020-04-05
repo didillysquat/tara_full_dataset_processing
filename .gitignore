@@ -1,7 +1,6 @@
 18s_data/
 *.png
 *.svg
-*.txt
 *.pickle
 .idea/
 .ncbirc
@@ -28,3 +27,4 @@ processing_5.py
 seq_qc_5/
 sample_provenance_20200201.csv
 tara_samples_provenance_OLD.csv
+read_me_for_ben
