@@ -101,13 +101,15 @@ class ITS2Processing:
     def __init__(self, marker, seq_file_download_directory=None, date_string=None, download=False):
         self.input_dir = os.path.abspath(os.path.join('.', 'input'))
         self.output_dir = os.path.abspath(os.path.join('.', 'output'))
+        self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.cache_dir, exist_ok=True)
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
         self.sample_provenance_df = self._make_sample_provenance_df()
         self.readset_info_dir = os.path.join(self.input_dir, "readset_csvs")
         self.readset_df = self._make_readset_info_dir()
-        self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
+        
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
         # symportal datasheets for doing the loading
         if date_string:
@@ -207,7 +209,7 @@ class ITS2Processing:
         return (auth_lines[0], auth_lines[1])
 
     def start_walking(self):
-        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}X.p.bz')):
+        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz')):
             self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
         else:
             soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
@@ -560,10 +562,10 @@ class ReplicationWalkerWorker:
                     size_dict = self._download_file_if_necessary(fwd_read, rev_read)
                 else:
                     # Then this is not a coral fastq.gz and we do not want to download.
-                    self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
+                    size_dict = self._get_size_dict_no_download(size_dict_passed=size_dict_passed, fwd_read=fwd_read, rev_read=rev_read)
             else:
                 # Then we are not downloading the files
-                self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
+                size_dict = self._get_size_dict_no_download(size_dict_passed=size_dict_passed, fwd_read=fwd_read, rev_read=rev_read)
         else:
             # For all other markers download_data will either not be true (16s_45, 16_full_45)
             # or will be optional (its2).
@@ -571,7 +573,7 @@ class ReplicationWalkerWorker:
             if use and self.download_data:
                 size_dict = self._download_file_if_necessary(fwd_read, rev_read)
             else:
-                self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
+                size_dict = self._get_size_dict_no_download(size_dict_passed=size_dict_passed, fwd_read=fwd_read, rev_read=rev_read)
         
         #TODO add the pcr name and extraction nme
         pcr_code = self.readset_df.at[readset, 'pcr_code']
@@ -582,7 +584,7 @@ class ReplicationWalkerWorker:
         if use and self.marker == 'its2':
             self._populate_sp_datasheet_dict_item(barcode_id, fwd_read, rev_read)
 
-    def _get_size_dict_no_download(self, size_dict_passed):
+    def _get_size_dict_no_download(self, size_dict_passed, fwd_read, rev_read):
         if size_dict_passed:
             return size_dict_passed
         else:
