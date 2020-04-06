@@ -16,7 +16,7 @@ bin/auth.txt
 *.p
 seq_qc/
 .ncbirc
-.vscode
+.vscode/
 cache/
 envs/
 figures/

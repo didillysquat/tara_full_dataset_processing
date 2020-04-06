@@ -1,12 +1,31 @@
 """
-Script to cover all of the processing for the TARA ITS2 samples from the corals and from the surface waters
-It will use a large part of the code that was used when we had only the data from the first three islands
-available. This previous script was call tara_processing_script.py
+This script has several functions.
+Firstly it produces a set of output tables, one for each marker (its2, 182, 16s_45, 16s_full_45).
+These tables are produced by parsing the directories of the Genescope server and considering every
+pair of fastq.gz files. The problem that we were trying to address was that for a given barcode_id (i.e. sample)
+there may be several sets of paired fastq.gz files. We were working with Julie to try to work out which
+pairs we should be using and which not. In the end we ended with a categorisatin sytem of green, yellow and red.
+These colours stand for sequence_replicate_same_run (i.e. one library split over two lanes), 
+sequence_replicate_different_run (same library but on different sequencing runs) and 
+method_replicate (this is where a different dna extraction method or seperate PCR was used).
+So the outputs produced give us these details. The columns are as follows:
+[
+            'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
+            'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
+            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genescope_comment_1', 'genescope_comment_2'
+]
+The 'use' column was the samples that Chris and I were going to 'recommend' or 'use' based on a strategy of only using one 
+pair of fastq.gz files per sample. This decision was based on looking at the average sizes of the green, yellow and red samples.
+One of the additional things I actually want to do is plot up the sizes to see if we should be revising this decision.
 
-To start with we will want to create an info df for the samples. This in turn can be used to generate a
-datasheet that we will then be able to use to run the samples through SymPortal.
+Secondly, this script produces the SymPortal datasheets for the coral and non-coral samples (seperate datasheets).
+The sediment and water samples are pooled into the non-coral samples. Within the running of the its2 component of this script,
+it automatically downloads the fastq.gz files that will be used to a given directory. 
+Currently, only a single fastq.gz pair are downloaded and loaded into symportal per barcode_id.
 
-This is probaly a good stage to get to for a first attempt
+Finally, within the 18s we want to implement the download of the 18s files that we will then do the the QC on and work with.
+We will only be intested in the coral samples (i.e. no water samples) for the 18s. However, we will work with all fastq.gz file
+pairs (i.e. multiple pairs per barcode if they exist).
 """
 import os
 import pickle
@@ -86,7 +105,7 @@ class ITS2Processing:
         os.makedirs(self.output_dir, exist_ok=True)
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
         self.sample_provenance_df = self._make_sample_provenance_df()
-        self.readset_info_dir = "/home/humebc/projects/tara/replication_testing/readset_csvs"
+        self.readset_info_dir = os.path.join(self.input_dir, "readset_csvs")
         self.readset_df = self._make_readset_info_dir()
         self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
         # Two dictionaries that will hold the information for creating the dataframes form that will become the
@@ -110,20 +129,18 @@ class ITS2Processing:
             'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genescope_comment_1', 'genescope_comment_2']
         # We can download the files that we are going to keep while we're at it
         # We should save them to a single directory
-
+        self.seq_file_download_directory = seq_file_download_directory
         if self.marker == 'its2':
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/ITS2/ITS2_SYM_VAR_5.8S2_SYM_VAR_REV/"
-            self.seq_file_download_directory = seq_file_download_directory
-            if not download:
-                self.download_data = False
-            else:
+            if download:
                 self.download_data = True
+            else:
+                self.download_data = False
             self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
         elif self.marker == '18s':
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/18S_V9/18S_V9_1389F_1510R/"
             if download:
                 self.download_data = True
-                self.seq_file_download_directory = seq_file_download_directory
             else:
                 self.download_data = False
             self.no_keep_info_red_barcodes_list = [
@@ -134,10 +151,12 @@ class ITS2Processing:
                 'OA-0000011', 'OA-0000027', 'OA-0002159', 'OA-0002546'
             ]
         elif self.marker == '16s_45':
+            self.seq_file_download_directory = None
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/16S_V4V5/Fuhrman_primers/"
             self.download_data = False
             self.no_keep_info_red_barcodes_list = []
         elif self.marker == '16s_full_45':
+            self.seq_file_download_directory = None
             self.remote_base_dir = "https://www.genoscope.cns.fr/sadc/tarapacific/METABARCODING/16S_Full_Length_plus_16S_V4V5/16S_FL_27F_1492R_plus_Fuhrman_primers/"
             self.download_data = False
             self.no_keep_info_red_barcodes_list = [
@@ -147,7 +166,6 @@ class ITS2Processing:
                 'FH-0000297', 'FH-0000303', 'FH-0000308', 'FH-0000313', 'FH-0000318', 'FH-0000323',
                 'FH-0000328', 'FH-0000333', 'FH-0000338', 'FH-0000343', 'FH-0000348', 'FH-0000353',
             ]
-        self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
         # Var to collect the output of the MP processing
@@ -178,12 +196,12 @@ class ITS2Processing:
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
         df = df.set_index('readset', drop=True)
         # Here add in the comments for Julie.
-        juli_comment_df = pd.read_csv('comments_from_julie.csv', index_col=0)
+        juli_comment_df = pd.read_csv(os.path.join(self.input_dir, 'comments_from_julie.csv'), index_col=0)
         new_df = pd.concat([df, juli_comment_df], axis=1)
         return new_df
 
     def _make_auth_tup(self):
-        auth_path = os.path.join(self.exe_path, 'auth.txt')
+        auth_path = os.path.join(self.input_dir, 'auth.txt')
         with open(auth_path, 'r') as f:
             auth_lines = [line.rstrip() for line in f]
         return (auth_lines[0], auth_lines[1])
@@ -214,7 +232,7 @@ class ITS2Processing:
             # Create a ReplicationWalker for every worker_base_dir
             rep_walker_list = []
             for w_dir in worker_base_dirs:
-                rep_walker_list.append(ReplicationWalkerWorker(w_dir, marker=self.marker, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
+                rep_walker_list.append(ReplicationWalkerWorker(w_dir, seq_file_download_directory=self.seq_file_download_directory, download_data=self.download_data, marker=self.marker, prov_df=self.sample_provenance_df, readset_df=self.readset_df))
             with Pool(20) as p:
                 self.mp_output_list_of_tups = p.map(self._run_walk_on_rep_walker_item, rep_walker_list)
             compress_pickle.dump(self.mp_output_list_of_tups, os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
@@ -285,7 +303,7 @@ class ITS2Processing:
         return df
 
 class ReplicationWalkerWorker:
-    def __init__(self, remote_base_dir, marker, prov_df=None, readset_df=None):
+    def __init__(self, remote_base_dir, marker, download_data=False, seq_file_download_directory=None, prov_df=None, readset_df=None):
         self.marker = marker
         self.remote_base_dir = remote_base_dir
         self.readset_info_dir = "/home/humebc/projects/tara/replication_testing/readset_csvs"
@@ -303,7 +321,6 @@ class ReplicationWalkerWorker:
         self.done_list = set()
         self.done_and_empty_list = set()
         self.headers = {'User-Agent': 'Benjamin Hume', 'From': 'benjamin.hume@kaust.edu.sa'}
-        self.exe_path = os.path.dirname(os.path.abspath(sys.argv[0]))
         self.authorisation_tup = self._make_auth_tup()
         # Two versions of the fastq_gz_list_current
         # This one refers to the list in the directory
@@ -319,11 +336,12 @@ class ReplicationWalkerWorker:
         self.no_keep_info_red_barcodes_list_visited = []
         self.coral_sp_datasheet_df_dict = {}
         self.non_coral_sp_datasheet_df_dict = {}
+        self.download_data = download_data
+        self.seq_file_download_directory = seq_file_download_directory
         if self.marker == 'its2':
             # Two dictionaries that will hold the information for creating the dataframes form that will become the
             # symportal datasheets for doing the loading
 
-            self.seq_file_download_directory = "/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data"
             # For the seq files that were replicated due to different methodologies being used, i.e. red cases
             # Julie gave us a list of the files that we should be using (one per barcode id). These files are listed here
             # (fwd files only). These are the strings from the readsets that we need to keep. They are not exact
@@ -341,9 +359,11 @@ class ReplicationWalkerWorker:
             # She gave us the reads to keep for all but two of the barcodes. The two barcodes that she didn't give us
             # keep reads for are:
             self.no_keep_info_red_barcodes_list = ['CO-0002385', 'CO-0004425']
-            self.download_data = True
+            
+            
+                
         elif self.marker == '18s':
-            self.download_data = False
+            
             # For the 18S things are a little tricker than the ITS2. For some barcodes,
             # there are multiple not to use and multiple that we can use.
             # As such we'll have to adapt the code to look for multiple readsets
@@ -530,13 +550,29 @@ class ReplicationWalkerWorker:
         else:
             readset = index_list[0]
 
-        if use and self.download_data:
-            size_dict = self._download_file_if_necessary(fwd_read, rev_read)
-        else:
-            if size_dict_passed:
-                size_dict = size_dict_passed
+        # For the its2 marker, we will only want to download the file if it is a 'use' pair.
+        # For the 18s data, we will want to download the data if it is a coral barcode_id
+        # We will want all fastq.gz pairs regardless of whether they are 'use' or not.
+        if self.marker == '18s':
+            if self.download_data:
+                if self.sample_provenance_df.at[barcode_id ,'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
+                    # Then this is a coral fastq.gz and we will want to download it
+                    size_dict = self._download_file_if_necessary(fwd_read, rev_read)
+                else:
+                    # Then this is not a coral fastq.gz and we do not want to download.
+                    self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
             else:
-                size_dict = self._get_sizes_trough_head_request(fwd_read, rev_read)
+                # Then we are not downloading the files
+                self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
+        else:
+            # For all other markers download_data will either not be true (16s_45, 16_full_45)
+            # or will be optional (its2).
+            # For the its2 we will only be downloading if it is a 'use' pair
+            if use and self.download_data:
+                size_dict = self._download_file_if_necessary(fwd_read, rev_read)
+            else:
+                self._get_size_dict_no_download(size_dict_passed=size_dict_passed)
+        
         #TODO add the pcr name and extraction nme
         pcr_code = self.readset_df.at[readset, 'pcr_code']
         dna_extraction_code = self.readset_df.at[readset, 'dna_extraction_code']
@@ -545,6 +581,12 @@ class ReplicationWalkerWorker:
 
         if use and self.marker == 'its2':
             self._populate_sp_datasheet_dict_item(barcode_id, fwd_read, rev_read)
+
+    def _get_size_dict_no_download(self, size_dict_passed):
+        if size_dict_passed:
+            return size_dict_passed
+        else:
+            return self._get_sizes_trough_head_request(fwd_read, rev_read)
 
     def _get_sizes_trough_head_request(self, fwd_read, rev_read):
         # then we need to get the file size without downloading the file
@@ -946,7 +988,7 @@ class ReplicationWalkerWorker:
                 )
 
     def _make_auth_tup(self):
-        auth_path = os.path.join(self.exe_path, 'auth.txt')
+        auth_path = os.path.join(self.input_dir, 'auth.txt')
         with open(auth_path, 'r') as f:
             auth_lines = [line.rstrip() for line in f]
         return (auth_lines[0], auth_lines[1])
@@ -1079,9 +1121,9 @@ def human_readable_size(size, decimal_places=3):
     return f"{size:.{decimal_places}f}{unit}"
 
 dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
-ITS2Processing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=True).start_walking()
-ITS2Processing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=False).start_walking()
-ITS2Processing(marker='16s_45', date_string=dat_string).start_walking()
-ITS2Processing(marker='16s_full_45', date_string=dat_string).start_walking()
+# ITS2Processing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=False).start_walking()
+ITS2Processing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=True).start_walking()
+# ITS2Processing(marker='16s_45', date_string=dat_string).start_walking()
+# ITS2Processing(marker='16s_full_45', date_string=dat_string).start_walking()
 
 
