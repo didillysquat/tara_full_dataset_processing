@@ -1,5 +1,4 @@
-"""Python script responsible for the processing of the 18s seq data to produce distance matrices
-of the coral samples"""
+"""This script performs the quality control of the 18S sequences and does the taxonomic annotation."""
 import os
 import sys
 import pandas as pd
@@ -15,10 +14,12 @@ class EighteenSProcessing(EighteenSBase):
         # Perform the QC for the samples
         # Mothur processing that will be fed into the taxonomic screening
         seq_qc = SequenceQC(
-            info_df=self.info_df, 
+            fastq_info_df=self.fastq_info_df, 
             qc_dir=self.qc_dir, 
             cache_dir=self.cache_dir, 
-            root_dir=self.root_dir
+            root_dir=self.root_dir,
+            sample_provenance_df=self.sample_provenance_df,
+            seq_dir = self.seq_dir
             ).do_mothur_qc()
 
         # After the mothur QC we will have a set of .name and .fasta files for each sample
@@ -31,15 +32,19 @@ class EighteenSProcessing(EighteenSBase):
 class SequenceQC:
     """Quality control of the sequences using Mothur firstly and then running through BLAST
     to remove all non-coral sequences"""
-    def __init__(self, info_df, qc_dir, cache_dir, root_dir):
-        self.info_df = info_df
+    def __init__(self, fastq_info_df, qc_dir, cache_dir, root_dir, sample_provenance_df, seq_dir):
+        self.fastq_info_df = fastq_info_df
         self.qc_dir = qc_dir
         self.root_dir = root_dir
         # These dicts will be used for getting the taxonomic level, and name of a
         # taxonomic match.
+        self.taxdump_dir = '/share/databases/nt/taxdump'
         self.node_dict_pickle_path = os.path.join(cache_dir, 'node_dict.p.bz')
         self.name_dict_pickle_path = os.path.join(cache_dir, 'name_dict.p.bz')
         self.node_dict, self.name_dict = self._generate_taxa_and_name_dicts()
+        self.sample_provenance_df = sample_provenance_df
+        # The directory where the sequencing files are
+        self.seq_dir = seq_dir
 
     def do_mothur_qc(self):
         # For some reason the make.contigs doesn't seem to be using multiple processors and thus
@@ -47,37 +52,40 @@ class SequenceQC:
         # process for each. Let's try to implement with Pool
         # We will need a list to pass to Pool for doing the Apply with
         apply_list = []
-        for sample_name, ser in self.info_df.iterrows():
-            if self._check_if_qc_already_complete(sample_name):
-                continue
-            else:
-                apply_list.append([sample_name, ser['fwd_path'], ser['rev_path'], self.qc_dir])
+        for readset, ser in self.fastq_info_df.iterrows():
+            # Check to see if this is a coral sample
+            if self.sample_provenance_df.at[ser['barcode_id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
+                if self._check_if_qc_already_complete(readset):
+                    continue
+                else:
+                    apply_list.append([readset, os.path.join(self.seq_dir, ser['fwd_read_name']), os.path.join(self.seq_dir, ser['rev_read_name']), self.qc_dir])
         
         if apply_list:
             # NB the Pool does not play well with the debugger that VS code is using.
             # Pool does work OK if run normally (i.e. no debug)
             # By having the Pool operation covered by the if apply_list:
             # we should still be able to debug as we won't have to aceess Pool.
-            with Pool(24) as p:
+            with Pool(200) as p:
                 p.map(self._init_indi_mothur_qc, apply_list)
         return self
 
     def _init_indi_mothur_qc(self, sample_info):
         """We have to pass the Pool a single function. This is the function we will use to instantiate 
         an IndividualMothurQC class and run the qc."""
-        IndividualMothurQC(
-            sample_name=sample_info[0], 
+        indi = IndividualMothurQC(
+            readset=sample_info[0], 
             fwd_path=sample_info[1], 
             rev_path=sample_info[2], 
             qc_base_dir=sample_info[3],
-            num_proc=1).start_qc()
+            num_proc=1)
+        indi.start_qc()
 
     def _check_if_qc_already_complete(self, sample_name):
         return os.path.exists(os.path.join(self.qc_dir, sample_name, 'qc_complete.txt'))
 
     def do_bast_qc(self):
         """
-        For every sample run a blast against the nt database.
+        For every set of sequence files run a blast against the nt database.
         For each sequence get 10 blast results.
         Look at the matches and see which taxon was highest represented.
         We will produce three annotation dictionaries.
@@ -89,36 +97,64 @@ class SequenceQC:
         In both of these dicts, genus level annotations will be used for the sequences.
 
         We will run this in serial but use multiple processors for running the blast.
+
+        # TODO given that we are running on zygote and can easily use up the 200 cores, I think that best speed
+        # will likely be realised through the use of both multiple processes and using multiple cores for the blast.
+        # Perhaps we could try 20 core blasts and use a pool of 10 processes.
         """
-        self._write_out_ncbi_db_config_file()
+        # self._write_out_ncbi_db_config_file()
 
-        print('Taxonomic annotation')
-        for sample_name in self.info_df.index:
-            sys.stdout.write(f'\r{sample_name}')
-            IndividualTaxAnnotationQC(
-                node_dict=self.node_dict, 
-                names_dict=self.name_dict, 
-                qc_dir=self.qc_dir, 
-                sample_name=sample_name
-                ).do_taxonomy_annotation()
-        print('\nTaxonomic annotation complete\n')
+        # Get an apply list
+        apply_list = []
+        for readset in self.fastq_info_df.index:
+            if not os.path.exists(os.path.join(self.qc_dir, readset, 'blast_complete.txt')):
+                apply_list.append((self.node_dict, self.name_dict, self.qc_dir, readset))
+                
+        if apply_list:
+            with Pool(20) as p:
+                p.map(self._set_tax_running, apply_list)
 
-    def _write_out_ncbi_db_config_file(self):
-        ncbircFile = []
-        ncbircFile.extend(["[BLAST]", "BLASTDB=/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/"])
+        foo = 'bar'
+        
+        # for readset in self.fastq_info_df.index:
+        #     sys.stdout.write(f'\r{readset}')
+        #     IndividualTaxAnnotationQC(
+        #         node_dict=self.node_dict, 
+        #         names_dict=self.name_dict, 
+        #         qc_dir=self.qc_dir, 
+        #         readset=readset
+        #         ).do_taxonomy_annotation()
+        #     # Write out the completed.txt file to show that this file pairs has already been done
+        #     with open(os.path.join(qc_dir, readset, 'completed.txt'), 'w') as f:
+        #         f.write(f'{readset} complete')
+        # print('\nTaxonomic annotation complete\n')
 
-        # write out the ncbircFile
-        with open(os.path.join(self.root_dir, '.ncbirc'), 'w') as f:
-            for line in ncbircFile:
-                f.write(f'{line}\n')
+    # def _write_out_ncbi_db_config_file(self):
+    #     ncbircFile = []
+    #     ncbircFile.extend(["[BLAST]", "BLASTDB=/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/"])
+
+    #     # write out the ncbircFile
+    #     with open(os.path.join(self.root_dir, '.ncbirc'), 'w') as f:
+    #         for line in ncbircFile:
+    #             f.write(f'{line}\n')
     
-    def _generate_taxa_and_name_dicts(self,
-                taxdump_dir='/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/taxdump'):
+    def _set_tax_running(self, list_of_things):
+        (node_dict, names_dict, qc_dir, readset) = list_of_things
+        
+        indi_tax_an = IndividualTaxAnnotationQC(
+                node_dict=node_dict.copy(), 
+                names_dict=names_dict.copy(), 
+                qc_dir=qc_dir, 
+                readset=readset
+                )
+        indi_tax_an.do_taxonomy_annotation()
+
+    def _generate_taxa_and_name_dicts(self):
             if os.path.isfile(self.node_dict_pickle_path):
                 node_dict = compress_pickle.load(self.node_dict_pickle_path)
             else:
                 # read in the .nodes file. This file tells us which tax level the node is and which node is the parent level
-                with open(f'{taxdump_dir}/nodes.dmp', 'r') as f:
+                with open(f'{self.taxdump_dir}/nodes.dmp', 'r') as f:
                     node_file = [line.rstrip() for line in f]
                 # now make a dict from this where key is the tax id and the value is a tup where 0 = parent 1 = tax level
                 node_dict = {line.split('\t|\t')[0]: (line.split('\t|\t')[1], line.split('\t|\t')[2]) for line in node_file}
@@ -128,9 +164,8 @@ class SequenceQC:
                 name_dict = compress_pickle.load(self.name_dict_pickle_path)
             else:
                 # next read in the names file. This file hold the name of the node.
-                with open(f'{taxdump_dir}/names.dmp', 'r') as f:
+                with open(f'{self.taxdump_dir}/names.dmp', 'r') as f:
                     name_file = [line.rstrip() for line in f]
-
                 # now make a dict from the names file where the key is the staxid and the value is the name
                 name_dict = {line.split('\t|\t')[0]: line.split('\t|\t')[1] for line in name_file if
                             line.split('\t|\t')[3].replace('\t|', '') == 'scientific name'}
@@ -139,17 +174,17 @@ class SequenceQC:
             return node_dict, name_dict
 
 class IndividualTaxAnnotationQC:
-    def __init__(self, node_dict, names_dict, qc_dir, sample_name):
+    def __init__(self, node_dict, names_dict, qc_dir, readset):
         self.node_dict = node_dict
         self.names_dict = names_dict
         self.genus = None
         self.family = None
         self.order = None
-        self.sample_name = sample_name
-        self.fasta_path = os.path.join(qc_dir, sample_name, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
-        self.blast_out_path = os.path.join(qc_dir, sample_name, 'blast.out')
+        self.readset = readset
+        self.fasta_path = os.path.join(qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
+        self.blast_out_path = os.path.join(qc_dir, readset, 'blast.out')
         self.output_format = "6 qseqid sseqid staxids evalue pident qcovs staxid stitle ssciname"
-        self.blast_out_pickle_path = os.path.join(qc_dir, sample_name, 'blast.out.p.bz')
+        self.blast_out_pickle_path = os.path.join(qc_dir, readset, 'blast.out.p.bz')
         self.blast_output_file = self._get_or_do_blast()
         # This is a dict with seq name as key, and the 10 blast results as a list of lists as value
         self.blast_output_dict = self._make_blast_out_dict()
@@ -159,11 +194,12 @@ class IndividualTaxAnnotationQC:
         self.coral_annotation_dict = {}
         self.symbiodiniaceae_annotation_dict = {}
         # The paths that we will pickle out the annotation dictionaries to
-        self.sample_annotation_dict_pickle_path = os.path.join(qc_dir, sample_name, 'sample_annotation_dict.p.bz')
-        self.coral_annotation_dict_pickle_path = os.path.join(qc_dir, sample_name, 'coral_annotation_dict.p.bz')
-        self.coral_symbiodiniaceae_dict_pickle_path = os.path.join(qc_dir, sample_name, 'symbiodiniaceae_annotation_dict.p.bz')
+        self.sample_annotation_dict_pickle_path = os.path.join(qc_dir, readset, 'sample_annotation_dict.p.bz')
+        self.coral_annotation_dict_pickle_path = os.path.join(qc_dir, readset, 'coral_annotation_dict.p.bz')
+        self.coral_symbiodiniaceae_dict_pickle_path = os.path.join(qc_dir, readset, 'symbiodiniaceae_annotation_dict.p.bz')
 
     def do_taxonomy_annotation(self):
+        sys.stdout.write(f'\r{self.readset}')
         for blasted_seq, result_list in self.blast_output_dict.items():
             self.IndividualTaxAnnotationQCSub(
                 blasted_seq_name=blasted_seq, 
@@ -178,6 +214,8 @@ class IndividualTaxAnnotationQC:
         compress_pickle.dump(self.sample_annotation_dict, self.sample_annotation_dict_pickle_path)
         compress_pickle.dump(self.coral_annotation_dict, self.coral_annotation_dict_pickle_path)
         compress_pickle.dump(self.symbiodiniaceae_annotation_dict, self.coral_symbiodiniaceae_dict_pickle_path)
+        with open(os.path.join(self.qc_dir, self.readset, 'completed.txt'), 'w') as f:
+            f.write(f'{readset} complete')
 
     def _make_blast_out_dict(self):
         # now create a dict that is the list of 10 result items using the seq name as key
@@ -196,8 +234,8 @@ class IndividualTaxAnnotationQC:
             return compress_pickle.load(self.blast_out_pickle_path)
         else:
             # Run local blast
-            print(f'Running blast for sample {self.sample_name}')
-            subprocess.run(
+            print(f'Running blast for sample {self.readset}')
+            result = subprocess.run(
                 ['blastn', '-out', self.blast_out_path, '-outfmt', self.output_format, '-query', self.fasta_path, '-db', 'nt',
                     '-max_target_seqs', '10', '-num_threads', '20'])
 
@@ -326,25 +364,23 @@ class IndividualTaxAnnotationQC:
                     staxid = self.node_dict[staxid][0]
 
 class IndividualMothurQC:
-    def __init__(self, sample_name, fwd_path, rev_path, qc_base_dir, num_proc=20):
-        self.sample_name = sample_name
+    def __init__(self, readset, fwd_path, rev_path, qc_base_dir, num_proc=20):
+        self.readset = readset
         self.fwd_path = fwd_path
         self.rev_path = rev_path
-        self.sample_qc_dir = os.path.join(qc_base_dir, self.sample_name)
+        self.sample_qc_dir = os.path.join(qc_base_dir, self.readset)
         os.makedirs(self.sample_qc_dir, exist_ok=True)
         self.num_proc=num_proc
         self._write_out_oligo_file()
         self.stability_file_path = self._write_out_file_file()
         self.mothur_batch_file_path = self._write_out_mothur_batch_file()
-        self.mothur_exe_path = "/home/humebc/phylogeneticSoftware/mothur1.43.0/mothur/mothur"
         
     def start_qc(self):
-        subprocess.run([self.mothur_exe_path, self.mothur_batch_file_path])
-        print(f'Mothur QC complete for {self.sample_name}')
-        # We are running very short on space so let's clean up
-        for file_to_del in os.listdir(self.sample_qc_dir):
-            if file_to_del not in ['stability.trim.contigs.good.unique.abund.pcr.names', 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta']:
-                os.remove(os.path.join(self.sample_qc_dir, file_to_del))
+        result = subprocess.run(['mothur', self.mothur_batch_file_path])
+        print(f'Mothur QC complete for {self.readset}')
+        # To save on space we will compress all output files
+        for file_to_compress in os.listdir(self.sample_qc_dir):
+            subprocess.run(['gzip', os.path.join(self.sample_qc_dir, file_to_compress)])
         # Write out a log file to show that qc has been completed
         with open(os.path.join(self.sample_qc_dir, 'qc_complete.txt'), 'w') as f:
             f.write('qc_complete.txt\n')
@@ -378,7 +414,7 @@ class IndividualMothurQC:
             f'set.dir(output={self.sample_qc_dir})',
             f'make.contigs(file={self.stability_file_path}, processors={self.num_proc})',
             f'summary.seqs(fasta={base}.trim.contigs.fasta)',
-            f'screen.seqs(fasta={base}.trim.contigs.fasta, maxambig=0, maxhomop=5)',
+            f'screen.seqs(fasta={base}.trim.contigs.fasta, maxambig=0)',
             f'summary.seqs(fasta={base}.trim.contigs.good.fasta)',
             f'unique.seqs(fasta={base}.trim.contigs.good.fasta)',
             f'summary.seqs(fasta={base}.trim.contigs.good.unique.fasta, '

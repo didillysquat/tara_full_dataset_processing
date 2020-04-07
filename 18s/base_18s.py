@@ -5,7 +5,7 @@ import pandas as pd
 from collections import defaultdict
 class EighteenSBase:
     def __init__(self):
-        self.root_dir = os.path.abspath('.')
+        self.root_dir = '/home/humebc/projects/tara/tara_full_dataset_processing'
         self.eighteens_dir = os.path.join(self.root_dir, '18s')
         self.input_dir = os.path.join(self.root_dir, 'input')
         # Directory where the fastq.gz 18s files are
