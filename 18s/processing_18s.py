@@ -3,7 +3,7 @@ import os
 import sys
 import pandas as pd
 from collections import defaultdict
-from multiprocessing import Pool
+from multiprocessing import Pool, current_process
 import subprocess
 import compress_pickle
 from base_18s import EighteenSBase
@@ -36,6 +36,7 @@ class SequenceQC:
         self.fastq_info_df = fastq_info_df
         self.qc_dir = qc_dir
         self.root_dir = root_dir
+        self.cache_dir = cache_dir
         # These dicts will be used for getting the taxonomic level, and name of a
         # taxonomic match.
         self.taxdump_dir = '/share/databases/nt/taxdump'
@@ -106,48 +107,37 @@ class SequenceQC:
 
         # Get an apply list
         apply_list = []
-        for readset in self.fastq_info_df.index:
-            if not os.path.exists(os.path.join(self.qc_dir, readset, 'blast_complete.txt')):
-                apply_list.append((self.node_dict, self.name_dict, self.qc_dir, readset))
+        for readset, ser in self.fastq_info_df.iterrows():
+            if self.sample_provenance_df.at[ser['barcode_id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
+                if not os.path.exists(os.path.join(self.qc_dir, readset, 'taxonomy_complete.txt')):
+                    apply_list.append(readset)
                 
         if apply_list:
-            with Pool(20) as p:
+            with Pool(120) as p:
                 p.map(self._set_tax_running, apply_list)
+        
+        # for readset in apply_list:
+        #     self._set_tax_running(readset)
 
         foo = 'bar'
-        
-        # for readset in self.fastq_info_df.index:
-        #     sys.stdout.write(f'\r{readset}')
-        #     IndividualTaxAnnotationQC(
-        #         node_dict=self.node_dict, 
-        #         names_dict=self.name_dict, 
-        #         qc_dir=self.qc_dir, 
-        #         readset=readset
-        #         ).do_taxonomy_annotation()
-        #     # Write out the completed.txt file to show that this file pairs has already been done
-        #     with open(os.path.join(qc_dir, readset, 'completed.txt'), 'w') as f:
-        #         f.write(f'{readset} complete')
-        # print('\nTaxonomic annotation complete\n')
-
-    # def _write_out_ncbi_db_config_file(self):
-    #     ncbircFile = []
-    #     ncbircFile.extend(["[BLAST]", "BLASTDB=/home/humebc/phylogeneticSoftware/ncbi-blast-2.6.0+/ntdbdownload/"])
-
-    #     # write out the ncbircFile
-    #     with open(os.path.join(self.root_dir, '.ncbirc'), 'w') as f:
-    #         for line in ncbircFile:
-    #             f.write(f'{line}\n')
     
-    def _set_tax_running(self, list_of_things):
-        (node_dict, names_dict, qc_dir, readset) = list_of_things
-        
-        indi_tax_an = IndividualTaxAnnotationQC(
-                node_dict=node_dict.copy(), 
-                names_dict=names_dict.copy(), 
-                qc_dir=qc_dir, 
-                readset=readset
-                )
-        indi_tax_an.do_taxonomy_annotation()
+    def _set_tax_running(self, readset):
+        try:
+            # print(f'{current_process().name}: readset is {readset}')
+            barcode_id = self.fastq_info_df.loc[readset]['barcode_id']
+            tax = self.sample_provenance_df.at[barcode_id, 'SAMPLE ENVIRONMENT, short']
+            # print(f'{current_process().name}: barcode is {barcode_id}')
+            # print(f'{current_process().name}: sample prov tax is {tax}')
+            indi_tax_an = IndividualTaxAnnotationQC(
+                    cache_dir=self.cache_dir, 
+                    qc_dir=self.qc_dir, 
+                    readset=readset
+                    )
+            indi_tax_an.do_taxonomy_annotation()
+        except Exception as e:
+            print(f'{current_process().name}: something went wrong with {readset}')
+            print(e)
+        # indi_tax_an.do_taxonomy_annotation()
 
     def _generate_taxa_and_name_dicts(self):
             if os.path.isfile(self.node_dict_pickle_path):
@@ -174,14 +164,17 @@ class SequenceQC:
             return node_dict, name_dict
 
 class IndividualTaxAnnotationQC:
-    def __init__(self, node_dict, names_dict, qc_dir, readset):
-        self.node_dict = node_dict
-        self.names_dict = names_dict
+    def __init__(self, cache_dir, qc_dir, readset):
+        self.node_dict_pickle_path = os.path.join(cache_dir, 'node_dict.p.bz')
+        self.name_dict_pickle_path = os.path.join(cache_dir, 'name_dict.p.bz')
+        self.node_dict, self.name_dict = self._generate_taxa_and_name_dicts()
         self.genus = None
         self.family = None
         self.order = None
         self.readset = readset
+        self.qc_dir = qc_dir
         self.fasta_path = os.path.join(qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
+        # print(f'{current_process().name}: The fasta path is {self.fasta_path}')
         self.blast_out_path = os.path.join(qc_dir, readset, 'blast.out')
         self.output_format = "6 qseqid sseqid staxids evalue pident qcovs staxid stitle ssciname"
         self.blast_out_pickle_path = os.path.join(qc_dir, readset, 'blast.out.p.bz')
@@ -197,6 +190,30 @@ class IndividualTaxAnnotationQC:
         self.sample_annotation_dict_pickle_path = os.path.join(qc_dir, readset, 'sample_annotation_dict.p.bz')
         self.coral_annotation_dict_pickle_path = os.path.join(qc_dir, readset, 'coral_annotation_dict.p.bz')
         self.coral_symbiodiniaceae_dict_pickle_path = os.path.join(qc_dir, readset, 'symbiodiniaceae_annotation_dict.p.bz')
+
+    def _generate_taxa_and_name_dicts(self):
+            if os.path.isfile(self.node_dict_pickle_path):
+                node_dict = compress_pickle.load(self.node_dict_pickle_path)
+            else:
+                # read in the .nodes file. This file tells us which tax level the node is and which node is the parent level
+                with open(f'{self.taxdump_dir}/nodes.dmp', 'r') as f:
+                    node_file = [line.rstrip() for line in f]
+                # now make a dict from this where key is the tax id and the value is a tup where 0 = parent 1 = tax level
+                node_dict = {line.split('\t|\t')[0]: (line.split('\t|\t')[1], line.split('\t|\t')[2]) for line in node_file}
+                compress_pickle.dump(node_dict, self.node_dict_pickle_path)
+
+            if os.path.isfile(self.name_dict_pickle_path):
+                name_dict = compress_pickle.load(self.name_dict_pickle_path)
+            else:
+                # next read in the names file. This file hold the name of the node.
+                with open(f'{self.taxdump_dir}/names.dmp', 'r') as f:
+                    name_file = [line.rstrip() for line in f]
+                # now make a dict from the names file where the key is the staxid and the value is the name
+                name_dict = {line.split('\t|\t')[0]: line.split('\t|\t')[1] for line in name_file if
+                            line.split('\t|\t')[3].replace('\t|', '') == 'scientific name'}
+                compress_pickle.dump(name_dict, self.name_dict_pickle_path)
+                
+            return node_dict, name_dict
 
     def do_taxonomy_annotation(self):
         sys.stdout.write(f'\r{self.readset}')
@@ -214,8 +231,8 @@ class IndividualTaxAnnotationQC:
         compress_pickle.dump(self.sample_annotation_dict, self.sample_annotation_dict_pickle_path)
         compress_pickle.dump(self.coral_annotation_dict, self.coral_annotation_dict_pickle_path)
         compress_pickle.dump(self.symbiodiniaceae_annotation_dict, self.coral_symbiodiniaceae_dict_pickle_path)
-        with open(os.path.join(self.qc_dir, self.readset, 'completed.txt'), 'w') as f:
-            f.write(f'{readset} complete')
+        with open(os.path.join(self.qc_dir, self.readset, 'taxonomy_complete.txt'), 'w') as f:
+            f.write(f'{self.readset} complete')
 
     def _make_blast_out_dict(self):
         # now create a dict that is the list of 10 result items using the seq name as key
@@ -230,14 +247,20 @@ class IndividualTaxAnnotationQC:
         Check to see if the blast has already been performed and can be read
         in from file. Else perform the blast from scratch.
         """
+        # if os.path.isfile(self.blast_out_pickle_path) and os.path.isfile(os.path.join(self.qc_dir, self.readset, 'blast_complete.txt')): # TODO add second verification file
         if os.path.isfile(self.blast_out_pickle_path):
             return compress_pickle.load(self.blast_out_pickle_path)
         else:
             # Run local blast
-            print(f'Running blast for sample {self.readset}')
+            print(f'{current_process().name}: Running blast for sample {self.readset}')
+            # Decompress
+            if os.path.exists(self.fasta_path + '.gz'):
+                subprocess.run(['gzip', '-d', self.fasta_path + '.gz'])
             result = subprocess.run(
-                ['blastn', '-out', self.blast_out_path, '-outfmt', self.output_format, '-query', self.fasta_path, '-db', 'nt',
-                    '-max_target_seqs', '10', '-num_threads', '20'])
+                ['blastn', '-out', self.blast_out_path, '-outfmt', self.output_format, '-query', self.fasta_path, '-db', '/share/databases/nt/nt',
+                    '-max_target_seqs', '10', '-num_threads', '4'])
+            if os.path.exists(self.fasta_path):
+                subprocess.run(['gzip', self.fasta_path])
 
             # Read in blast output
             with open(self.blast_out_path, 'r') as f:
@@ -245,6 +268,12 @@ class IndividualTaxAnnotationQC:
 
             # pickle out the blast results here to possibly save us time in the future
             compress_pickle.dump(blast_output_file, self.blast_out_pickle_path)
+            # Write out a second file for verification purposes, so that we know the
+            # write out of the blast out pickle was completed
+            with open(os.path.join(self.qc_dir, self.readset, 'blast_complete.txt'), 'w') as f:
+                    f.write(f'{self.readset} blast complete')
+            # And then delete the blast.out file
+            os.remove(self.blast_out_path)
             return blast_output_file
     
     class IndividualTaxAnnotationQCSub:
