@@ -26,6 +26,9 @@ Currently, only a single fastq.gz pair are downloaded and loaded into symportal 
 Finally, within the 18s we want to implement the download of the 18s files that we will then do the the QC on and work with.
 We will only be intested in the coral samples (i.e. no water samples) for the 18s. However, we will work with all fastq.gz file
 pairs (i.e. multiple pairs per barcode if they exist).
+
+NB as a final change to the table stephane has asked that we move from barcode_id to sample-id. We will do this by simply
+changing the column name and prepending TARA_ to each of the values.
 """
 import os
 import pickle
@@ -50,7 +53,7 @@ import datetime
 from pathlib import Path
 import compress_pickle
 
-class ITS2Processing:
+class GeneralProcessing:
     # This whole process became a little complicated when we realised that there were sometimes multiple sets
     # of fastq files per barcode_id/marker pairing. There were three categories of why this happened
     # 1 - mutiple lanes of sequencing on same sequencing run of same library - green
@@ -99,9 +102,9 @@ class ITS2Processing:
 
 
     def __init__(self, marker, seq_file_download_directory=None, date_string=None, download=False):
-        self.input_dir = os.path.abspath(os.path.join('.', 'input'))
-        self.output_dir = os.path.abspath(os.path.join('.', 'output'))
-        self.cache_dir = os.path.abspath(os.path.join('.', 'cache'))
+        self.input_dir = os.path.abspath(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing', 'input'))
+        self.output_dir = os.path.abspath(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing', 'output'))
+        self.cache_dir = os.path.abspath(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing', 'cache'))
         os.makedirs(self.input_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.cache_dir, exist_ok=True)
@@ -271,6 +274,12 @@ class ITS2Processing:
         self.output_information_df = pd.DataFrame(
             [_ for t in self.mp_output_list_of_tups for _ in t[2]], columns=self.output_information_df_cols
         )
+
+        # Here we change the barcode_id column to sample-id and we prepend TARA_ to all of the value in this column
+        self.output_information_df.rename(columns={'barcode_id':'sample-id'}, inplace=True)
+        new_names = ['TARA_' + _ for _ in list(self.output_information_df['sample-id'])]
+        self.output_information_df['sample-id'] = new_names
+
         self.output_information_df.to_csv(self.output_information_df_path, index=False)
 
     def _sp_df_to_csv(self, tup_index, csv_path):
@@ -313,7 +322,7 @@ class ReplicationWalkerWorker:
             self.readset_df = readset_df
         else:
             self.readset_df = self._make_readset_info_dir()
-        self.input_dir = os.path.abspath(os.path.join('.', 'input'))
+        self.input_dir = os.path.abspath(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing', 'input'))
         self.sample_provenance_path = os.path.join(self.input_dir, 'sample_provenance_20200201.csv')
         if not prov_df is None:
             self.sample_provenance_df = prov_df
@@ -1123,9 +1132,9 @@ def human_readable_size(size, decimal_places=3):
     return f"{size:.{decimal_places}f}{unit}"
 
 dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
-# ITS2Processing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=False).start_walking()
-ITS2Processing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=True).start_walking()
-# ITS2Processing(marker='16s_45', date_string=dat_string).start_walking()
-# ITS2Processing(marker='16s_full_45', date_string=dat_string).start_walking()
+GeneralProcessing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=False).start_walking()
+# GeneralProcessing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=False).start_walking()
+# GeneralProcessing(marker='16s_45', date_string=dat_string).start_walking()
+# GeneralProcessing(marker='16s_full_45', date_string=dat_string).start_walking()
 
 
