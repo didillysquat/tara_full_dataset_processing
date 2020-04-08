@@ -113,6 +113,13 @@ class SequenceQC:
                     apply_list.append(readset)
                 
         if apply_list:
+            # NB having this set at using a pool of size 12 and using 40 'threads' for the blast
+            # works well for doing the blast.
+            # There is some bottle neck somewhere for the second annotation part of the 
+            # taxonomy processing. You can turn the pool upto 120 but only 6 processes get used.
+            # We will not spend the time optimising this now as it is running fast enough.
+            # Completes in approx 1 hour. (after having already done the blasts)
+            # But if you come back to this in the future you may want to optimise.
             with Pool(120) as p:
                 p.map(self._set_tax_running, apply_list)
         
@@ -123,7 +130,7 @@ class SequenceQC:
     
     def _set_tax_running(self, readset):
         try:
-            # print(f'{current_process().name}: readset is {readset}')
+            print(f'{current_process().name}: readset is {readset}')
             barcode_id = self.fastq_info_df.loc[readset]['barcode_id']
             tax = self.sample_provenance_df.at[barcode_id, 'SAMPLE ENVIRONMENT, short']
             # print(f'{current_process().name}: barcode is {barcode_id}')
@@ -137,6 +144,7 @@ class SequenceQC:
         except Exception as e:
             print(f'{current_process().name}: something went wrong with {readset}')
             print(e)
+            raise RuntimeError
         # indi_tax_an.do_taxonomy_annotation()
 
     def _generate_taxa_and_name_dicts(self):
@@ -223,7 +231,7 @@ class IndividualTaxAnnotationQC:
                 results_list=result_list, 
                 sample_dict=self.sample_annotation_dict, 
                 symbiodiniaceae_dict=self.symbiodiniaceae_annotation_dict, 
-                coral_dict=self.coral_annotation_dict, node_dict=self.node_dict, names_dict=self.names_dict
+                coral_dict=self.coral_annotation_dict, node_dict=self.node_dict, names_dict=self.name_dict
                 ).process_matches()
         
         # Here we have populated the taxonomy dictionaries for the sample in question

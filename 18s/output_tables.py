@@ -1,3 +1,10 @@
+# TODO: we need to go back to the general_seq_processing.py and properly intgrate working with
+# SAMPLE ID or sample-id rather than barcode id. Both in making the provenance table and in making the output
+# tables. Then we need to make a new set of output tables and put them into the processing_18s.py and update
+# this script as well to work on sample-id rathern than barcode_id. We should then run it through to make
+# sure that our coral fastqs still agree.
+# Then we can continue working on the output_tables.py.
+# If we don't do this now. Its just going to be confusing in the future.
 import os
 import compress_pickle
 import sys
@@ -7,18 +14,22 @@ from collections import defaultdict
 import numpy as np
 
 class EighteenSOutputTables(EighteenSBase):
-    """ Class to produce the three output tables
+    """ Class to produce the four output tables
     1 - Table that is the raw seq abundances (post mothur QC processing) in each of the samples (absolute abundance)
     2 - Table that holds the blast annotation for each of these sequences (Order, Family and Genus)
     3 - Table that is the post consolidation walk sequences from taxonomic origin of one of the
     three target genera. Absolute proportions in the samples.
-
     4 - Table that will hold meta information for each of the samples that will enable researchers to make a
     decision about whether they want to use given samples are not. The columns will be:
 
+    # TODO
+    sample-id: This is the barcode_id with TARA_ prepended to it.
+
+    #TODO change this to 'use' as a Bool
     status - This will be binary as use OR do_not_use
 
-    genus_18S_taxonomic_annotation - This will be either Pocrites, Millepora, Pocillopora or other.
+    # TODO Change name but also check to see if this is accurate. I think we give the exact genus name
+    genetic_18S_genus_taxonomic_annotation - This will be either Pocrites, Millepora, Pocillopora or other.
         It will be the cummulatively most abundant of the categories in the sample.
         If this is 'other', it will cause the sample to have a do_not_use status.
 
@@ -54,13 +65,16 @@ class EighteenSOutputTables(EighteenSBase):
 
 
     """
+    
     def __init__(self):
         super().__init__()
-        self.info_df = compress_pickle.load(os.path.join(self.cache_dir, 'info_df_with_additional_info.p.bz'))
-        # For doing the tables we want to add a column that is the total number of sequences post-qc.
-        # We will use this when sample replicates are available to see which replicate we want
-        # to mark as is_replicate.
-        self._add_total_seqs_info_to_info_df()
+        # For the output tables, on a sample by sample basis we want to have access to what the most abundant
+        # coral genus was for a given sample, and what the most abundant sequence was for that genus.
+        # For every readset in the fastq_info_df we will gather this information and populate it in a new
+        # df called abundance_info_df. This df may later contain addional information such as the QC info.
+        # For now we will also add a column called post_qc_seq_depth. This will be the total number of 
+        # sequences returned for a given readset.
+        self.abundance_info_df = self._make_or_get_abundance_info_df()
 
         # Produce the dictionary for making the coral meta info table
         # This will have sample name as key and a list in order of the df columns given in the comments
@@ -94,28 +108,51 @@ class EighteenSOutputTables(EighteenSBase):
         self.consolidated_df_dict = {}
         self._populated_consolidated_df_dict()
 
-
-    def _add_total_seqs_info_to_info_df(self):
-        if os.path.isfile(os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz')):
-            self.info_df = compress_pickle.load(os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz'))
+    def _make_or_get_abundance_info_df(self):
+        if os.path.isfile(os.path.join(self.cache_dir, 'abundance_info_df.p.bz')):
+            return compress_pickle.load(os.path.join(self.cache_dir, 'abundance_info_df.p.bz'))
         else:
-            total_abund_list = []
-            print('Adding post_qc_seq_depth to info_df')
-            for sample_id in self.info_df.index:
-                sys.stdout.write(f'\r{sample_id}')
-                # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
-                total_abund_list.append(sum(name_abs_abund_dict.values()))
-            print('\nComplete')
-            self.info_df['post_qc_seq_depth'] = total_abund_list
-            compress_pickle.dump(self.info_df, os.path.join(self.cache_dir, 'info_df_w_post_qc_seq_depth.p.bz'))
+            print('Building abundance_info_df')
+            abundance_df_dict = {}
+            for readset in self.fastq_info_df.index:
+                sys.stdout.write(f'\r{readset}')
+                sample_qc_dir = os.path.join(self.qc_dir, readset)
+                rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
+                coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
+                most_abund_coral_genus_df_list.append(self._identify_most_abund_coral_genus(rel_all_seq_abundance_dict, coral_annotation_dict))
+                consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+                most_abund_seq_of_coral_genus_df_list.append(sorted([_ for _ in consolidated_host_seqs_abund_dict.items()], key=lambda x: x[1], reverse=True)[0][0])
+                absolute_seqs_count = sum(self._make_abs_abund_dict_from_names_path(sample_id).values())
+                abundance_df_dict[readset] = [most_abund_coral_genus, most_abund_seq_of_coral_genus, absolute_seqs_count]
+            df = pd.DataFrame.from_dict(data=abundance_df_dict, orient='index', columns=['most_abund_coral_genus', 'most_abund_seq_of_coral_genus', 'post_qc_seq_depth'])
+            compress_pickle.dump(df, os.path.join(self.cache_dir, 'abundance_info_df.p.bz'))
+            return df
+
+    def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
+        for sorted_tup in sorted(
+            [(seq_name, rel_abund) for seq_name, rel_abund in rel_all_seq_abundance_dict.items()],
+            key=lambda x: x[1],
+            reverse=True
+            ):
+                try:
+                    genus = coral_annotation_dict[sorted_tup[0]]
+                    if genus == 'Porites':
+                        return 'Porites'
+                    elif genus == 'Pocillopora':
+                        return 'Pocillopora'
+                    elif genus == 'Millepora':
+                        return 'Millepora'
+                except KeyError:
+                    continue
 
     def _make_primary_seq_dict(self):
         # Get the primary sequences for each of the genera
+        # This is the sequence that is found as the most abundant for the largest number of readsets
+        # for a given genus.
         primary_seq_dict = {}  # genus key to primary seq value
         for genus in ['Porites', 'Millepora', 'Pocillopora']:
-            primary_seq_dict[genus] = self.info_df[
-                self.info_df['most_abund_coral_genus'] == genus
+            primary_seq_dict[genus] = self.abundance_info_df[
+                self.abundance_info_df['most_abund_coral_genus'] == genus
                 ]['most_abund_seq_of_coral_genus'].mode().values.tolist()[0]
         return primary_seq_dict
 
@@ -124,8 +161,8 @@ class EighteenSOutputTables(EighteenSBase):
             return compress_pickle.load(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
         print('Populating coral meta info table dict')
-        for sample_id in self.info_df.index:
-            tbfour = TableFour(parent=self, sample_id=sample_id)
+        for readset in self.fastq_info_df.index:
+            tbfour = TableFour(parent=self, readset=readset)
             tbfour.populate_coral_meta_info_table_dict()
         compress_pickle.dump(self.coral_meta_info_table_dict, os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
@@ -347,18 +384,11 @@ class EighteenSOutputTables(EighteenSBase):
         return {seq_name: abund/tot for seq_name, abund in abs_abund_dict.items()}
 
 class TableFour():
-    def __init__(self, parent, sample_id):
+    def __init__(self, parent, readset):
         self.parent = parent
-        self.sample_id = sample_id
-        # If this is one of multiple technical replicates
-        self.is_tech_rep = (self.sample_id[-2] == '_')
-        if self.is_tech_rep:
-            self.sample_base_id = '_'.join(self.sample_id.split('_')[:-1])
-            self.tech_rep_num = int(self.sample_id.split('_')[-1])
-        else:
-            self.sample_base_id = self.sample_id
+        self.readset = readset
         self.status = True
-        self.sample_qc_dir = os.path.join(self.parent.qc_dir, sample_id)
+        self.sample_qc_dir = os.path.join(self.parent.qc_dir, readset)
         self.coral_annotation_dict = compress_pickle.load(os.path.join(self.sample_qc_dir, 'coral_annotation_dict.p.bz'))
         self.consolidated_host_seqs_abund_dict = compress_pickle.load(
             os.path.join(self.sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
@@ -367,7 +397,7 @@ class TableFour():
         self.coral_tax_rel_count_dd = self._make_coral_tax_rel_count_dd()
         self.sorted_coral_tax_dict_keys = sorted(self.coral_tax_rel_count_dd, key=self.coral_tax_rel_count_dd.get, reverse=True)
         self.genus_18S_taxonomic_annotation = self.sorted_coral_tax_dict_keys[0]
-        self.provenance_annotation = self.parent.sample_provenance_df.at[sample_id, 'Sample Material label, organismal system level, taxonomic, nominal']
+        self.provenance_annotation = self.parent.sample_provenance_df.at[readset, 'Sample Material label, organismal system level, taxonomic, nominal']
 
         # The remainder of the variables that we need to populate
         self.is_provenance_tax_annotation_correct = None
@@ -385,7 +415,6 @@ class TableFour():
         self.sample_annotation_dict = None
         self.fasta_dict = None
         self.all_tax_count_dd = None
-
 
     def _make_coral_tax_rel_count_dd(self):
         coral_tax_rel_count_dd = defaultdict(float)
