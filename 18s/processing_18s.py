@@ -28,6 +28,494 @@ class EighteenSProcessing(EighteenSBase):
         # One is all sequnces, one is only coral, one is only symbiodiniaceae
         seq_qc.do_bast_qc()
 
+        # Do seq consolidation. This will make and pickle out various abundance
+        # dictionaries that we will use in the plotting and in the distance matrix creation
+        SeqConsolidator(qc_dir=self.qc_dir, cache_dir=self.cache_dir, fastq_info_df=self.fastq_info_df, coral_readsets=self.coral_readsets).do_consolidation()
+
+class SeqConsolidator:
+    # In order to do the all_coral_sequence, we are going to need to move
+    # the creation of abundance dataframes up here, as we need to keep track of global abundance
+    # We also need to have the global abundances to assign the color_dict
+    # 1 - Make a consolidation dictionary by walking in order of shortest first
+    # 1a - Compress pickle out the abudnace dictionaries for each sample as you go (all seqs)
+    # 2 - Go back through all of the sequences collecting abundances and relating them
+    # to the corresponding representative consolidated sequences
+    # 3 - Compress pickle out the 'translated' abudnace dictionaries for each sample (only coral seqs)
+    # 3a - At the same time pickle out the 'translated' abundance dictionaires for each sample that 
+    # contain only the 'host sequences': These are the sequencs that are of the genus of the most abundant
+    # sequence. We can easily make the minor abundance dictionaries from this.
+    # 4 - Make a color dictionary according to the abundance order. Make sure that the yellow
+    # red and blue still represent the most abundant sequences in the corresponding corals
+    def __init__(self, qc_dir, cache_dir, fastq_info_df, coral_readsets):
+        self.qc_dir = qc_dir
+        self.cache_dir = cache_dir
+        self.fastq_info_df = fastq_info_df
+        self.consolidated_host_seqs_rel_abundance_dict = None
+        self.coral_blasted_seq_to_consolidated_seq_dict = {}
+        self.coral_readsets = coral_readsets
+
+    def do_consolidation(self):
+        if not self._check_if_consolidation_already_complete():
+            # Firstly get a set of all sequences that are of one of the three genera
+            # In the process of doing this, pickle out the all seq abunance dict for
+            # the sample
+            self.consolidated_host_seqs_rel_abundance_dict = self._make_host_seqs_dict()
+            # Then create the consolidation path and
+            # consolidate the sequence insitu in the self.host_seqs_dict
+            # Also produce a dict that maps blasted_seq to representative consolidated sequence
+            # Then pickle out the consolidated_host_seqs_rel_abund_dict
+            # and the coral_blasted_seq_to_consolidated_seq_dict
+            self._create_consolidation_path_list()
+            
+            # Revisit the sample directories and make pickle out the:
+            # 1 - consolidated_coral_seqs_abund_dict
+            # 2 - consolidated_host_seqs_abund_dict
+            # The first contains all coral sequences
+            # The second contains only coral sequences that are of the genus of the most
+            # abundant coral sequence
+            # In both cases we will use the consolidated representatives of each sequence
+            self._create_and_write_sample_coral_consolidated_rel_abund_dicts()
+            self._make_all_coral_sequence_color_dict()
+        else:
+            return
+    
+    def _make_all_coral_sequence_color_dict(self):
+        """We want to create a color dict where the sequences are coloured in order of abundance
+        and when we run out of colors we will use the greys as usual.
+        We want to ensure that the most abundant Porites, Millepora and Pocillopora
+        sequences are still the same, yellow red and blue, so we'll want to hard code this
+        """
+        color_dict = {}
+        color_list = self._get_colour_list()
+        greys = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+        # remove the three colours of interest from the list and add them to the beginning
+        # We will need to adjust the order of these three sequences as we don't know
+        # which was most abundant. I.e. was porites seq most abundant or millepora etc.
+        self._curate_color_list(color_list)
+        sorted_seqs_tups = sorted(
+            [(seq_name, rel_abund) for seq_name, rel_abund in self.consolidated_host_seqs_rel_abundance_dict.items()], 
+            key=lambda x: x[1], 
+            reverse=True
+            )
+        sorted_names = [tup[0] for tup in sorted_seqs_tups]
+        for i, seq_name in enumerate(sorted_names):
+            if i < len(color_list):
+                color_dict[seq_name] = color_list[i]
+            else:
+                color_dict[seq_name] = greys[i%6]
+        
+        compress_pickle.dump(color_dict, os.path.join(self.cache_dir, 'all_coral_sequence_color_dict.p.bz'))
+        return color_dict
+
+    @staticmethod
+    def _curate_color_list(color_list):
+        if "#FFFF00" in color_list: color_list.remove("#FFFF00")
+        if "#87CEFA" in color_list: color_list.remove("#87CEFA") 
+        if "#FF6347" in color_list: color_list.remove("#FF6347")
+        if "#00FF00" in color_list: color_list.remove("#00FF00")
+        color_list.insert(0, "#FF6347")
+        color_list.insert(0, "#87CEFA")
+        color_list.insert(0, "#FFFF00")
+        # Swap out the 5 and 11 elements as the 5 element is currently a similar color
+        # to the 2 element
+        five = color_list[5]
+        color_list[5] = color_list[11]
+        color_list[11] = five
+        three = color_list[3]
+        color_list[3] = color_list[22]
+        color_list[22] = three
+
+
+    def _check_if_consolidation_already_complete(self):
+        if os.path.isfile(os.path.join(self.cache_dir, 'final_consolidated_host_seqs_rel_abundance_dict.p.bz')):
+            if os.path.isfile(os.path.join(self.cache_dir, 'coral_blasted_seq_to_consolidated_seq_dict.p.bz')):
+                if os.path.isfile(os.path.join(self.cache_dir, 'all_coral_sequence_color_dict.p.bz')):
+                    return True
+        return False
+
+    def _create_and_write_sample_coral_consolidated_rel_abund_dicts(self):
+        print('\nWriting out sample abundance dictionaries\n')
+        for readset in self.coral_readsets:
+            sys.stdout.write(f'\r{readset}')
+            sample_qc_dir = os.path.join(self.qc_dir, readset)
+            # Load the already created abundance dictionary
+            rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
+            # Load the already created taxonomy annotation dictoinaries
+            sample_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'sample_annotation_dict.p.bz'))
+            coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
+            seq_name_to_seq_dict = self._make_seq_name_to_seq_dict(readset)
+            # # Firstly we can write out the consolidated_coral_seqs_abund_dict
+            # # There is the possibility that several sequences could be represented by
+            # # the same sequences. We will need to check for this and combine these abundances if so
+            # self._make_write_consolidated_coral_seqs_abund_dict(
+            #     rel_all_seq_abundance_dict, sample_annotation_dict, sample_qc_dir, seq_name_to_seq_dict)
+
+            # Now it is time to do the consolidated_host_seqs_abund_dict
+            # Firstly identify the most abundant coral sequence
+            most_abundant_coral_genus = self._identify_most_abund_coral_genus(
+                rel_all_seq_abundance_dict=rel_all_seq_abundance_dict, 
+                coral_annotation_dict=coral_annotation_dict
+                )
+            
+            # Here we have the most abundant genus identified
+            self._make_write_consolidated_host_seqs_abund_dict(
+                rel_all_seq_abundance_dict, coral_annotation_dict, 
+                most_abundant_coral_genus, sample_qc_dir, seq_name_to_seq_dict)
+        sys.stdout.write('\n')
+
+    # def _make_write_consolidated_coral_seqs_abund_dict(
+    #     self, rel_all_seq_abundance_dict, sample_annotation_dict, sample_qc_dir, seq_name_to_seq_dict):
+    #     # Firstly we can write out the consolidated_coral_seqs_abund_dict
+    #     # There is the possibility that several sequences could be represented by
+    #     # the same sequences. We will need to check for this and combine these abundances if so
+    #     consolidated_coral_seqs_abund_dict = {}
+    #     for seq_name, rel_abund in rel_all_seq_abundance_dict.items():
+    #         try:
+    #             if sample_annotation_dict[seq_name] == 'Scleractinia_Anthoathecata':
+    #                 try:
+    #                     rep_consol_seq = self.coral_blasted_seq_to_consolidated_seq_dict[seq_name_to_seq_dict[seq_name]]
+    #                 except KeyError:
+    #                     # If key error, then the seq was not consolidated and is itself a representative consolidation
+    #                     # sequence and so can be used directly in the consolidated_coral_seqs_abund_dict
+    #                     # TODO here we can check that the sequence can be found in the
+    #                     if seq_name_to_seq_dict[seq_name] not in self.consolidated_host_seqs_rel_abundance_dict:
+    #                         foo = 'bar'
+    #                     rep_consol_seq = seq_name_to_seq_dict[seq_name]
+    #                 if rep_consol_seq in consolidated_coral_seqs_abund_dict:
+    #                     # Then there were multiple seuqence represented by this consol sequence
+    #                     # and we need to combine the relative abunances
+    #                     current_abund = consolidated_coral_seqs_abund_dict[rep_consol_seq]
+    #                     new_abund = current_abund + rel_abund
+    #                     consolidated_coral_seqs_abund_dict[rep_consol_seq] = new_abund
+    #                 else:
+    #                     consolidated_coral_seqs_abund_dict[rep_consol_seq] = rel_abund
+    #             else:
+    #                 # Then this was not a coral sequence and we are not concerned with it
+    #                 pass
+    #         except KeyError:
+    #             # There was no meaningful annotation available for this sequence in the nt database
+    #             pass
+    #
+    #     # Finally we need to renormalise the realtive abundances for this dictionary as we
+    #     # have removed the non_coral samples
+    #     tot = sum(consolidated_coral_seqs_abund_dict.values())
+    #     consolidated_coral_seqs_abund_dict = {k: v/tot for k, v in consolidated_coral_seqs_abund_dict.items()}
+    #     compress_pickle.dump(consolidated_coral_seqs_abund_dict, os.path.join(sample_qc_dir, 'consolidated_coral_seqs_abund_dict.p.bz'))
+
+    def _make_write_consolidated_host_seqs_abund_dict(self, rel_all_seq_abundance_dict, coral_annotation_dict, most_abundant_coral_genus, sample_qc_dir, seq_name_to_seq_dict):
+        consolidated_host_seqs_abund_dict = {}
+        for seq_name, rel_abund in rel_all_seq_abundance_dict.items():
+            # if seq_name == 'GTCGCTACTACCGATTGAATGGTTTAGTGAGGCCTCCTGACTGGCGCCGACACTCTGTCTCGTGCAGAGAGTGGGAGGCCGGGAAGTTGTTCAAACTTGATCATTTAGAGGAAGTAAAAGTCGTAACAAGGTTTC':
+            #     foo = 'bar'
+            try:
+                if coral_annotation_dict[seq_name] == most_abundant_coral_genus:
+                    # Then this is of the genus that we are interested in
+                    # See if there if the sequence has a representative consolidated sequence
+                    # If not then use the sequence its self as the key
+                    try:
+                        rep_consol_seq = self.coral_blasted_seq_to_consolidated_seq_dict[seq_name_to_seq_dict[seq_name]]
+                    except KeyError:
+                        rep_consol_seq = seq_name_to_seq_dict[seq_name]
+                        # TODO test to see that the seq can be found in the abundance dict.
+                        if not rep_consol_seq in self.consolidated_host_seqs_rel_abundance_dict:
+                            foo = 'bar'
+                    if rep_consol_seq in consolidated_host_seqs_abund_dict:
+                        # Then there were multiple seuqence represented by this 
+                        # consolidated sequence and we need to combine the relative abunances
+                        current_abund = consolidated_host_seqs_abund_dict[rep_consol_seq]
+                        new_abund = current_abund + rel_abund
+                        consolidated_host_seqs_abund_dict[rep_consol_seq] = new_abund
+                    else:
+                        consolidated_host_seqs_abund_dict[rep_consol_seq] = rel_abund
+                else:
+                    # Then this is not of the genus we are interested in
+
+                    pass
+            except KeyError:
+                # Then this was not a coral sequence and we are not concerned with it
+                pass
+        # Finally we need to renormalise the realtive abundances for this dictionary as we
+        # have removed the non_coral samples
+        tot = sum(consolidated_host_seqs_abund_dict.values())
+        consolidated_host_seqs_abund_dict = {k: v/tot for k, v in consolidated_host_seqs_abund_dict.items()}
+        compress_pickle.dump(consolidated_host_seqs_abund_dict, os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+
+    def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
+        for sorted_tup in sorted(
+            [(seq_name, rel_abund) for seq_name, rel_abund in rel_all_seq_abundance_dict.items()], 
+            key=lambda x: x[1], 
+            reverse=True
+            ):
+                try:
+                    genus = coral_annotation_dict[sorted_tup[0]]
+                    if genus == 'Porites':
+                        return 'Porites'
+                    elif genus == 'Pocillopora':
+                        return 'Pocillopora'
+                    elif genus == 'Millepora':
+                        return 'Millepora'
+                except KeyError:
+                    continue
+  
+    def _write_out_dicts(self):
+        compress_pickle.dump(
+            self.consolidated_host_seqs_rel_abundance_dict, 
+            os.path.join(self.cache_dir, 'final_consolidated_host_seqs_rel_abundance_dict.p.bz')
+            )
+        compress_pickle.dump(
+        self.coral_blasted_seq_to_consolidated_seq_dict, 
+        os.path.join(self.cache_dir, 'coral_blasted_seq_to_consolidated_seq_dict.p.bz')
+        )
+
+    def _consolidate(self, consolidation_path_list, representative_to_seq_list):
+        """In this method we will do two things.
+        1 - We will walk the path consolidating the sequences by modifying
+        the self.host_seqs_dict insitu.
+        2 - We will also create a new dict that is original sequence, to final 
+        representative consolidated sequence. To create this dictionary, we will
+        use an additional utility dictionary that will keep track of for a given
+        sequence, which sequenecs it is the current representative consolidation
+        sequence for during the walk of the consolidation path. That way, every time
+        we get to a new seq consolidation tuple, for the seq being consolidated, we will
+        check to see which seqs it is representative of, and also transfer all of these
+        sequences to being represented by the super sequence in question
+
+        NB now that we are doing a bottom up and a top down approach"""
+        print('Doing sequence consolidation\n')
+        count = 1
+        tot = len(consolidation_path_list)
+        # search_seq = 'GTCGCTACTACCGATTGAATGGTTTAGTGAGGCCTCCTGACTGGCGCCGACACTCTGTCTCGTGCAGAGAGTGGGAGGCCGGGAAGTTGTTCAAACTTGATCATTTAGAGGAAGTAAAAGTCGTAACAAGGTTTC'
+
+        for query_seq, match_seq in consolidation_path_list:
+            # if query_seq == search_seq:
+            #     foo = 'asdf'
+            sys.stdout.write(f'\r{count} out of {tot}')
+            count += 1
+            query_seq_cummulative_rel_abund = self.consolidated_host_seqs_rel_abundance_dict[query_seq]
+            match_seq_cummulative_rel_abund = self.consolidated_host_seqs_rel_abundance_dict[match_seq]
+            self.consolidated_host_seqs_rel_abundance_dict[match_seq] = query_seq_cummulative_rel_abund + match_seq_cummulative_rel_abund
+            del self.consolidated_host_seqs_rel_abundance_dict[query_seq]
+            if query_seq in representative_to_seq_list:
+                # then the seq being consolidated was a representative sequence for other sequences
+                # and these sequences should also be transfered under the new representative
+                for seq_to_transfer in representative_to_seq_list[query_seq]:
+                    self.coral_blasted_seq_to_consolidated_seq_dict[seq_to_transfer] = match_seq
+                    representative_to_seq_list[match_seq].append(seq_to_transfer)
+                del representative_to_seq_list[query_seq]
+            self.coral_blasted_seq_to_consolidated_seq_dict[query_seq] = match_seq
+            representative_to_seq_list[match_seq].append(query_seq)
+        print('\nconsolidation complete\n')
+
+    def _make_host_seqs_dict(self):
+        """This is the first step in the process. We need to go through all of the 
+        seuences and get a list of all host sequences that are of one of the genera
+        we are concerned with. Collect a cummulative abundance for the sequences too so that we can
+        use this information when making the consolidation path. We will then create a 
+        consolidation path from this."""
+        # for every sample, create an complete abundance dict of seq to abundance and pickle it out
+        # for those sequences that are of one of the three genera, then add them to the list
+        if os.path.isfile(os.path.join(self.cache_dir, 'initial_consolidated_host_seqs_rel_abundance_dict.p.bz')):
+            return compress_pickle.load(os.path.join(self.cache_dir, 'initial_consolidated_host_seqs_rel_abundance_dict.p.bz'))
+        consolidated_host_seqs_rel_abundance_dict = defaultdict(float)
+        for readset in self.coral_readsets:
+            print(f'Getting coral sequences from readset {readset}')
+            sample_qc_dir = os.path.join(self.qc_dir, readset)
+            abs_all_seq_abundance_dict = self._make_abund_dict_from_names_path(readset)
+            seq_name_to_seq_dict = self._make_seq_name_to_seq_dict(readset)
+            compress_pickle.dump(
+                abs_all_seq_abundance_dict, 
+                os.path.join(sample_qc_dir, 'abs_all_seq_abundance_dict.p.bz'))
+            tot = sum(abs_all_seq_abundance_dict.values())
+            rel_all_seq_abundance_dict = {k: v/tot for k, v in abs_all_seq_abundance_dict.items()}
+            compress_pickle.dump(
+                rel_all_seq_abundance_dict, 
+                os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
+            sample_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'sample_annotation_dict.p.bz'))
+            coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
+
+            for blasted_seq, annotation in sample_annotation_dict.items():
+                if annotation[2] in ['Scleractinia', 'Anthoathecata']:
+                    # Then this is a coral seq
+                    # If it is of one of the three genera in question then we should
+                    # add it to the list of sequences
+                    if coral_annotation_dict[blasted_seq] in ['Porites', 'Pocillopora', 'Millepora']:
+                        consolidated_host_seqs_rel_abundance_dict[
+                            seq_name_to_seq_dict[blasted_seq]
+                            ] += rel_all_seq_abundance_dict[blasted_seq]
+        compress_pickle.dump(
+            consolidated_host_seqs_rel_abundance_dict, 
+            os.path.join(self.cache_dir, 'initial_consolidated_host_seqs_rel_abundance_dict.p.bz')
+            )
+        return consolidated_host_seqs_rel_abundance_dict
+
+    def _make_seq_name_to_seq_dict(self, readset):
+        fasta_path = os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
+        fasta_file_as_list = EighteenSBase.decompress_read_compress(fasta_path)
+        # with open(os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'), 'r') as f:
+        #     fasta_file_as_list = [line.rstrip() for line in f]
+        temporary_dictionary = {}
+        i = 0
+        while i < len(fasta_file_as_list):
+            sequence_name = fasta_file_as_list[i][1:].split('\t')[0]
+            temporary_dictionary[sequence_name] = fasta_file_as_list[i + 1]
+            i += 2
+        return temporary_dictionary
+
+    def _create_consolidation_path_list(self):
+        """We will do a run from short to long and vice versa. We will only consolidate one sequence
+        into another if the sequence to be consolidated has a lower abundance than the putative representative
+        sequence."""
+        representative_to_seq_list = defaultdict(list)
+        for i in range(2):
+            # First get a list of the sequences to work with sorted by order of length
+            if i == 0:
+                # Work short to long
+                if os.path.isfile(os.path.join(self.cache_dir, 'consolidation_path_list_s_to_l.p.bz')):
+                    consolidation_path_list = compress_pickle.load(
+                        os.path.join(self.cache_dir, 'consolidation_path_list_s_to_l.p.bz'))
+                    # search_seq = 'GTCGCTACTACCGATTGAATGGTTTAGTGAGGCCTCCTGACTGGCGCCGACACTCTGTCTCGTGCAGAGAGTGGGAGGCCGGGAAGTTGTTCAAACTTGATCATTTAGAGGAAGTAAAAGTCGTAACAAGGTTTC'
+                    # for tup in consolidation_path_list:
+                    #     if search_seq in tup:
+                    #         if tup[0] == search_seq:
+                    #             print('search seq is tup 0')
+                    #         else:
+                    #             print('search seq is tup 1')
+                else:
+                    seq_list = sorted(list(self.consolidated_host_seqs_rel_abundance_dict.keys()), key=len)
+                    consolidation_path_list = self._walk_and_test_match_s_to_l(seq_list)
+                    compress_pickle.dump(consolidation_path_list, os.path.join(self.cache_dir, 'consolidation_path_list_s_to_l.p.bz'))
+            else:
+                # work long to short
+                seq_list = sorted(list(self.consolidated_host_seqs_rel_abundance_dict.keys()), key=len, reverse=True)
+                consolidation_path_list = self._walk_and_test_match_l_to_s(seq_list)
+            self._consolidate(
+                consolidation_path_list, 
+                representative_to_seq_list)
+        
+        # Pickle out the host_seqs_dict and the consolidated_seq_dict
+        self._write_out_dicts()
+
+    def _walk_and_test_match_s_to_l(self, seq_list):
+        consolidation_path_list = []
+        # Go from start length to end length - 1
+        start_n = len(seq_list[0])
+        finish_n = len(seq_list[-1])
+        print('\nMaking consolidation path short to long')
+        for n in range(start_n, finish_n):
+            query_seqs = [seq for seq in seq_list if len(seq) == n]
+            if not query_seqs:
+                continue
+            putative_match_seqs = [seq for seq in seq_list if len(seq) > n]
+            sub_putative_match_abund_dict = {p_match_seq: self.consolidated_host_seqs_rel_abundance_dict[p_match_seq] for p_match_seq in putative_match_seqs}
+            count = 0
+            tot_query_seqs = len(query_seqs)
+            tot_p_match_seqs = len(putative_match_seqs)
+            for q_seq in query_seqs:
+                q_seq_abund = self.consolidated_host_seqs_rel_abundance_dict[q_seq]
+                matches = [seq for seq in putative_match_seqs if (sub_putative_match_abund_dict[seq] > q_seq_abund) and (q_seq in seq)]
+                count += 1
+                sys.stdout.write(f'\rseq {count} out of {tot_query_seqs} for level n={n} of {finish_n}. {tot_p_match_seqs} seqs to check against.')
+                
+                if matches:
+                    if len(matches) > 1:
+                        # Here we create a list of tuples where the match sequence and the number of
+                        # DataSetSamples that contained that sample.
+                        # We then sort it according to the cumulative abundance
+                        # Finally, we use this sequence as the consolidation representative for the
+                        # consolidation path
+                        representative_seq = sorted(
+                            [(match_seq, self.consolidated_host_seqs_rel_abundance_dict[match_seq]) for match_seq in matches],
+                            key=lambda x: x[1], reverse=True)[0][0]
+                        consolidation_path_list.append((q_seq, representative_seq))
+                    else:
+                        consolidation_path_list.append((q_seq, matches[0]))
+                else:
+                    # If there are no matches then there is no entry required in the consolidation path
+                    pass
+        return consolidation_path_list
+
+    def _walk_and_test_match_l_to_s(self, seq_list):
+        consolidation_path_list = []
+        # Go from start length to end length - 1
+        start_n = len(seq_list[0])
+        finish_n = len(seq_list[-1])
+        print('\nMaking consolidation path long to short')
+        for n in range(start_n, finish_n, -1):
+            query_seqs = [seq for seq in seq_list if len(seq) == n]
+            if not query_seqs:
+                continue
+            putative_match_seqs = [seq for seq in seq_list if len(seq) < n]
+            sub_putative_match_abund_dict = {p_match_seq: self.consolidated_host_seqs_rel_abundance_dict[p_match_seq] for p_match_seq in putative_match_seqs}
+            count = 0
+            tot_query_seqs = len(query_seqs)
+            tot_p_match_seqs = len(putative_match_seqs)
+            for q_seq in query_seqs:
+                q_seq_abund = self.consolidated_host_seqs_rel_abundance_dict[q_seq]
+                matches = [seq for seq in putative_match_seqs if (sub_putative_match_abund_dict[seq] > q_seq_abund) and (seq in q_seq)]
+                count += 1
+                sys.stdout.write(f'\rseq {count} out of {tot_query_seqs} for level n={n} of {finish_n}. {tot_p_match_seqs} seqs to check against.')
+                
+                if matches:
+                    if len(matches) > 1:
+                        # Here we create a list of tuples where the match sequence and the number of
+                        # DataSetSamples that contained that sample.
+                        # We then sort it according to the cumulative abundance
+                        # Finally, we use this sequence as the consolidation representative for the
+                        # consolidation path
+                        representative_seq = sorted(
+                            [(match_seq, self.consolidated_host_seqs_rel_abundance_dict[match_seq]) for match_seq in matches],
+                            key=lambda x: x[1], reverse=True)[0][0]
+                        consolidation_path_list.append((q_seq, representative_seq))
+                    else:
+                        consolidation_path_list.append((q_seq, matches[0]))
+                else:
+                    # If there are no matches then there is no entry required in the consolidation path
+                    pass
+        return consolidation_path_list
+
+
+    def _make_abund_dict_from_names_path(self, readset):
+        name_path = os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.names')
+        name_file = EighteenSBase.decompress_read_compress(name_path)
+        # with open(os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.names'), 'r') as f:
+        #     name_file = [line.rstrip() for line in f]
+        return {line.split('\t')[0]: len(line.split('\t')[1].split(',')) for line in name_file}
+
+    @staticmethod
+    def _get_colour_list():
+        colour_list = ["#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059", "#FFDBE5",
+                    "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF", "#997D87", "#5A0007", "#809693",
+                    "#FEFFE6", "#1B4400", "#4FC601", "#3B5DFF", "#4A3B53", "#FF2F80", "#61615A", "#BA0900", "#6B7900",
+                    "#00C2A0", "#FFAA92", "#FF90C9", "#B903AA", "#D16100", "#DDEFFF", "#000035", "#7B4F4B", "#A1C299",
+                    "#300018", "#0AA6D8", "#013349", "#00846F", "#372101", "#FFB500", "#C2FFED", "#A079BF", "#CC0744",
+                    "#C0B9B2", "#C2FF99", "#001E09", "#00489C", "#6F0062", "#0CBD66", "#EEC3FF", "#456D75", "#B77B68",
+                    "#7A87A1", "#788D66", "#885578", "#FAD09F", "#FF8A9A", "#D157A0", "#BEC459", "#456648", "#0086ED",
+                    "#886F4C", "#34362D", "#B4A8BD", "#00A6AA", "#452C2C", "#636375", "#A3C8C9", "#FF913F", "#938A81",
+                    "#575329", "#00FECF", "#B05B6F", "#8CD0FF", "#3B9700", "#04F757", "#C8A1A1", "#1E6E00", "#7900D7",
+                    "#A77500", "#6367A9", "#A05837", "#6B002C", "#772600", "#D790FF", "#9B9700", "#549E79", "#FFF69F",
+                    "#201625", "#72418F", "#BC23FF", "#99ADC0", "#3A2465", "#922329", "#5B4534", "#FDE8DC", "#404E55",
+                    "#0089A3", "#CB7E98", "#A4E804", "#324E72", "#6A3A4C", "#83AB58", "#001C1E", "#D1F7CE", "#004B28",
+                    "#C8D0F6", "#A3A489", "#806C66", "#222800", "#BF5650", "#E83000", "#66796D", "#DA007C", "#FF1A59",
+                    "#8ADBB4", "#1E0200", "#5B4E51", "#C895C5", "#320033", "#FF6832", "#66E1D3", "#CFCDAC", "#D0AC94",
+                    "#7ED379", "#012C58", "#7A7BFF", "#D68E01", "#353339", "#78AFA1", "#FEB2C6", "#75797C", "#837393",
+                    "#943A4D", "#B5F4FF", "#D2DCD5", "#9556BD", "#6A714A", "#001325", "#02525F", "#0AA3F7", "#E98176",
+                    "#DBD5DD", "#5EBCD1", "#3D4F44", "#7E6405", "#02684E", "#962B75", "#8D8546", "#9695C5", "#E773CE",
+                    "#D86A78", "#3E89BE", "#CA834E", "#518A87", "#5B113C", "#55813B", "#E704C4", "#00005F", "#A97399",
+                    "#4B8160", "#59738A", "#FF5DA7", "#F7C9BF", "#643127", "#513A01", "#6B94AA", "#51A058", "#A45B02",
+                    "#1D1702", "#E20027", "#E7AB63", "#4C6001", "#9C6966", "#64547B", "#97979E", "#006A66", "#391406",
+                    "#F4D749", "#0045D2", "#006C31", "#DDB6D0", "#7C6571", "#9FB2A4", "#00D891", "#15A08A", "#BC65E9",
+                    "#FFFFFE", "#C6DC99", "#203B3C", "#671190", "#6B3A64", "#F5E1FF", "#FFA0F2", "#CCAA35", "#374527",
+                    "#8BB400", "#797868", "#C6005A", "#3B000A", "#C86240", "#29607C", "#402334", "#7D5A44", "#CCB87C",
+                    "#B88183", "#AA5199", "#B5D6C3", "#A38469", "#9F94F0", "#A74571", "#B894A6", "#71BB8C", "#00B433",
+                    "#789EC9", "#6D80BA", "#953F00", "#5EFF03", "#E4FFFC", "#1BE177", "#BCB1E5", "#76912F", "#003109",
+                    "#0060CD", "#D20096", "#895563", "#29201D", "#5B3213", "#A76F42", "#89412E", "#1A3A2A", "#494B5A",
+                    "#A88C85", "#F4ABAA", "#A3F3AB", "#00C6C8", "#EA8B66", "#958A9F", "#BDC9D2", "#9FA064", "#BE4700",
+                    "#658188", "#83A485", "#453C23", "#47675D", "#3A3F00", "#061203", "#DFFB71", "#868E7E", "#98D058",
+                    "#6C8F7D", "#D7BFC2", "#3C3E6E", "#D83D66", "#2F5D9B", "#6C5E46", "#D25B88", "#5B656C", "#00B57F",
+                    "#545C46", "#866097", "#365D25", "#252F99", "#00CCFF", "#674E60", "#FC009C", "#92896B"]
+        return colour_list
+
+
 
 class SequenceQC:
     """Quality control of the sequences using Mothur firstly and then running through BLAST
@@ -55,7 +543,7 @@ class SequenceQC:
         apply_list = []
         for readset, ser in self.fastq_info_df.iterrows():
             # Check to see if this is a coral sample
-            if self.sample_provenance_df.at[ser['barcode_id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
+            if self.sample_provenance_df.at[ser['sample-id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
                 if self._check_if_qc_already_complete(readset):
                     continue
                 else:
@@ -81,8 +569,8 @@ class SequenceQC:
             num_proc=1)
         indi.start_qc()
 
-    def _check_if_qc_already_complete(self, sample_name):
-        return os.path.exists(os.path.join(self.qc_dir, sample_name, 'qc_complete.txt'))
+    def _check_if_qc_already_complete(self, readset):
+        return os.path.exists(os.path.join(self.qc_dir, readset, 'qc_complete.txt'))
 
     def do_bast_qc(self):
         """
@@ -108,7 +596,7 @@ class SequenceQC:
         # Get an apply list
         apply_list = []
         for readset, ser in self.fastq_info_df.iterrows():
-            if self.sample_provenance_df.at[ser['barcode_id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
+            if self.sample_provenance_df.at[ser['sample-id'], 'SAMPLE ENVIRONMENT, short'] == 'C-CORAL':
                 if not os.path.exists(os.path.join(self.qc_dir, readset, 'taxonomy_complete.txt')):
                     apply_list.append(readset)
                 
@@ -131,10 +619,8 @@ class SequenceQC:
     def _set_tax_running(self, readset):
         try:
             print(f'{current_process().name}: readset is {readset}')
-            barcode_id = self.fastq_info_df.loc[readset]['barcode_id']
-            tax = self.sample_provenance_df.at[barcode_id, 'SAMPLE ENVIRONMENT, short']
-            # print(f'{current_process().name}: barcode is {barcode_id}')
-            # print(f'{current_process().name}: sample prov tax is {tax}')
+            sample_id = self.fastq_info_df.loc[readset]['sample-id']
+            tax = self.sample_provenance_df.at[sample_id, 'SAMPLE ENVIRONMENT, short']
             indi_tax_an = IndividualTaxAnnotationQC(
                     cache_dir=self.cache_dir, 
                     qc_dir=self.qc_dir, 
