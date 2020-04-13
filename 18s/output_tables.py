@@ -1,5 +1,4 @@
-# Then we can continue working on the output_tables.py.
-# If we don't do this now. Its just going to be confusing in the future.
+#!/usr/bin/env python3
 import os
 import compress_pickle
 import sys
@@ -59,6 +58,7 @@ class EighteenSOutputTables(EighteenSBase):
 
     putative_intra_genus_contamination_ratio - Ratio that the above is based on
 
+    # TODO is_replicate Whether or not the barcode in question has multiple fastq.gz pairs associated with it.
 
     """
     
@@ -74,6 +74,7 @@ class EighteenSOutputTables(EighteenSBase):
         # df called abundance_info_df. This df may later contain addional information such as the QC info.
         # For now we will also add a column called post_qc_seq_depth. This will be the total number of 
         # sequences returned for a given readset.
+        self.dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
         self.abundance_info_df = self._make_or_get_abundance_info_df()
 
         # Produce the dictionary for making the coral meta info table
@@ -87,29 +88,26 @@ class EighteenSOutputTables(EighteenSBase):
         # these as there are still technical replicates hosted on the genoscope server.
         self._populate_coral_meta_info_table_dict()
 
-        # TODO move back to being a public method run independently
-        self.make_and_write_coral_meta_info_output_table()
-
         # # This will be a dict where full sequence is the key
         # # The value will be another dict holding cumulative relative abundance
         # # and the taxonomic tup
-        # self.master_seq_info_dict = {}
-        # self._populate_master_seq_info_dict()
-        # # Now get a master list of the sequences in order of cummulative abundance
-        # self.master_seq_abund_order_list = self._make_master_seq_abund_order_list()
+        self.master_seq_info_dict = {}
+        self._populate_master_seq_info_dict()
+        # Now get a master list of the sequences in order of cummulative abundance
+        self.master_seq_abund_order_list = self._make_master_seq_abund_order_list()
 
-        # # Now popualte the dictionary that will be used to create the abundance df
-        # self.abundance_df_dict = {}
-        # self._populate_abundance_df_dict()
+        # Now popualte the dictionary that will be used to create the abundance df
+        self.abundance_df_dict = {}
+        self._populate_abundance_df_dict()
 
-        # self.tax_annotation_df_dict = self._populate_tax_annotation_df_dict()
+        self.tax_annotation_df_dict = self._populate_tax_annotation_df_dict()
 
-        # # Dict for collecting the sequencing information for making the host only consolidated sequences
-        # # absolute abundance dataframe
-        # self.host_only_master_seq_info_dict = self._populate_host_only_master_seq_info_dict()
-        # self.host_only_master_seq_abund_order_list = self._make_host_only_master_seq_abund_order_list()
-        # self.consolidated_df_dict = {}
-        # self._populated_consolidated_df_dict()
+        # Dict for collecting the sequencing information for making the host only consolidated sequences
+        # absolute abundance dataframe
+        self.host_only_master_seq_info_dict = self._populate_host_only_master_seq_info_dict()
+        self.host_only_master_seq_abund_order_list = self._make_host_only_master_seq_abund_order_list()
+        self.consolidated_df_dict = {}
+        self._populated_consolidated_df_dict()
 
     def _make_or_get_abundance_info_df(self):
         if os.path.isfile(os.path.join(self.cache_dir, 'abundance_info_df.p.bz')):
@@ -184,6 +182,7 @@ class EighteenSOutputTables(EighteenSBase):
                 'primary_sequence', 'is_different_primary_sequence',
                 'host_rel_abund', 'is_low_host_rel_abund',
                 'putative_intra_genus_contamination_ratio', 'is_putative_intra_genus_contamination',
+                'is_replicate',
                 'is_representative_for_sample', 'post_qc_seq_depth',
                 'fwd_read_name', 'rev_read_name',
                 'SAMPLING DESIGN LABEL',
@@ -203,19 +202,32 @@ class EighteenSOutputTables(EighteenSBase):
         column_order.insert(1, 'readset')
         df = df.reindex(columns=column_order)
         print('Writing coral meta info output table')
-        dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
-        df.to_csv(os.path.join(self.output_dir, f'coral_18S_meta_info_table_{dat_string}.csv.bz'), index=False, compression='bz2')
+        
+        df.to_csv(os.path.join(self.output_dir, f'coral_18S_meta_info_table_{self.dat_string}.csv.bz'), index=False, compression='bz2')
 
     def make_and_write_raw_abund_output_table(self):
         # Here we have the self.abundance_df_dict populated and we can now create the dataframe from this dict
-        print('Constructing raw abundance table')
+        print('Constructing raw abundance table') # TODO I think we will need to add in the a sample_id column
         df = pd.DataFrame.from_dict(
             self.abundance_df_dict,
             orient='index',
             columns=self.master_seq_abund_order_list
         )
+        # rename the index so that we don't have a clash with readset
+        df.index.name = 'not_readset'
+        # Add readset to the df
+        df['readset'] = list(df.index)
+        # Add sample-id to the df
+        sample_id_list = [self.fastq_info_df.at[_, 'sample-id'] for _ in list(df.index)]
+        df['sample-id'] = sample_id_list
+        # create a new columns list
+        column_order = self.master_seq_abund_order_list.copy()
+        column_order.insert(0, 'sample-id')
+        column_order.insert(0, 'readset')
+        df = df.reindex(columns=column_order)
+        
         print('Writing raw abundance table')
-        df.to_csv(os.path.join(self.output_dir, 'raw_seq_abund.csv.bz'), index=True, compression='bz2', index_label='sample_id')
+        df.to_csv(os.path.join(self.output_dir, f'raw_seq_abund_{self.dat_string}.csv.bz'), index=False, compression='bz2')
 
     def make_and_write_tax_output_table(self):
         print('Constructing taxonomy table')
@@ -225,7 +237,7 @@ class EighteenSOutputTables(EighteenSBase):
             columns=['order', 'family', 'genus']
         )
         print('Writing taxonomy table')
-        df.to_csv(os.path.join(self.output_dir, 'tax_annotation.csv.bz'), index=True, compression='bz2', index_label='sequence')
+        df.to_csv(os.path.join(self.output_dir, f'tax_annotation_{self.dat_string}.csv.bz'), index=True, compression='bz2', index_label='sequence')
 
     def make_and_write_consolidated_host_output_table(self):
         print('Constructing consolidated host output table')
@@ -234,7 +246,7 @@ class EighteenSOutputTables(EighteenSBase):
             columns=self.host_only_master_seq_abund_order_list
         )
         print('Writing consolidated host output table')
-        df.to_csv(os.path.join(self.output_dir, 'consolidated_host.csv.bz'), index=True, compression='bz2', index_label='sample_id')
+        df.to_csv(os.path.join(self.output_dir, f'consolidated_host_{self.dat_string}.csv.bz'), index=True, compression='bz2', index_label='sample_id')
 
     def _populate_tax_annotation_df_dict(self):
         # The key should be sequence and the list should be order, family genus, in that order
@@ -249,13 +261,13 @@ class EighteenSOutputTables(EighteenSBase):
             self.abundance_df_dict = compress_pickle.load(os.path.join(self.cache_dir, 'abundance_df_table_output.p.bz'))
         else:
             print('Collecting sequence information (original_seqs): second pass')
-            for sample_id in self.info_df.index:
-                sys.stdout.write(f'\r{sample_id}')
+            for readset in self.coral_readsets:
+                sys.stdout.write(f'\r{readset}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_id)
+                fasta_file = self._read_in_fasta_file(readset)
 
                 # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(readset)
 
                 # create a seq_to_abs_abund dictionary
                 seq_to_abs_abund_dict = {
@@ -265,7 +277,7 @@ class EighteenSOutputTables(EighteenSBase):
                 # In the order of the self.master_seq_abund_order_list
                 # populate the abundances for the given sample
                 temp_abund_list = [seq_to_abs_abund_dict[seq] if seq in seq_to_abs_abund_dict else 0 for seq in self.master_seq_abund_order_list]
-                self.abundance_df_dict[sample_id] = temp_abund_list
+                self.abundance_df_dict[readset] = temp_abund_list
             compress_pickle.dump(self.abundance_df_dict, os.path.join(self.cache_dir, 'abundance_df_table_output.p.bz'))
 
     def _populate_host_only_master_seq_info_dict(self):
@@ -285,14 +297,14 @@ class EighteenSOutputTables(EighteenSBase):
             return compress_pickle.load(os.path.join(self.cache_dir, 'host_only_master_seq_info_dict.p.bz'))
         host_only_master_seq_info_dict = defaultdict(float)
         print('Collecting sequence information (consolidated seqs): first pass')
-        for sample_id in self.info_df.index:
-            sys.stdout.write(f'\r{sample_id}')
+        for readset in self.coral_readsets:
+            sys.stdout.write(f'\r{readset}')
 
             # Dict that is sequence key to relative abundance in the sample (of only the given genus sequences)
             # I.e. dict adds up to one. We will use this only for the keys
             # to see which seqs we should be concerned with
             consolidated_host_seqs_abund_dict = compress_pickle.load(
-                os.path.join(self.qc_dir, sample_id, 'consolidated_host_seqs_abund_dict.p.bz'))
+                os.path.join(self.qc_dir, readset, 'consolidated_host_seqs_abund_dict.p.bz'))
 
             for seq, rel_abund in consolidated_host_seqs_abund_dict.items():
                 host_only_master_seq_info_dict[seq] += rel_abund
@@ -313,13 +325,13 @@ class EighteenSOutputTables(EighteenSBase):
             print('Collecting sequence information (consolidated seqs): second pass')
             coral_blasted_seq_to_consolidated_seq_dict = compress_pickle.load(
                 os.path.join(self.cache_dir, 'coral_blasted_seq_to_consolidated_seq_dict.p.bz'))
-            for sample_id in self.info_df.index:
-                sys.stdout.write(f'\r{sample_id}')
+            for readset in self.coral_readsets:
+                sys.stdout.write(f'\r{readset}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_id)
+                fasta_file = self._read_in_fasta_file(readset)
                 fasta_seq_to_name_dict = {fasta_file[i+1]: fasta_file[i].split('\t')[0][1:] for i in range(0, len(fasta_file), 2)}
                 # read in the name file and make an abundance dictionary
-                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(sample_id)
+                name_abs_abund_dict = self._make_abs_abund_dict_from_names_path(readset)
 
                 # the dict we are making for each sample that maps consolidated sequence to the
                 # original sequences it represents
@@ -335,7 +347,7 @@ class EighteenSOutputTables(EighteenSBase):
                         consol_seq_to_orig_seq_dict[seq].append(seq)
 
                 consolidated_host_seqs_abund_dict = compress_pickle.load(
-                    os.path.join(self.qc_dir, sample_id, 'consolidated_host_seqs_abund_dict.p.bz'))
+                    os.path.join(self.qc_dir, readset, 'consolidated_host_seqs_abund_dict.p.bz'))
 
                 temp_abund_list = []
                 for master_consolidated_seq in self.host_only_master_seq_abund_order_list:
@@ -343,7 +355,7 @@ class EighteenSOutputTables(EighteenSBase):
                         temp_abund_list.append(sum([name_abs_abund_dict[fasta_seq_to_name_dict[repped_seq]] for repped_seq in consol_seq_to_orig_seq_dict[master_consolidated_seq]]))
                     else:
                         temp_abund_list.append(0)
-                self.consolidated_df_dict[sample_id] = temp_abund_list
+                self.consolidated_df_dict[readset] = temp_abund_list
             compress_pickle.dump(self.consolidated_df_dict, os.path.join(self.cache_dir, 'consolidated_df_dict_output_tables.p.bz'))
 
     def _make_host_only_master_seq_abund_order_list(self):
@@ -360,17 +372,17 @@ class EighteenSOutputTables(EighteenSBase):
             self.master_seq_info_dict = compress_pickle.load(os.path.join(self.cache_dir, 'master_seq_info_dict.p.bz'))
         else:
             print('Collecting sequence information (original seqs): first pass')
-            for sample_id in self.info_df.index:
-                sys.stdout.write(f'\r{sample_id}')
+            for readset in self.coral_readsets:
+                sys.stdout.write(f'\r{readset}')
                 # read in the fasta file
-                fasta_file = self._read_in_fasta_file(sample_id)
+                fasta_file = self._read_in_fasta_file(readset)
 
                 # read in the name file and make an abundance dictionary
-                name_rel_abund_dict = self._make_rel_abund_dict_from_names_path(sample_id)
+                name_rel_abund_dict = self._make_rel_abund_dict_from_names_path(readset)
 
                 # read in the sample taxonomy dictionary
                 sample_annotation_dict = compress_pickle.load(
-                    os.path.join(self.qc_dir, sample_id, 'sample_annotation_dict.p.bz'))
+                    os.path.join(self.qc_dir, readset, 'sample_annotation_dict.p.bz'))
 
                 # for each sequence in the fasta file
                 # if not already in the dict, init with the rel abund and tax info
@@ -389,11 +401,9 @@ class EighteenSOutputTables(EighteenSBase):
                                                                  'tax_annotation': tax_tup}
             compress_pickle.dump(self.master_seq_info_dict, os.path.join(self.cache_dir, 'master_seq_info_dict.p.bz'))
 
-    def _read_in_fasta_file(self, sample_id):
-        with open(
-                os.path.join(self.qc_dir, sample_id, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'),
-                'r') as f:
-            return [line.rstrip() for line in f]
+    def _read_in_fasta_file(self, readset):
+        fasta_path = os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
+        return self.decompress_read_compress(fasta_path)
 
     def _make_abs_abund_dict_from_names_path(self, readset):
         name_path = os.path.join(self.qc_dir, readset, 'stability.trim.contigs.good.unique.abund.pcr.names')
@@ -518,6 +528,7 @@ class TableFour():
             self.primary_sequence, self.is_different_primary_sequence,
             self.host_rel_abund, self.is_low_host_rel_abund,
             self.putative_intra_genus_contamination_ratio, self.is_putative_intra_genus_contamination,
+            self.parent.fastq_info_df.at[self.readset, 'is_replicate'],
             self.is_representative_for_sample, self.post_qc_seq_depth,
             self.parent.fastq_info_df.at[self.readset, 'fwd_read_name'],
             self.parent.fastq_info_df.at[self.readset, 'rev_read_name'],
@@ -684,7 +695,7 @@ class TableFour():
 
 if __name__ == "__main__":
     ot = EighteenSOutputTables()
-    # ot.make_and_write_coral_meta_info_output_table()
-    # ot.make_and_write_tax_output_table()
-    # ot.make_and_write_raw_abund_output_table()
-    # ot.make_and_write_consolidated_host_output_table()
+    ot.make_and_write_coral_meta_info_output_table()
+    ot.make_and_write_tax_output_table()
+    ot.make_and_write_raw_abund_output_table()
+    ot.make_and_write_consolidated_host_output_table()
