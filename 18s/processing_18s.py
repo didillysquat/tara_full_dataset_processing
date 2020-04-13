@@ -32,6 +32,19 @@ class EighteenSProcessing(EighteenSBase):
         # dictionaries that we will use in the plotting and in the distance matrix creation
         SeqConsolidator(qc_dir=self.qc_dir, cache_dir=self.cache_dir, fastq_info_df=self.fastq_info_df, coral_readsets=self.coral_readsets).do_consolidation()
 
+        # make the seq_to_total_abund_dict
+        if os.path.isfile(os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz')):
+            pass
+        else:
+            seq_to_total_abund_dict = defaultdict(int)
+            for readset in self.coral_readsets:
+                sample_qc_dir = os.path.join(self.qc_dir, readset)
+                consolidated_host_seqs_abund_dict = compress_pickle.load(
+                    os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+                for seq_name in consolidated_host_seqs_abund_dict.keys():
+                    seq_to_total_abund_dict[seq_name] += 1
+            compress_pickle.dump(seq_to_total_abund_dict, os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz'))
+        
 class SeqConsolidator:
     # In order to do the all_coral_sequence, we are going to need to move
     # the creation of abundance dataframes up here, as we need to keep track of global abundance
