@@ -64,12 +64,12 @@ class EighteenSAnalysis(EighteenSBase):
             island_site_dict[island].add(site)
         return island_site_dict
 
-    def do_stacked_bar_plots(self, plot_type, in_sample_cutoff=None, norm_abund=None, norm_method=None):
+    def do_stacked_bar_plots(self, plot_type, in_sample_cutoff=None, norm_abund=None, norm_method=None, labels='colony'):
         sbp = StackedBarPlotter(
             plot_type=plot_type, islands=self.islands,
             island_site_dict=self.island_site_dict, host_species=self.host_species, 
             fig_output_dir=self.fig_output_dir, qc_dir=self.qc_dir, fastq_info_df=self.fastq_info_df, sample_provenance_df=self.sample_provenance_df, cache_dir=self.cache_dir,
-            in_sample_cutoff=in_sample_cutoff, norm_abund=norm_abund, norm_method=norm_method)
+            in_sample_cutoff=in_sample_cutoff, norm_abund=norm_abund, norm_method=norm_method, label_type=labels)
         sbp.plot()
 
 
@@ -559,7 +559,8 @@ class StackedBarPlotter:
     """
     def __init__(
             self, plot_type, islands, island_site_dict, host_species,
-            fig_output_dir, qc_dir, fastq_info_df, sample_provenance_df, cache_dir, in_sample_cutoff, norm_abund, norm_method):
+            fig_output_dir, qc_dir, fastq_info_df, sample_provenance_df, 
+            cache_dir, in_sample_cutoff, norm_abund, norm_method, label_type):
         # We will use this plot type variable to change between the different types of plots being produced
         # We will start with 'all_taxa' that can be all of the taxa in a single plot
         # We will now do 'all_coral_genus'. This will be a plot of only the coral sequences and to a genus
@@ -583,6 +584,7 @@ class StackedBarPlotter:
         self.in_sample_cutoff = in_sample_cutoff
         self.norm_abund = norm_abund
         self.norm_method = norm_method
+        self.label_type = label_type
         self.plotting_categories, self.color_dict = self._init_color_dict()
         if self.plot_type in ['all_coral_sequence','minor_coral_sequence']:
             self.ordered_seq_name_list = self._get_ordered_seq_name_list()
@@ -656,26 +658,26 @@ class StackedBarPlotter:
         if self.plot_type == 'minor_coral_sequence':
             if self.in_sample_cutoff and self.norm_abund:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}.svg')
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}.png')
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
             elif self.in_sample_cutoff:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.svg')
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}.png')
+                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.png')
             elif self.norm_abund:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}.svg')
+                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}.png')
+                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
             else:
                 # if no normalisation and no sample cutoff used
-                svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
-                png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
+                svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.svg')
+                png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.png')
         else:
-            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.svg')
-            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}.png')
+            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.svg')
+            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.png')
 
         print(f'\nWriting .svg to {svg_path}')
         plt.savefig(svg_path)
@@ -1033,10 +1035,23 @@ class StackedBarIndiPlot():
         self.ax.set_xlim(0 - 0.5, max_num_smpls_in_subplot - 0.5)
         self.ax.set_ylim(0,1)
         # This is where we chose what to annotate the x acis with 
-        self._remove_axes_but_allow_labels(x_labels=self.indi_annotations)
+        if self.parent.label_type == 'colony':
+            x_labels = self.indi_annotations
+            fontsize=2
+        elif self.parent.label_type == 'sample-id':
+            x_labels = self.sample_ids
+            fontsize=2
+        elif self.parent.label_type == 'readset':
+            x_labels = []
+            for readset in self.readsets:
+                one_el = readset.split('_')[1].replace('OSTA', '')
+                two_el = readset.split('_')[3].split('.')[0]
+                x_labels.append(f'{one_el}_{two_el}')
+                fontsize=1.5
+        self._remove_axes_but_allow_labels(x_labels=x_labels, fontsize=fontsize)
         self.ax.set_ylabel(self.site, fontsize=5, labelpad=0)
 
-    def _remove_axes_but_allow_labels(self, ax=None, x_labels=None):
+    def _remove_axes_but_allow_labels(self, ax=None, x_labels=None, fontsize=2):
         if ax is None:
             self.ax.set_frame_on(False)
             self.ax.set_yticks([])
@@ -1044,7 +1059,7 @@ class StackedBarIndiPlot():
                 #TODO Here we want to write the labels directly onto the bars if possible
                 self.ax.set_xticks([])
                 for i, lab in enumerate(x_labels):
-                    self.ax.text(x=i-0.5, y=0, s=lab, va='bottom', ha='left', rotation=90, fontsize=2)
+                    self.ax.text(x=i-0.5, y=0, s=lab, va='bottom', ha='left', rotation=90, fontsize=fontsize)
                     # plt.savefig('/home/humebc/draft.png', dpi=1200)
                     # self.ax.set_xticks([_-0.5 for _ in range(len(self.indi_annotations))])
                     # self.ax.set_xticklabels(self.indi_annotations, fontsize=2, rotation=-90)
@@ -1079,14 +1094,18 @@ if __name__ == "__main__":
     # an int() function of this result.
     # The num_seqs normalisation will only use the ith most abundant sequences where the ith degree is defined by
     # normalisation_abund
+    # A 'labels' option may also be passed to the do_stacked_bar_plots function. This will denote
+    # What labels are plotted on the each of the columns. By default 'colony' is used. This uses the individual
+    # annotations for example C001. 'sample-id' - will use the sample-id. 'readset' will use readset.
 
     # Do all the plots
     # For the release 1, I think it makes sense to just provide the three plots
     # 'all_taxa', 'all_coral_genus', 'all_coral_sequence'
     for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence']:
-        EighteenSAnalysis().do_stacked_bar_plots(
-                plot_type=plot_type, in_sample_cutoff=None,
-                norm_abund=None, norm_method=None)
+        for label in ['readset', 'sample-id']:
+            EighteenSAnalysis().do_stacked_bar_plots(
+                    plot_type=plot_type, in_sample_cutoff=None,
+                    norm_abund=None, norm_method=None, labels=label)
     
     # for plot_type in ['all_taxa', 'all_coral_genus', 'all_coral_sequence', 'minor_coral_sequence']:
     #     if plot_type == 'minor_coral_sequence':
