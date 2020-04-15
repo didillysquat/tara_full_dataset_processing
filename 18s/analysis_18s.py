@@ -654,30 +654,30 @@ class StackedBarPlotter:
                     else:
                         self._remove_axes_but_allow_labels(ax)
 
-        self.fig.suptitle(f'18s {self.plot_type}', fontsize=16)
+        self.fig.suptitle(f'18S {self.plot_type}', fontsize=16)
         if self.plot_type == 'minor_coral_sequence':
             if self.in_sample_cutoff and self.norm_abund:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
+                                        f'stacked_bar_18S_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
+                                        f'stacked_bar_18S_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
             elif self.in_sample_cutoff:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.svg')
+                                        f'stacked_bar_18S_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.png')
+                                        f'stacked_bar_18S_{self.plot_type}_in_sample_cutoff_{self.in_sample_cutoff}_{self.label_type}.png')
             elif self.norm_abund:
                 svg_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
+                                        f'stacked_bar_18S_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.svg')
                 png_path = os.path.join(self.fig_output_dir,
-                                        f'stacked_bar_18s_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
+                                        f'stacked_bar_18S_{self.plot_type}_norm_{self.norm_method}_{self.norm_abund}_{self.label_type}.png')
             else:
                 # if no normalisation and no sample cutoff used
-                svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.svg')
-                png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.png')
+                svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18S_{self.plot_type}_{self.label_type}.svg')
+                png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18S_{self.plot_type}_{self.label_type}.png')
         else:
-            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.svg')
-            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18s_{self.plot_type}_{self.label_type}.png')
+            svg_path = os.path.join(self.fig_output_dir, f'stacked_bar_18S_{self.plot_type}_{self.label_type}.svg')
+            png_path = os.path.join(self.fig_output_dir, f'stacked_bar_18S_{self.plot_type}_{self.label_type}.png')
 
         print(f'\nWriting .svg to {svg_path}')
         plt.savefig(svg_path)

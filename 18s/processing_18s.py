@@ -598,13 +598,9 @@ class SequenceQC:
         We will also produce two additional dicts. One for only Symbiodiniaceae and one for only Scleractinia or Anthoathecata.
         In both of these dicts, genus level annotations will be used for the sequences.
 
-        We will run this in serial but use multiple processors for running the blast.
-
-        # TODO given that we are running on zygote and can easily use up the 200 cores, I think that best speed
-        # will likely be realised through the use of both multiple processes and using multiple cores for the blast.
-        # Perhaps we could try 20 core blasts and use a pool of 10 processes.
+        We will run this in serial but use multiple processors for running the blast.        
         """
-        # self._write_out_ncbi_db_config_file()
+
 
         # Get an apply list
         apply_list = []
