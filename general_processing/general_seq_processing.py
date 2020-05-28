@@ -29,6 +29,8 @@ pairs (i.e. multiple pairs per barcode if they exist).
 
 NB as a final change to the table stephane has asked that we move from barcode_id to sample-id. We will do this by simply
 changing the column name and prepending TARA_ to each of the values.
+
+This script should have been run first and before the processing_18s.py to ensure that the 18S files are downloaded.
 """
 import os
 import pickle

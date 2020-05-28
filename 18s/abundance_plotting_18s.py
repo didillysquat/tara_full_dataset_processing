@@ -1,4 +1,9 @@
-"""We need to do some investigation into the absolute number of sequences and unique number of sequences
+"""
+This is kind of quick and direty script that I was using to plot up some additional useful plots.
+This is probably worth revisiting to produce useful supplementary info.
+
+
+We need to do some investigation into the absolute number of sequences and unique number of sequences
 found in samples to better quality control the distance metrics"""
 
 from base_18s import EighteenSBase
