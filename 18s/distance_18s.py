@@ -44,10 +44,10 @@ class EighteenSDistance(EighteenSBase):
     although, Didier did say that he is also going to send through some categorisations.
     """
     def __init__(
-        self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0, 
+        self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, 
         remove_majority_sequence=True, mafft_num_proc=6, braycurtis_normalisation_abundance=10000, 
         unifrac_normalisation_abundance=1000, normalisation_method='pwr', approach='dist', 
-        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic'):
+        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3):
         super().__init__()
         # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
         self.genera = ['Pocillopora', 'Porites']
@@ -57,11 +57,17 @@ class EighteenSDistance(EighteenSBase):
         # Dict where genus if key and primary seq (nucleotide seq) is value.
         self.primary_seq_dict = self._make_primary_seq_dict()
         # Here we can make use of the meta_info_table that we created in output_tables.py
-        self.exclude_secondary_seq_samples=exclude_secondary_seq_samples
-        self.samples_at_least_threshold=samples_at_least_threshold
+        self.exclude_secondary_seq_samples = exclude_secondary_seq_samples
+        self.only_snp_samples = only_snp_samples
+        self.use_replicates = use_replicates
+        self.samples_at_least_threshold = samples_at_least_threshold
+        self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
+        try:
+            assert(0 <= self.samples_at_least_threshold <= 1)
+        except AssertionError:
+            raise AssertionError('samples_at_least_threshold must be between 0 and 1')
         if snp_distance_type == 'biallelic':
             self.snp_dist_df_dict, self.snp_sample_list_dict = self._generate_biallelic_snp_dist_dfs()
-        
         # A dict of genus to the list of representative readsets to include
         self.genus_to_representative_readset_dict = self._generate_genera_readset_dict()
         self.dist_methods = ['unifrac', 'braycurtis']
@@ -71,10 +77,8 @@ class EighteenSDistance(EighteenSBase):
         self.braycurtis_norm_abund = braycurtis_normalisation_abundance
         self.normalisation_method = normalisation_method
         self.approach = approach
-        self.only_snp_samples = only_snp_samples
-        self.use_replicates = use_replicates
+        
         foo = 'bar'
-    
     
     def _generate_biallelic_snp_dist_dfs(self):
         poc_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PocG111_biallelic_gaps.tree.distances.txt')
@@ -192,6 +196,7 @@ class EighteenSDistance(EighteenSBase):
         use_replicates
         only_snp_samples
         """
+        temp_dict = {}
         # First screen by coral host
         for genus in self.genera:
             temp_dict[genus] = self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus]
@@ -206,30 +211,11 @@ class EighteenSDistance(EighteenSBase):
         # Then by only_snp_samples
         if self.only_snp_samples:
             for genus in self.genera:
-                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['sample-id'] in self.snp_sample_list_dict[genus]]
+                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['sample-id'].isin(self.snp_sample_list_dict[genus])]
         # Finally, we only want the list of the readsets, so get the indices from the df
         for genus in self.genera:
             temp_dict[genus] = list(temp_dict[genus].index)
-
-        # if not self.exclude_secondary_seq_samples:
-        #     temp_dict = {}
-        #     for genus in self.genera:
-        #         temp_dict[genus] = list(self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus].index)
-        #     return temp_dict
-        # elif self.exclude_secondary_seq_samples:
-        #     # We will exclude samples that have a different primary host sequences from the majority of
-        #     # samples of the given genus
-        #     temp_dict = {}
-        #     for genus in self.genera:
-        #         temp_dict[genus] = list(self.meta_info_df[
-        #             (self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus) & 
-        #             (self.meta_info_df['primary_sequence'] == self.primary_seq_dict[genus]) &
-        #             (self.meta_info_df['is_representative_for_sample'] == True)
-        #         ].index)
-        #     return temp_dict
-        else:
-            raise NotImplementedError
-
+        return temp_dict
 
 class DistancePlotter:
     def __init__(self, parent, color_by=None, plot_unifrac=True):
@@ -477,10 +463,10 @@ class IndiDistanceAnalysis():
         # the trees. We will start here with 1000 seqs for the unifrac and see
         # how long it takes to make the tree. If its not too bad then we can up the number
         if self.dist_method == 'unifrac':
-            self.num_seqs_to_normalise_to = 1000
+            self.num_seqs_to_normalise_to = self.parent.unifrac_norm_abund
             self.abundance_df = None
         else:
-            self.num_seqs_to_normalise_to = 10000
+            self.num_seqs_to_normalise_to = self.parent.braycurtis_norm_abund
             self.abundance_dict = None
 
 
@@ -491,10 +477,10 @@ class IndiDistanceAnalysis():
             secondary_seq_string = 'included'
         self.dist_out_path = os.path.join(
             self.parent.output_dir_18s,
-            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_samp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.dist_method}.dist')
+            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_samp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.parent.normalisation_method}_{self.dist_method}.dist')
         self.pcoa_out_path = os.path.join(
             self.parent.output_dir_18s,
-            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_smp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.dist_method}.csv')
+            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_smp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.parent.normalisation_method}_{self.dist_method}.csv')
 
         self.pcoa_df = None
 
@@ -506,67 +492,69 @@ class IndiDistanceAnalysis():
 
         # Variables concerned with braycurtis
         self.braycurtis_btwn_sample_distance_dictionary = None
-        
-        # The pseudo code for this is
-        # Create an abundance dataframe (we need to choose whether to normalise this or not)
-        # We probably should normalise.
-        # Do this by creating a dict of dicts and using the dicts methods that exist
-        # in the initial 18S code
-        # master fasta file of the sequences from the samples,
-        # If we are doing unifrac then we will need to compute a tree
-        # then we can do either the braycurtis calculations or
-        # the unifrac calculations.
-        # then from this produce pcoa
-        # then plot this
-        # The tree creation will likely be one of the most expensive parts
-        # so we should aim to pickle out the trees if possible, same with alignments.
-        # We can possibly pickle these items out as their hashes.
 
     def _create_abundance_df(self):
         """For each sample in self.samples, load up the consolidated_host_seqs_abund_dict
         and create a dict that is sequence to normalised abundance. Then add this dictionary
         to a master dictionary where sample_name is key. Then finally create a df from this
         dict of dicts"""
-
-        # Then we need to screen any sequences we use to make sure that they are found in at least
-        # 5 samples. We need to build a dict to allow us to do this.
-        if self.parent.samples_at_least_threshold:
+        if self.parent.samples_at_least_threshold > 0:
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
             threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.parent.samples_at_least_threshold}
         dict_to_create_df_from = {}
         print('Creating abundance df')
-
         # NB there is one sample that only had one sequence in the consolidated_host_seqs_abund_dict
         # and this sample is causing errors. We will check for empty conolidated dict,
         # add the sample to a list and then remove it from the self.samples list
         samples_to_remove_list = []
         for sample_name in self.samples:
             sys.stdout.write(f'\r{sample_name}')
-            temp_sample_dict = {}
+            
             sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
             
-            # We need to remove the most abundant sequence from the equation
-            most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), key=(lambda key: consolidated_host_seqs_abund_dict[key]))
-            # remove the most abund seq
-            del consolidated_host_seqs_abund_dict[most_abund_sequence]
-            # renormalise
-            if self.parent.samples_at_least_threshold:
-                # screen out those sequences that are not found in 5 or more samples
+            # remove most abundant sequences if this option is set
+            is self.parent.remove_maj_seq:
+                most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), key=(lambda key: consolidated_host_seqs_abund_dict[key]))
+                # remove the most abund seq
+                del consolidated_host_seqs_abund_dict[most_abund_sequence]
+            
+            # if working with samples_at_least_threshold, screen out rare seqs here
+            if self.parent.samples_at_least_threshold > 0:
                 consolidated_host_seqs_abund_dict = {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
+            
+            # normalise the consolidated_host_seqs_abund_dict back to 1
             tot = sum(consolidated_host_seqs_abund_dict.values())
             consolidated_host_seqs_abund_dict = {k: v/tot for k, v in consolidated_host_seqs_abund_dict.items()}
 
             # To prevent downstream problems we will insist on there always being at least
             # three sequences. Later we can put this to much higher to look at the effect
-            if len(consolidated_host_seqs_abund_dict.keys()) < 3:
+            if len(consolidated_host_seqs_abund_dict.keys()) < self.parent.min_num_distinct_seqs_per_sample:
                 samples_to_remove_list.append(sample_name)
                 continue
-            for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
-                normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
-                if normalised_abund:
-                    temp_sample_dict[sequence] = normalised_abund
+
+            # Here normalise acorrding to the given normalisation method
+            if self.parent.normalisation_method == 'rai':
+                # Relative abundance integer conversion
+                temp_sample_dict = {}
+                for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
+                    normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
+                    if normalised_abund:
+                        temp_sample_dict[sequence] = normalised_abund
+            else:
+                # pwr
+                # pick without replacement.
+                # If subsample, we will produce a list using np.random.choice
+                # https://docs.scipy.org/doc/numpy-1.16.0/reference/generated/numpy.random.choice.html
+                # We will then convert this to a dict using counter
+                # This dict will have absolute abundances. These will be converted to relaive abundances
+                # outside of this script.
+                seqs, probs = zip(*consolidated_host_seqs_abund_dict.items())
+                seqs_list = np.random.choice(seqs, self.num_seqs_to_normalise_to, p=probs)
+                temp_sample_dict = dict(Counter(seqs_list))
+
             dict_to_create_df_from[sample_name] = temp_sample_dict
+        
         for sample_name in samples_to_remove_list:
             self.samples.remove(sample_name)
 
@@ -584,17 +572,29 @@ class IndiDistanceAnalysis():
         return df
 
     def _get_seq_to_sample_occurence_dict(self):
-        if os.path.isfile(os.path.join(self.parent.cache_dir, 'seq_to_sample_occurence_dict.p.bz')):
-            seq_to_sample_occurence_dict = compress_pickle.load(os.path.join(self.parent.cache_dir, 'seq_to_sample_occurence_dict.p.bz'))
+        """
+        Return a dictionary with key as a given sequence, and the number of readsets that sequence was found
+        in as the the value. We only want to consider the readsets that are to be used in this given ordination.
+        To save recompution time, we will sort the name of readsets and get a md5sum of the resulting jsoned
+        string. We will then save then pickle out the resultant seq_to_sample_occurence_dict using
+        this hash.
+        """
+        sample_list_hash = self._md5sum_from_python_object(self.samples)
+        pickle_path_to_find = os.path.join(self.parent.cache_dir, f'{{sample_list_hash}_seq_to_sample_occurence_dict.p.bz}')
+        if os.path.isfile(pickle_path_to_find):
+            seq_to_sample_occurence_dict = compress_pickle.load(pickle_path_to_find)
         else:
             seq_to_sample_occurence_dict = defaultdict(int)
-            for read_set in self.parent.meta_info_df.index:
+            for read_set in self.samples:
                 sample_qc_dir = os.path.join(self.parent.qc_dir, read_set)
                 consolidated_host_seqs_abund_dict = compress_pickle.load(
                     os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
                 for seq_name in consolidated_host_seqs_abund_dict.keys():
                     seq_to_sample_occurence_dict[seq_name] += 1
-            compress_pickle.dump(seq_to_sample_occurence_dict, os.path.join(self.parent.cache_dir, 'seq_to_sample_occurence_dict.p.bz'))
+            # Now convert the absolute abundances to relative abudances for the given set of readsets
+            tot = len(self.samples)
+            seq_to_sample_occurence_dict = {k: v/tot for k, v in seq_to_sample_occurence_dict.items()}
+            compress_pickle.dump(seq_to_sample_occurence_dict, pickle_path_to_find)
         return seq_to_sample_occurence_dict
 
     def _create_abundance_dicts(self):
@@ -881,6 +881,20 @@ class IndiDistanceAnalysis():
             os.rename(self.tree_path, os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile'))
             self.tree_path = os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile')
 
+    def _md5sum_from_python_object(self, p_obj):
+        """ 
+        A wrapper function around the self._md5sum function, that will take in a python object,
+        sort it, write it out to temp, md5sum the written out file, delete the file,
+        and return the md5sum hash.
+        """
+        sorted_p_obj = sorted(p_obj)
+        temp_out_path = os.path.join(self.temp_dir, 'p_obj.out')
+        with open(temp_out_path, 'w') as f:
+            json.dump(sorted_p_obj, f)
+        md5sum_hash = self._md5sum(temp_out_path)
+        os.remove(temp_out_path)
+        return md5sum_hash
+    
     @staticmethod
     def _md5sum(filename):
         with open(filename, mode='rb') as f:
@@ -1025,8 +1039,10 @@ def remove_axes_but_allow_labels(ax):
 
 if __name__ == "__main__":
     """
-    samples_at_least_threshold = The minimum number of samples that a given sequence
-    must be found in for it to be considered part of the calculation of the distance matrices.
+    samples_at_least_threshold = The minimum number of samples (as a realtive abundance of the total
+    number of readsets that we will be working with for the given configuratin of samples) that a given sequence
+    must be found in for it to be considered part of the calculation of the distance matrices. E.g. at 0.5, a
+    sequence must be found in half of the readsets we are working with for the ordination. [0.0]
 
     remove_majority_sequence = Whether to remove the most abundant sequence from each of the readsets before
     calculating the distance ordinations.
@@ -1054,9 +1070,12 @@ if __name__ == "__main__":
     exclude_no_use_samples = whether to exlude samples (readsets) that are listed as use==False in the fastq_info_df
 
     snp_distance_type = The type of distance matrix we will use for the snp data [biallelic].
+
+    min_num_distinct_seqs_per_sample = The minimum number of distinct sequences a given readset must have in its
+    abundance dictionary after normalisation. Else the readset will be discarded [3].
     """
     dist = EighteenSDistance(
-        exclude_secondary_seq_samples=True, samples_at_least_threshold=100, remove_majority_sequence=True)
+        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True)
     # Options for resolution_type are:
     # 'host_only' = 0 filtering of the seqs in the samples and they are only separated by
     # the gentically identified majority genus.
