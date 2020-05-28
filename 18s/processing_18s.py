@@ -1,4 +1,24 @@
-"""This script performs the quality control of the 18S sequences and does the taxonomic annotation."""
+"""
+This script performs the quality control of the 18S sequences and does the taxonomic annotation.
+It also create various count dictionaries that are required for the follow up work.
+It also does the consolidation control for the host sequences.
+
+The general_seq_processing.py script should have been run before this script
+to ensure that the 18S files have been downloaded and that the replication tables
+have been created.
+
+This script must then have been run before any of the other scripts 
+(i.e. all but the general_seq_processing.py script).
+
+TODO: Improve this description: The script 18s_processing.py takes care of all of the processing of the samples.
+From doing that processing we end up with a directory called seq_qc that has a directory for
+each readset in it. In each of these directories we have three dictionaries pickled out as well as
+a fasta and names file. The fasta gives us all of the sequences in the readset after mothur processing
+(i.e. no taxonomic exclusion) and the names file gives us the abundances of those samples. Have a look
+at the 18s_processing.py script to get exactaly what the three dicts are but essentially, one is 
+all sequences taxonomically annotated, one is just Symbiodiniaceae sequences and one is just the 
+coral sequnces.
+"""
 import os
 import sys
 import pandas as pd
@@ -44,6 +64,32 @@ class EighteenSProcessing(EighteenSBase):
                 for seq_name in consolidated_host_seqs_abund_dict.keys():
                     seq_to_total_abund_dict[seq_name] += 1
             compress_pickle.dump(seq_to_total_abund_dict, os.path.join(self.cache_dir, 'seq_to_total_abund_dict.p.bz'))
+
+        # Create the abundance_info_df that is used by output_tables.py
+        # For the output tables, on a sample by sample basis we want to have access to what the most abundant
+        # coral genus was for a given sample, and what the most abundant sequence was for that genus.
+        # For every readset in the fastq_info_df we will gather this information and populate it in a new
+        # df called abundance_info_df. This df may later contain addional information such as the QC info.
+        # For now we will also add a column called post_qc_seq_depth. This will be the total number of 
+        # sequences returned for a given readset.
+        if os.path.isfile(os.path.join(self.cache_dir, 'abundance_info_df.p.bz')):
+            pass
+        else:
+            print('Building abundance_info_df')
+            abundance_df_dict = {}
+            for readset in self.coral_readsets:
+                sys.stdout.write(f'\r{readset}')
+                sample_qc_dir = os.path.join(self.qc_dir, readset)
+                rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
+                coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
+                most_abund_coral_genus = self._identify_most_abund_coral_genus(rel_all_seq_abundance_dict, coral_annotation_dict)
+                consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+                most_abund_seq_of_coral_genus = sorted([_ for _ in consolidated_host_seqs_abund_dict.items()], key=lambda x: x[1], reverse=True)[0][0]
+                absolute_seqs_count = sum(self._make_abs_abund_dict_from_names_path(readset).values())
+                abundance_df_dict[readset] = [most_abund_coral_genus, most_abund_seq_of_coral_genus, absolute_seqs_count]
+            df = pd.DataFrame.from_dict(data=abundance_df_dict, orient='index', columns=['most_abund_coral_genus', 'most_abund_seq_of_coral_genus', 'post_qc_seq_depth'])
+            compress_pickle.dump(df, os.path.join(self.cache_dir, 'abundance_info_df.p.bz'))
+            
         
 class SeqConsolidator:
     # In order to do the all_coral_sequence, we are going to need to move
