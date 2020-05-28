@@ -1,10 +1,7 @@
 """This is the base class for the other major 18S classes that are involved with 'doing'
-the tara 18S analysis. This takes an output_information... table that is produced by the
+the tara 18S analysis. This takes an output_information table that is produced by the
 general_seq_processing.py script.
-The processing_18s.py needs to be run first. This will do the mothur qc and do
-taxonomy work. It will also produce some key abundance dictionaries on a per readset basis.
-After that, the output_tables.py can be run. This will produce 4 output tables.
-After that the XXX is used for doing the plotting."""
+The general_seq_processing.py needs to be run before this can be used."""
 import os
 import sys
 import compress_pickle
@@ -19,8 +16,11 @@ class EighteenSBase:
         # Directory where the fastq.gz 18s files are
         self.seq_dir = os.path.join(self.eighteens_dir, '18s_data')
         self.output_dir = os.path.join(self.root_dir, 'output')
+        self.output_dir_18s = os.path.join(self.eighteens_dir, 'output')
+        self.input_dir_18s = os.path.join(self.eighteens_dir, 'input')
         os.makedirs(self.output_dir, exist_ok=True)
         self.fig_output_dir = os.path.join(self.root_dir, 'figures')
+        self.fig_output_dir_18s = os.path.join(self.eighteens_dir, 'figures')
         os.makedirs(self.fig_output_dir, exist_ok=True)
         # The directory where the finalised post qc and post taxa screening files will be written
         self.qc_dir = os.path.join(self.eighteens_dir, 'seq_qc')
@@ -36,13 +36,9 @@ class EighteenSBase:
         # we process the relevant directories
         self.fastq_info_df_path = os.path.join(self.input_dir, 'output_information_df_all_fastqs_18s_2020-04-09T07_11_24.231392UTC.csv')
         self.fastq_info_df = self._make_fastq_info_df()
+        # List of the readsets that are from coral samples only
         self.coral_readsets = [readset for readset, ser in self.fastq_info_df.iterrows() if self.sample_provenance_df.at[ser['sample-id'] ,'SAMPLE ENVIRONMENT, short'] == 'C-CORAL']
-        foo = 'bar'
-        # The main info df that we will use
-        # Sample name as key, fwd and rev path to seq files, coral species
-        # TODO, we will see if we can walk away from relying on this and rather use the above
-        # 
-        # self.info_df = self._make_info_df()
+        self.genera = ['Pocillopora', 'Millepora', 'Porites']
 
     @staticmethod
     def decompress_read_compress(path_to_read_in):
