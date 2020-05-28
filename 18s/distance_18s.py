@@ -68,35 +68,36 @@ class EighteenSDistance(EighteenSBase):
         self.approach = approach
         self.only_snp_samples = only_snp_samples
         self.use_replicates = use_replicates
-        if snp_distance_type = 'biallelic':
+        if snp_distance_type == 'biallelic':
             # Create self.poc_snp_dist_df, self.poc_snp_sample_list, 
             # self.por_snp_dist_df, self.por_snp_sample_list
             self._generate_biallelic_snp_dist_dfs()
+        foo = 'bar'
     
     
     def _generate_biallelic_snp_dist_dfs(self):
-        poc_snp_dist_path = os.path.join(self.input_dir_18s, 'MP_PocG111_biallelic_gaps.tree.distances.txt')
-        por_snp_dist_path = os.path.join(self.input_dir_18s, 'MP_PorG111_biallelic_gaps.tree.distances.txt')
-        for dist_path, coral in zip([poc_snp_dist_path, por_snp_dist_path], ['POC', 'POR']:
+        poc_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PocG111_biallelic_gaps.tree.distances.txt')
+        por_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PorG111_biallelic_gaps.tree.distances.txt')
+        for dist_path, coral in zip([poc_snp_dist_path, por_snp_dist_path], ['POC', 'POR']):
             # Read in the distance file. There is no header so we will read in as list and then process
-            with open(self.dist_path, 'r') as f:
-                dat = [line.split('\t') for line in f]
+            with open(dist_path, 'r') as f:
+                dat = [line.rstrip().split('\t') for line in f]
             # Indices are currently in format (e.g. I01S01C011POR). Need to convert to sample-id.
             index = [_[0] for _ in dat]
             index = self._convert_index_to_sample_ids(index)
-
+            dat = np.array([_[1:] for _ in dat], dtype=float).astype(int)
             # make the df
             if coral == 'POC':
-                self.poc_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index)
+                self.poc_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
                 self.poc_snp_sample_list = list(self.poc_snp_dist_df.index)
             else:
-                self.por_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index)
+                self.por_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
                 self.por_snp_sample_list = list(self.por_snp_dist_df.index)
 
     def _convert_index_to_sample_ids(self, index):
         # We want to convert these indices to samplie-id
-        island_re = re.compile('S\d+') 
-        site_re = re.compile('I\d+')
+        island_re = re.compile('I\d+') 
+        site_re = re.compile('S\d+')
         co_re = re.compile('C\d+')
         # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
         # (e.g. TARA_CO-1016606)
@@ -108,8 +109,13 @@ class EighteenSDistance(EighteenSBase):
             sample_id = self.sample_provenance_df[
                 (self.sample_provenance_df['ISLAND#'] == island) & 
                 (self.sample_provenance_df['SITE#'] == site) & 
-                (self.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony)].index
-                sample_name_dict[ind] = sample_id
+                (self.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony) & 
+                (self.sample_provenance_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')].index.values.tolist()
+            if len(sample_id) != 1:
+                raise RunTimeError('More than one matching sample-id')
+            else:
+                sample_id = sample_id[0]
+            sample_name_dict[ind] = sample_id
         
         # Convert the index to sample-id
         return [sample_name_dict[ind] for ind in index]
