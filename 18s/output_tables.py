@@ -10,7 +10,9 @@ import datetime
 import subprocess
 
 class EighteenSOutputTables(EighteenSBase):
-    """ Class to produce the four output tables
+    """
+    processing_18s.py needs to be run before this script.
+    Class to produce the four output tables
     1 - Table that is the raw seq abundances (post mothur QC processing) in each of the samples (absolute abundance)
     2 - Table that holds the blast annotation for each of these sequences (Order, Family and Genus)
     3 - Table that is the post consolidation walk sequences from taxonomic origin of one of the
@@ -18,80 +20,113 @@ class EighteenSOutputTables(EighteenSBase):
     4 - Table that will hold meta information for each of the samples that will enable researchers to make a
     decision about whether they want to use given samples are not. The columns will be:
 
-    # TODO
+    columns of the table:
+
     sample-id: This is the barcode_id with TARA_ prepended to it.
 
-    #TODO change this to 'use' as a Bool
-    use - This will be binary as use OR do_not_use
+    readset: A unique identifier that associates to a specific pair of fastq.gz files including details of
+    DNA extraction, PCR and sequencing protocols. Corresponding tables are here: 
+    https://sites.google.com/site/tarapacificconsortium/wg1metabarcoding/genoscope
 
-    # TODO Change name but also check to see if this is accurate. I think we give the exact genus name
-    genetic_18S_genus_taxonomic_annotation - This will be either Pocrites, Millepora, Pocillopora or other.
-        It will be the cummulatively most abundant of the categories in the sample.
-        If this is 'other', it will cause the sample to have a do_not_use use.
+    use - Boolean
 
-    provenance_tax_annotation_is_correct - This will hold a boolean value. This is False if the primary_taxonomic annotation differs
-        from the annotation in the tara provenance information file.
+    no_use_reason: When use is FALSE, this value indicates why. Multiple reasons may be concatenated with a semi-colon. 
+    “tax_annotation_mismatch”: indicates is_provenance_taxonomic_annotation_correct is FALSE; 
+    “different_primary_sequence”: indicates is_different_primary_sequence is TRUE; 
+    “inter_genus_contamination”: indicates is_inter_genus_contamination is TRUE; 
+    “low_host_sequence_abundance”: indicates is_low_host_rel_abund is TRUE; 
+    “not_of_target_genus”: indicates the taxonomic annotation is not one of Pocillopora, Porites or Millepora; 
+    “putative_intra_genus_contamination”: indicates is_putative_intra_genus_contamination_ratio is TRUE.
 
-    is_inter_genus_contamination - This will be True if the collective abundance of the 'other_coral' sequences is
-        greater than 0.01 of the sample. If True this will give a use of do_not_use
+    genetic_18S_genus_taxonomic_annotation: The most commonly annotated genus from the sample’s 
+    collection of sequences that annotated as order Scleractinia or Anthoathecata. 
+    If the genetic_18S_genus_taxonomic_annotation is not one of Porites, Millepora or Pocillopora, 
+    use will be set to FALSE.
 
-    inter_genus_contamination_rel_abund - Float. The actual relative abundance of the 'other_coral' sequences
+    Sample Material label, organismal system level, taxonomic, nominal; Sample Material label, 
+    organismal system level, taxonomic, label: Sample provenance table taxonomic annotation information 
+    for the given sample. If the one of Porites, Millepora or Pocillopora, is not found in 
+    the value for ‘Sample Material label, organismal system level, taxonomic, nominal’ 
+    (only the genus of a binomial designation is considered), use will be set to FALSE.
 
-    is_different_primary_sequence Boolean. Whether the most abundant sequence of the genus in
-        question is different to the 'usual' most abundant sequence for the genus in question
-        (considering all other samples). This will only apply to samples that have a genus_18S_taxonomic_annotation
-        as one of our three target genera. (~50 samples will have this true). Causes do_not_use.
+    is_provenance_taxonomic_annotation_correct: If the genetic_18S_genus_taxonomic_annotation 
+    is in agreement with the value for ‘Sample Material label, organismal system level, taxonomic, nominal’, 
+    this is TRUE. Else, this is FALSE. If FALSE, use is FALSE.
 
-    primary_sequence. The most abundant sequence of the sample that annotates as the genus_18S_taxonomic_annotation.
+    inter_genus_contamination_rel_abund: The summed relative abundances (relative to all sequences in the sample) 
+    of the sequences of order Scleractinia or Anthoathecata, excluding those sequences annotated as the 
+    genetic_18S_genus_taxonomic_annotation.
 
-    low_host_rel_abund. Boolean. If the relative abundance of the host genus in question sequences is
-        below 30% as a proportion of all sequence in the sample, this will be true. Will cause do_not_use.
+    is_inter_genus_contamination: If inter_genus_contamination_rel_abund is 
+    greater than 0.01 this will be TRUE. If TRUE, use will be FALSE.
 
-    host_rel_abund
-        The ratio of the above.
+    primary_sequence: The most abundant sequence from the sample annotated 
+    as the genetic_18S_genus_taxonomic_annotation.
 
-    is_putative_intra_genus_contamination. Boolean. Whether there is the possibility of intra genus contamination.
-        This covers the cases where we have samples that contain 2 abundant sequences from the same genus.
-        It could of course be the case that this is due to intragenomic sequence diversity rather than intergenomic
-        diversity. But to be on the safe side, I think it is a good idea to flag it up in this table.
-        I will set the threshold ratio (ratio of the abundance of the first and second most abundant sequences)
-        to be 0.3 for this category to be set to true. (< 10 samples will have this as True). Will cause do_not_use
+    is_different_primary_sequence: If the primary_sequence of the sample in question 
+    is different to the most common primary_sequence for samples that annotate as 
+    genetic_18S_genus_taxonomic_annotation in the dataset, this will be TRUE. If TRUE, use will be FALSE.
 
-    putative_intra_genus_contamination_ratio - Ratio that the above is based on
+    host_rel_abund: The summed relative abundances (relative to all sequences in the sample) 
+    of all sequences in the sample that annotate as genetic_18S_genus_taxonomic_annotation.
+    
+    is_low_host_rel_abund: If host_rel_abund is < 0.3 this will be TRUE. If TRUE, use will be FALSE.
 
-    # TODO is_replicate Whether or not the barcode in question has multiple fastq.gz pairs associated with it.
+    putative_intra_genus_contamination_ratio: The abundance ratio of the second and 
+    first most abundant sequences that annotate as genetic_18S_genus_taxonomic_annotation.
+
+    is_putative_intra_genus_contamination_ratio: If putative_intra_genus_contamination_ratio > 0.3 
+    this will be TRUE. If TRUE, use will be FALSE.
+
+    is_replicate: Some samples (i.e. a single ‘sample-id’) have multiple pairs of sequencing 
+    results available for them (i.e. more than a single fastq.gz file pair). 
+    If this sample has more than one pair of fastq.gz files associated with it, this will be TRUE. 
+    Else, FALSE. The value of this column has no effect on use.
+
+    is_representative_for_sample: In cases where is_replicate is FALSE, this value will be TRUE.
+    For samples where is_replicate is TRUE, on the single readset for the sample in question will
+    have is_representative_for_sample as TRUE (i.e. will be the representative readset for the given 
+    sample-id). For a given sample-id the readset with the highest post-quality control sequencing 
+    depth (detailed as post_qc_seq_depth), will be used as the representative 
+    (i.e. is_representative_for_sample will be TRUE for this readset, and FALSE for all other readsets 
+    of the given sample-id). By filtering this column to only contain samples that have a TRUE value, 
+    only one result per coral sample will remain.
+
+    post_qc_seq_depth: This is the total number of sequences returned for the given sample post-quality control processing.
+
+    fwd_read_name: Name of the fastq.gz forward read.
+
+    rev_read_name: Name of the fastq.gz reverse read.
+
+    SAMPLING DESIGN LABEL; ISLAND#; SITE#; COLONY# (C000) FISH# (F000) MACROALGAE# (MA00); 
+    SAMPLE PROTOCOL LABEL, level 1; SAMPLE PROTOCOL LABEL, level 2; Sample Material label – trait: 
+    These fields associate directly to the Sample provenance table.
+
+    NB. A special note on samples with their ‘Sample Material label, organismal system level, 
+    taxonomic, nominal’ listed as ‘Heliopora’ in the Tara sample provenance table. 
+    There are 6 such samples. For these samples, the genetic_18S_genus_taxonomic_annotation is the 
+    most abundant genus annotation from the collection of all sequences in the sample, rather than 
+    from those sequences annotated as order Scleractinia or Anthoathecata. 
+    The inter_genus_contamination_rel_abund, is_inter_genus_contamination, 
+    is_different_primary_sequence, putative_intra_genus_contamination_ratio, 
+    and is_putative_intra_genus_contamination fields are purposely left blank.
 
     """
     
     def __init__(self):
         super().__init__()
-        # Because there are both coral and non-coral 18s seq pairs in the fastq_info_df, it will be useful
-        # to have a list that is just the coral readsets from the table. I'll make this in the base 18s
-        # at the same time I make the fastq_info_df.
-        
-        # For the output tables, on a sample by sample basis we want to have access to what the most abundant
-        # coral genus was for a given sample, and what the most abundant sequence was for that genus.
-        # For every readset in the fastq_info_df we will gather this information and populate it in a new
-        # df called abundance_info_df. This df may later contain addional information such as the QC info.
-        # For now we will also add a column called post_qc_seq_depth. This will be the total number of 
-        # sequences returned for a given readset.
         self.dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
-        self.abundance_info_df = self._make_or_get_abundance_info_df()
-
+        self.abundance_info_df = self._get_abundance_info_df()
+        # Dict where genus if key and primary seq (nucleotide seq) is value.
+        self.primary_seq_dict = self._make_primary_seq_dict()
         # Produce the dictionary for making the coral meta info table
         # This will have sample name as key and a list in order of the df columns given in the comments
-        self.primary_seq_dict = self._make_primary_seq_dict()
         self.coral_meta_info_table_dict = {}
-        #TODO We need to incorporate the changes requested by Stephane. These are largely
-        # aimed at keeping the same terms that are given in the provenance table
-        # in our output table. This is a good point.
-        # We had originally hoped to be able to get rid of technical replicates but we will need to include
-        # these as there are still technical replicates hosted on the genoscope server.
         self._populate_coral_meta_info_table_dict()
 
-        # # This will be a dict where full sequence is the key
-        # # The value will be another dict holding cumulative relative abundance
-        # # and the taxonomic tup
+        # This will be a dict where full sequence is the key
+        # The value will be another dict holding cumulative relative abundance
+        # and the taxonomic tup
         self.master_seq_info_dict = {}
         self._populate_master_seq_info_dict()
         # Now get a master list of the sequences in order of cummulative abundance
@@ -110,25 +145,11 @@ class EighteenSOutputTables(EighteenSBase):
         self.consolidated_df_dict = {}
         self._populated_consolidated_df_dict()
 
-    def _make_or_get_abundance_info_df(self):
+    def _get_abundance_info_df(self):
         if os.path.isfile(os.path.join(self.cache_dir, 'abundance_info_df.p.bz')):
             return compress_pickle.load(os.path.join(self.cache_dir, 'abundance_info_df.p.bz'))
         else:
-            print('Building abundance_info_df')
-            abundance_df_dict = {}
-            for readset in self.coral_readsets:
-                sys.stdout.write(f'\r{readset}')
-                sample_qc_dir = os.path.join(self.qc_dir, readset)
-                rel_all_seq_abundance_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'rel_all_seq_abundance_dict.p.bz'))
-                coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
-                most_abund_coral_genus = self._identify_most_abund_coral_genus(rel_all_seq_abundance_dict, coral_annotation_dict)
-                consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-                most_abund_seq_of_coral_genus = sorted([_ for _ in consolidated_host_seqs_abund_dict.items()], key=lambda x: x[1], reverse=True)[0][0]
-                absolute_seqs_count = sum(self._make_abs_abund_dict_from_names_path(readset).values())
-                abundance_df_dict[readset] = [most_abund_coral_genus, most_abund_seq_of_coral_genus, absolute_seqs_count]
-            df = pd.DataFrame.from_dict(data=abundance_df_dict, orient='index', columns=['most_abund_coral_genus', 'most_abund_seq_of_coral_genus', 'post_qc_seq_depth'])
-            compress_pickle.dump(df, os.path.join(self.cache_dir, 'abundance_info_df.p.bz'))
-            return df
+            raise RuntimeError('abundance_info_df.p.bz should have been created as part of processing_18s.py')
 
     def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
         for sorted_tup in sorted(
@@ -159,6 +180,7 @@ class EighteenSOutputTables(EighteenSBase):
         return primary_seq_dict
 
     def _populate_coral_meta_info_table_dict(self):
+        """This is the entry point for the main processing of what will be come table one"""
         if os.path.isfile(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz')):
             self.coral_meta_info_table_dict = compress_pickle.load(os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
         else:
@@ -167,8 +189,8 @@ class EighteenSOutputTables(EighteenSBase):
             count = 0
             for readset in self.coral_readsets:
                 sys.stdout.write(f'\r{readset}: {count}/{tot}')
-                tbfour = TableFour(parent=self, readset=readset)
-                tbfour.populate_coral_meta_info_table_dict()
+                coral_meta_info_table_creator = CoralMetaInfoTableCreator(parent=self, readset=readset)
+                coral_meta_info_table_creator.populate_coral_meta_info_table_dict()
                 count += 1
             compress_pickle.dump(self.coral_meta_info_table_dict, os.path.join(self.cache_dir, 'coral_18S_meta_info_table_dict.p.bz'))
 
@@ -210,7 +232,7 @@ class EighteenSOutputTables(EighteenSBase):
         
     def make_and_write_raw_abund_output_table(self):
         # Here we have the self.abundance_df_dict populated and we can now create the dataframe from this dict
-        print('Constructing raw abundance table') # TODO I think we will need to add in the a sample_id column
+        print('Constructing raw abundance table')
         df = pd.DataFrame.from_dict(
             self.abundance_df_dict,
             orient='index',
@@ -248,9 +270,21 @@ class EighteenSOutputTables(EighteenSBase):
             self.consolidated_df_dict, orient='index',
             columns=self.host_only_master_seq_abund_order_list
         )
+        # rename the index so that we don't have a clash with readset
+        df.index.name = 'not_readset'
+        # Add readset to the df
+        df['readset'] = list(df.index)
+        # Add sample-id to the df
+        sample_id_list = [self.fastq_info_df.at[_, 'sample-id'] for _ in list(df.index)]
+        df['sample-id'] = sample_id_list
+        # create a new columns list
+        column_order = self.host_only_master_seq_abund_order_list.copy()
+        column_order.insert(0, 'sample-id')
+        column_order.insert(0, 'readset')
+        df = df.reindex(columns=column_order)
         print('Writing consolidated host output table')
         
-        df.to_csv(os.path.join(self.output_dir, f'18S_consolidated_host_{self.dat_string}.csv'), index=True, index_label='sample_id')
+        df.to_csv(os.path.join(self.output_dir, f'18S_consolidated_host_{self.dat_string}.csv'), index=False)
         
 
     def _populate_tax_annotation_df_dict(self):
@@ -420,7 +454,7 @@ class EighteenSOutputTables(EighteenSBase):
         tot = sum(abs_abund_dict.values())
         return {seq_name: abund/tot for seq_name, abund in abs_abund_dict.items()}
 
-class TableFour():
+class CoralMetaInfoTableCreator():
     def __init__(self, parent, readset):
         # Here we will not assign all of the information we want from the provenance table
         # to a variable. We will only assign those things that we need to make our host-related
@@ -429,7 +463,7 @@ class TableFour():
         self.readset = readset
         self.sample_id = self.parent.fastq_info_df.at[readset, 'sample-id']
         self.use = True
-        #TODO we will add a column which is do_not_use_reason
+        # we will add a column which is do_not_use_reason
         # This will be a string value of either:
         # "tax_annotation_mismatch" -- > if the genetic tax annotation does not match the sample provenance annotation
         # "putative_intra_genus_contamination"
@@ -485,8 +519,6 @@ class TableFour():
         self._set_host_rel_abund_normal()
 
         self._set_intragenus()
-
-        # self._set_island_site_individual()
 
         self._set_post_qc_seq_depth()
 
@@ -564,23 +596,6 @@ class TableFour():
             # Trait
             self.parent.sample_provenance_df.at[self.sample_id, 'Sample Material label - trait']
         ]
-
-    # def _set_island_site_individual(self):
-    #     # Add in the island and site information as well because this is useful to have
-    #     self.island = self.parent.fastq_info_df.at[self.sample_id, 'island']
-    #     self.site = self.parent.info_df.at[self.sample_id, 'site']
-    #     # Get the individual
-    #     if self.sample_id[-2] == '_':
-    #         # then this is a techrep
-    #         sample_base = '_'.join(self.sample_id.split('_')[:-1])
-    #         sample_base_id = int(
-    #             self.parent.sample_provenance_df.at[
-    #                 sample_base, 'COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'].replace('C', ''))
-    #         self.individual = str(sample_base_id) + '_' + self.sample_id.split('_')[-1]
-    #     else:
-    #         self.individual = str(int(
-    #             self.parent.sample_provenance_df.at[
-    #                 self.sample_id, 'COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'].replace('C', '')))
 
     def _set_intragenus(self):
         # Finally, to check for the putative intragenus contamination
@@ -696,9 +711,6 @@ class TableFour():
         fasta_path = os.path.join(self.parent.qc_dir, self.readset,
                                'stability.trim.contigs.good.unique.abund.pcr.unique.fasta')
         fasta_file_as_list = EighteenSBase.decompress_read_compress(fasta_path)
-        # with open(os.path.join(self.parent.qc_dir, self.sample_id,
-        #                        'stability.trim.contigs.good.unique.abund.pcr.unique.fasta'), 'r') as f:
-        #     fasta_file_as_list = [line.rstrip() for line in f]
         fasta_dict = {}
         i = 0
         while i < len(fasta_file_as_list):
