@@ -49,6 +49,8 @@ class EighteenSDistance(EighteenSBase):
         unifrac_normalisation_abundance=1000, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic'):
         super().__init__()
+        # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
+        self.genera = ['Pocillopora', 'Porites']
         # Use the meta_info_table produced by output_tables.py
         self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
         self.meta_info_df = self._get_meta_info_df()
@@ -57,6 +59,9 @@ class EighteenSDistance(EighteenSBase):
         # Here we can make use of the meta_info_table that we created in output_tables.py
         self.exclude_secondary_seq_samples=exclude_secondary_seq_samples
         self.samples_at_least_threshold=samples_at_least_threshold
+        if snp_distance_type == 'biallelic':
+            self.snp_dist_df_dict, self.snp_sample_list_dict = self._generate_biallelic_snp_dist_dfs()
+        
         # A dict of genus to the list of representative readsets to include
         self.genus_to_representative_readset_dict = self._generate_genera_readset_dict()
         self.dist_methods = ['unifrac', 'braycurtis']
@@ -68,17 +73,15 @@ class EighteenSDistance(EighteenSBase):
         self.approach = approach
         self.only_snp_samples = only_snp_samples
         self.use_replicates = use_replicates
-        if snp_distance_type == 'biallelic':
-            # Create self.poc_snp_dist_df, self.poc_snp_sample_list, 
-            # self.por_snp_dist_df, self.por_snp_sample_list
-            self._generate_biallelic_snp_dist_dfs()
         foo = 'bar'
     
     
     def _generate_biallelic_snp_dist_dfs(self):
         poc_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PocG111_biallelic_gaps.tree.distances.txt')
         por_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PorG111_biallelic_gaps.tree.distances.txt')
-        for dist_path, coral in zip([poc_snp_dist_path, por_snp_dist_path], ['POC', 'POR']):
+        snp_dist_df_dict = {}
+        snp_sample_list_dict = {}
+        for dist_path, genus in zip([poc_snp_dist_path, por_snp_dist_path], self.genera):
             # Read in the distance file. There is no header so we will read in as list and then process
             with open(dist_path, 'r') as f:
                 dat = [line.rstrip().split('\t') for line in f]
@@ -87,16 +90,13 @@ class EighteenSDistance(EighteenSBase):
             index = self._convert_index_to_sample_ids(index)
             dat = np.array([_[1:] for _ in dat], dtype=float).astype(int)
             # make the df
-            if coral == 'POC':
-                self.poc_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
-                self.poc_snp_sample_list = list(self.poc_snp_dist_df.index)
-            else:
-                self.por_snp_dist_df = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
-                self.por_snp_sample_list = list(self.por_snp_dist_df.index)
+            snp_dist_df_dict[genus] = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
+            snp_sample_list_dict[genus] = index
+        return snp_dist_df_dict, snp_sample_list_dict
 
     def _convert_index_to_sample_ids(self, index):
         # We want to convert these indices to samplie-id
-        island_re = re.compile('I\d+') 
+        island_re = re.compile('I\d+')
         site_re = re.compile('S\d+')
         co_re = re.compile('C\d+')
         # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
@@ -183,24 +183,50 @@ class EighteenSDistance(EighteenSBase):
         self.plot_computed_distances()
 
     def _generate_genera_readset_dict(self):
-        #TODO include self.use_replicates
-        # TODO include self.only_snp_samples
-        if not self.exclude_secondary_seq_samples:
-            temp_dict = {}
+        """
+        For each target coral (i.e. Pocillopora and Porites) get the list of readsets that we should be working with
+        We will work with readsets as there are sometimes > 1 readset per sample-id.
+        Start with all sequences and exclude according to:
+        Target coral
+        exclude_secondary_seq_samples
+        use_replicates
+        only_snp_samples
+        """
+        # First screen by coral host
+        for genus in self.genera:
+            temp_dict[genus] = self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus]
+        # Then by replicates
+        if not self.use_replicates:
             for genus in self.genera:
-                temp_dict[genus] = list(self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus].index)
-            return temp_dict
-        elif self.exclude_secondary_seq_samples:
-            # We will exclude samples that have a different primary host sequences from the majority of
-            # samples of the given genus
-            temp_dict = {}
+                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['is_representative_for_sample'] == True]
+        # Then by exclude_secondary_seq_samples
+        if self.exclude_secondary_seq_samples:
             for genus in self.genera:
-                temp_dict[genus] = list(self.meta_info_df[
-                    (self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus) & 
-                    (self.meta_info_df['primary_sequence'] == self.primary_seq_dict[genus]) &
-                    (self.meta_info_df['is_representative_for_sample'] == True)
-                ].index)
-            return temp_dict
+                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['is_different_primary_sequence'] == False]
+        # Then by only_snp_samples
+        if self.only_snp_samples:
+            for genus in self.genera:
+                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['sample-id'] in self.snp_sample_list_dict[genus]]
+        # Finally, we only want the list of the readsets, so get the indices from the df
+        for genus in self.genera:
+            temp_dict[genus] = list(temp_dict[genus].index)
+
+        # if not self.exclude_secondary_seq_samples:
+        #     temp_dict = {}
+        #     for genus in self.genera:
+        #         temp_dict[genus] = list(self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus].index)
+        #     return temp_dict
+        # elif self.exclude_secondary_seq_samples:
+        #     # We will exclude samples that have a different primary host sequences from the majority of
+        #     # samples of the given genus
+        #     temp_dict = {}
+        #     for genus in self.genera:
+        #         temp_dict[genus] = list(self.meta_info_df[
+        #             (self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus) & 
+        #             (self.meta_info_df['primary_sequence'] == self.primary_seq_dict[genus]) &
+        #             (self.meta_info_df['is_representative_for_sample'] == True)
+        #         ].index)
+        #     return temp_dict
         else:
             raise NotImplementedError
 
@@ -1023,6 +1049,9 @@ if __name__ == "__main__":
 
     use_replicates = whether to use all available technical replicates for samples (i.e. multiple readsets per
     sample) [False]. If False we will use the representative readset noted in the fastq_info_df
+
+    TODO
+    exclude_no_use_samples = whether to exlude samples (readsets) that are listed as use==False in the fastq_info_df
 
     snp_distance_type = The type of distance matrix we will use for the snp data [biallelic].
     """
