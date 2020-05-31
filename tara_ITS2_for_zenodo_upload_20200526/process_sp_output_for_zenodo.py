@@ -9,6 +9,10 @@ import os
 import pandas as pd
 import shutil
 import subprocess
+import numpy as np
+import matplotlib as mpl
+mpl.use('agg')
+import matplotlib.pyplot as plt
 
 class ProcessSPOutputForZenodo:
     def __init__(self):
@@ -187,4 +191,45 @@ class ProcessSPOutputForZenodo:
                         df.rename(columns=temp_dict, inplace=True)
                     df.to_csv(os.path.join(dir_, file_), index=False)
 
-ProcessSPOutputForZenodo().process()
+# ProcessSPOutputForZenodo().process()
+
+class AssessSeqDepth:
+    """
+    Quick utility class to investigate whether we need to be using any of the tech replicates to increase
+    sequencing depth.
+    Load in the post_med dfs for coral and non coral and look to see that all samples are above 10000 contigs.
+    Turns out that the average is >60000 for both. And the smallest raw_contigs are about 15 000. So no need
+    for tech reps.
+    """
+    def __init__(self):
+        self.path_to_post_med_seq_tab_coral = "/home/humebc/projects/tara/tara_full_dataset_processing/tara_ITS2_for_zenodo_upload_20200526/20200528_tara_corals/post_med_seqs/107_20200527_2020-05-27_22-53-40.050470.seqs.absolute.abund_and_meta.csv"
+        self.path_to_post_med_seq_tab_non_coral = "/home/humebc/projects/tara/tara_full_dataset_processing/tara_ITS2_for_zenodo_upload_20200526/20200528_tara_non_corals/post_med_seqs/2020-05-27_22-56-23.172444.seqs.absolute.abund_and_meta.csv"
+        self.path_to_its2_replication_tab = "/home/humebc/projects/tara/tara_full_dataset_processing/output/output_information_df_all_fastqs_its2_2020-05-31T11_06_03.996934UTC.csv"
+        # We will use the two above tables to append a column to the replciation
+        # table that is the num of contigs. Then we will work with this one table.
+        self.readset_df = self._make_readset_df()
+
+    def _make_readset_df(self):
+        post_med_coral_df = pd.read_csv(self.path_to_post_med_seq_tab_coral, index_col=1)
+        post_med_non_coral_df = pd.read_csv(self.path_to_post_med_seq_tab_non_coral, index_col=1)
+        
+        # look for coral
+        for ind, val in post_med_coral_df['raw_contigs'].items():
+            if str(ind) != 'nan':
+                if int(val) < 10000:
+                    print(ind, val)
+        print(f"The average for coral contigs was: {np.average(post_med_coral_df['raw_contigs'][:-1])}")
+
+        # look for non-coral
+        for ind, val in post_med_non_coral_df['raw_contigs'].items():
+            if str(ind) != 'nan':
+                if int(val) < 10000:
+                    print(ind, val)
+        print(f"The average for coral contigs was: {np.average(post_med_non_coral_df['raw_contigs'][:-1])}")
+
+
+        
+AssessSeqDepth()._make_readset_df()
+
+
+
