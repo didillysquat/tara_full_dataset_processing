@@ -24,6 +24,8 @@ The TARA Pacific ITS2 data release is organised into three subdirectories repres
 
  In addition to sequence quality control, the `20200326_tara_corals` dataset was included in a SymPortal analysis to predict ITS2 profiles. This dataset therefore contains some additional resources that are not available for the other two datasets. Prediction of ITS2 profiles is not possible for non-host-derived samples. For more details please refer to the [associated manuscript](https://onlinelibrary.wiley.com/doi/full/10.1111/1755-0998.13004).
 
+ Where technical replicates were available for a given sample-id (i.e. multiple pairs of fastq.gz files), only the largest replicate (combined size of the two fastq.gz files) was used.
+
  ***
 
 ## Data subdirectories
