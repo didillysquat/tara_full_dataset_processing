@@ -48,7 +48,7 @@ class EighteenSDistance(EighteenSBase):
         self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, 
         remove_majority_sequence=True, mafft_num_proc=6, braycurtis_normalisation_abundance=10000, 
         unifrac_normalisation_abundance=1000, normalisation_method='pwr', approach='dist', 
-        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0):
+        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0, exclude_no_use_samples=True):
         super().__init__()
         # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
         self.genera = ['Pocillopora', 'Porites']
@@ -61,6 +61,7 @@ class EighteenSDistance(EighteenSBase):
         self.exclude_secondary_seq_samples = exclude_secondary_seq_samples
         self.only_snp_samples = only_snp_samples
         self.use_replicates = use_replicates
+        self.exclude_no_use_samples = exclude_no_use_samples
         self.samples_at_least_threshold = samples_at_least_threshold
         self.most_abund_seq_cutoff = most_abund_seq_cutoff
         if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
@@ -224,6 +225,9 @@ class EighteenSDistance(EighteenSBase):
         if self.only_snp_samples:
             for genus in self.genera:
                 temp_dict[genus] = temp_dict[genus][temp_dict[genus]['sample-id'].isin(self.snp_sample_list_dict[genus])]
+        if self.exclude_no_use_samples:
+            for genus in self.genera:
+                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['use'] == True]
         # Finally, we only want the list of the readsets, so get the indices from the df
         for genus in self.genera:
             temp_dict[genus] = list(temp_dict[genus].index)
@@ -893,7 +897,6 @@ class IndiDistanceAnalysis():
             with open(self.aligned_fasta_path, 'r') as f:
                 aligned_fasta = [line.rstrip() for line in f]
 
-
             sequential_fasta = self._convert_interleaved_to_sequencial_fasta(aligned_fasta)
             
             # Write out the sequential aligned fasta to the same aligned fasta path
@@ -1116,21 +1119,20 @@ if __name__ == "__main__":
     sample) [False]. If False we will use the representative readset noted in the fastq_info_df
 
     TODO
-    exclude_no_use_samples = whether to exlude samples (readsets) that are listed as use==False in the fastq_info_df
+    exclude_no_use_samples = whether to exlude samples (readsets) that are listed as use==False in the fastq_info_df. [True]
 
     snp_distance_type = The type of distance matrix we will use for the snp data [biallelic].
 
     min_num_distinct_seqs_per_sample = The minimum number of distinct sequences a given readset must have in its
     abundance dictionary after normalisation. Else the readset will be discarded [3].
 
-    TODO
     most_abund_seq_cutoff = If this is 0. It will effectively be turned off. If this  is any other value, then
     a cutoff will be applied so that only the i most abundant sequences in a given sample will be considered. This
     value must be greaer than the min_num_distinct_seqs_per_sample else an error will be thrown. If a non-zero
     value is provided to this argument. It will override the samples_at_lesast_threshold. [0]
     """
     dist = EighteenSDistance(
-        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True, most_abund_seq_cutoff=4)
+        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True, most_abund_seq_cutoff=4, mafft_num_proc=100)
     # Options for resolution_type are:
     # 'host_only' = 0 filtering of the seqs in the samples and they are only separated by
     # the gentically identified majority genus.
