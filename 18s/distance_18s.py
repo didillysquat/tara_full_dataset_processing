@@ -17,8 +17,9 @@ import shutil
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
-from collections import defaultdict
+from collections import defaultdict, Counter
 import re
+import json
 
 class EighteenSDistance(EighteenSBase):
     """
@@ -493,16 +494,20 @@ class IndiDistanceAnalysis():
         # Variables concerned with braycurtis
         self.braycurtis_btwn_sample_distance_dictionary = None
 
-    def _create_abundance_df(self):
+    def _create_abundance_df(self, obj_to_return):
         """For each sample in self.samples, load up the consolidated_host_seqs_abund_dict
         and create a dict that is sequence to normalised abundance. Then add this dictionary
         to a master dictionary where sample_name is key. Then finally create a df from this
-        dict of dicts"""
-        if self.parent.samples_at_least_threshold > 0:
+        dict of dicts.
+        
+        If obj_to_return=='abund_dict', we will return the master dictionary
+        else obj_to_return=='abund_df', we will return a df made from the dict
+        """
+        if self.parent.samples_at_least_threshold > 0: # TODO plot cutoff against mean seqs remaining and std.
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
             threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.parent.samples_at_least_threshold}
         dict_to_create_df_from = {}
-        print('Creating abundance df')
+        print(f'Creating {obj_to_return}')
         # NB there is one sample that only had one sequence in the consolidated_host_seqs_abund_dict
         # and this sample is causing errors. We will check for empty conolidated dict,
         # add the sample to a list and then remove it from the self.samples list
@@ -514,8 +519,9 @@ class IndiDistanceAnalysis():
             consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
             
             # remove most abundant sequences if this option is set
-            is self.parent.remove_maj_seq:
-                most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), key=(lambda key: consolidated_host_seqs_abund_dict[key]))
+            if self.parent.remove_maj_seq:
+                most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), 
+                                        key=(lambda key: consolidated_host_seqs_abund_dict[key]))
                 # remove the most abund seq
                 del consolidated_host_seqs_abund_dict[most_abund_sequence]
             
@@ -566,10 +572,13 @@ class IndiDistanceAnalysis():
         # plt.savefig(os.path.join(self.parent.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.category}_{self.dist_method}.png'))
         # plt.close()
 
-        df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
-        df[pd.isna(df)] = 0
-        print('\ndf creation complete\n')
-        return df
+        if obj_to_return == 'abund_dict':
+            return dict_to_create_df_from
+        else:
+            df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
+            df[pd.isna(df)] = 0
+            print('\ndf creation complete\n')
+            return df
 
     def _get_seq_to_sample_occurence_dict(self):
         """
@@ -579,18 +588,24 @@ class IndiDistanceAnalysis():
         string. We will then save then pickle out the resultant seq_to_sample_occurence_dict using
         this hash.
         """
+        print('Creating sample occurence dictionary')
+        print('Checking to see if cache available')
         sample_list_hash = self._md5sum_from_python_object(self.samples)
-        pickle_path_to_find = os.path.join(self.parent.cache_dir, f'{{sample_list_hash}_seq_to_sample_occurence_dict.p.bz}')
+        pickle_path_to_find = os.path.join(self.parent.cache_dir, f'{sample_list_hash}_seq_to_sample_occurence_dict.p.bz')
         if os.path.isfile(pickle_path_to_find):
+            print('Cache is available. Loading from cache.')
             seq_to_sample_occurence_dict = compress_pickle.load(pickle_path_to_find)
         else:
+            print('Cache is not available. Generating from scratch.')
             seq_to_sample_occurence_dict = defaultdict(int)
             for read_set in self.samples:
+                sys.stdout.write('f\r{read_set}')
                 sample_qc_dir = os.path.join(self.parent.qc_dir, read_set)
                 consolidated_host_seqs_abund_dict = compress_pickle.load(
                     os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
                 for seq_name in consolidated_host_seqs_abund_dict.keys():
                     seq_to_sample_occurence_dict[seq_name] += 1
+            print('Complete')
             # Now convert the absolute abundances to relative abudances for the given set of readsets
             tot = len(self.samples)
             seq_to_sample_occurence_dict = {k: v/tot for k, v in seq_to_sample_occurence_dict.items()}
@@ -601,18 +616,19 @@ class IndiDistanceAnalysis():
         """
         Method that produces the abundance dictionary that will hold a set of sub dictionaries
         one for each readset we are concerned with.
-        In all cases the 
         """
         if self.parent.samples_at_least_threshold:
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
             threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.parent.samples_at_least_threshold}
 
         abundance_dict = {}
-        print('Creating abundance df')
+        print('Creating abundance dict')
+        
         samples_to_remove_list = []
         for sample_name in self.samples:
             sys.stdout.write(f'\r{sample_name}')
-            temp_sample_dict = {}
+            
+            
             sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(
                 os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
@@ -623,36 +639,55 @@ class IndiDistanceAnalysis():
                                         key=(lambda key: consolidated_host_seqs_abund_dict[key]))
                 # remove the most abund seq
                 del consolidated_host_seqs_abund_dict[most_abund_sequence]
+            
             # renormalise
-            if self.parent.samples_at_least_threshold:
+            if self.parent.samples_at_least_threshold > 0:
                 # screen out those sequences that are not found in X or more samples
                 consolidated_host_seqs_abund_dict = {
                     k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
+            
+            # normalise the consolidated_host_seqs_abund_dict back to 1
             tot = sum(consolidated_host_seqs_abund_dict.values())
             consolidated_host_seqs_abund_dict = {k: v / tot for k, v in consolidated_host_seqs_abund_dict.items()}
 
             # To prevent downstream problems we will insist on there always being at least
             # three sequences. Later we can put this to much higher to look at the effect
-            if len(consolidated_host_seqs_abund_dict.keys()) < 3:
+            if len(consolidated_host_seqs_abund_dict.keys()) < self.parent.min_num_distinct_seqs_per_sample:
                 samples_to_remove_list.append(sample_name)
                 continue
 
-            for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
-                normalised_abund = int(rel_abund * self.num_seqs_to_normalise_to)
-                if normalised_abund:
-                    temp_sample_dict[sequence] = normalised_abund
+            if self.parent.normalisation_method == 'rai':
+                # Relative abundance integer conversion
+                temp_sample_dict = {}
+                for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
+                    normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
+                    if normalised_abund:
+                        temp_sample_dict[sequence] = normalised_abund
+            else:
+                # pwr
+                # pick without replacement.
+                # If subsample, we will produce a list using np.random.choice
+                # https://docs.scipy.org/doc/numpy-1.16.0/reference/generated/numpy.random.choice.html
+                # We will then convert this to a dict using counter
+                # This dict will have absolute abundances. These will be converted to relaive abundances
+                # outside of this script.
+                seqs, probs = zip(*consolidated_host_seqs_abund_dict.items())
+                seqs_list = np.random.choice(seqs, self.num_seqs_to_normalise_to, p=probs)
+                temp_sample_dict = dict(Counter(seqs_list))
+            
             abundance_dict[sample_name] = temp_sample_dict
+        
         for sample_name in samples_to_remove_list:
             self.samples.remove(sample_name)
 
         # It may also be very helpful to look at the distribution of the number of minor sequences
         # a given sample has
-        hist_list = [len(sub_dict.keys()) for sub_dict in abundance_dict.values()]
-        print('making and writing histogram of sequence diversity')
-        plt.hist(hist_list, bins=30)
-        plt.savefig(
-            os.path.join(self.parent.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.genus}_{self.dist_method}.png'))
-        plt.close()
+        # hist_list = [len(sub_dict.keys()) for sub_dict in abundance_dict.values()]
+        # print('making and writing histogram of sequence diversity')
+        # plt.hist(hist_list, bins=30)
+        # plt.savefig(
+        #     os.path.join(self.parent.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.genus}_{self.dist_method}.png'))
+        # plt.close()
 
         return abundance_dict
 
@@ -671,7 +706,7 @@ class IndiDistanceAnalysis():
         # abundance of that sequence normalised to a given number of seuences that depend
         # on the distance calculation method. For braycurtis, this is currently set to 10000
         # or UniFrac this is currently set to 1000.
-        self.abundance_dict = self._create_abundance_dicts()
+        self.abundance_dict = self._create_abundance_df(obj_to_return='abund_dict')
         self.braycurtis_btwn_sample_distance_dictionary = self._compute_braycurtis_distance_dict()
         self.braycurtis_btwn_sample_distance_file = self._make_and_write_braycurtis_distance_file()
         self.pcoa_df = self._make_pcoa_df_braycurtis()
@@ -788,7 +823,7 @@ class IndiDistanceAnalysis():
     def _do_unifrac_analysis(self):
         if self._check_if_pcoa_already_computed():
             return
-        self.abundance_df = self._create_abundance_df()
+        self.abundance_df = self._create_abundance_df(obj_to_return='abund_df')
         self._create_tree()
         self._compute_weighted_unifrac()
         self._write_out_unifrac_dist_file()
