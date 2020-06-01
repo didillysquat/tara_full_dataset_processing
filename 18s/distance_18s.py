@@ -8,6 +8,7 @@ from plumbum import local
 import subprocess
 from scipy.spatial.distance import braycurtis
 from skbio.stats.ordination import pcoa
+from skbio.math.stats.distance import mantel
 from skbio.tree import TreeNode
 from skbio.diversity import beta_diversity
 import numpy as np
@@ -80,6 +81,8 @@ class EighteenSDistance(EighteenSBase):
             raise AssertionError('samples_at_least_threshold must be between 0 and 1')
         if snp_distance_type == 'biallelic':
             self.snp_dist_df_dict, self.snp_sample_list_dict = self._generate_biallelic_snp_dist_dfs()
+        else:
+            raise NotImplementedError
         # A dict of genus to the list of representative readsets to include
         self.genus_to_representative_readset_dict = self._generate_genera_readset_dict()
         self.dist_method_18S = dist_method_18S
@@ -730,10 +733,49 @@ class IndiDistanceAnalysis():
 
     def _compare_to_snp(self):
         # The dist matrix is written out here
-        dist_df_18S = pd.DataFrame(self.dist_out_path)
-        # TODO currently, the BC dist is tab delim and has an extra line that counts the taxa at the top
-        # While the unifrac is comma delim and does not have the extra line.
-        # We should convert both for mats so that they match. But for time being just work with it.
+        df_18S = pd.read_csv(self.dist_out_path, index_col=0)
+        # The SNP and the 18S matrices must contain the same indices and be in the same order.
+        # Need to take into account that the indices for the 18S df are readset names.
+        # Also need to take into account that replicates may have been used.
+        
+        # First get rid of any items (rows and corresponding columns that are tech replicates)
+        # To do this, work through the present readsets and identify those that are not representative
+        drop_list = []
+        for ind in df_18S.index:
+            if self.parent.fastq_info_df.at[ind, 'is_replicate']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        df_18S.drop(index=drop_list, columns=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in df_18S.index:
+            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+        
+        # These should be unique
+        assert(len(sample_id_list) == len(set(sample_id_list)))
+        df_18S.index = sample_id_list
+
+        # Now get rid of the samples not in the corresponding 
+        drop_list = [_ for _ in df_18S.index if _ not in self.parent.snp_dist_df_dict[self.genus].index.values.tolist()]
+        df_18S.drop(index=drop_list, columns=drop_list, inplace=True)
+
+        # Finally, reindex so that the dist info is in the same order
+        assert(len(df_18S.index) == len(self.parent.snp_dist_df_dict[self.genus].index))
+        df_18S = df_18S.reindex(index=self.parent.snp_dist_df_dict[self.genus].index, columns=self.parent.snp_dist_df_dict[self.genus].index)
+
+        # At this point the dfs should be ready to compare.
+        cor_coef, p_val = mantel(df_18S, self.parent.snp_dist_df_dict[self.genus])
+        foo = 'bar'
+
+        # Now we can write out the results
+        result_path = os.path.join(self.parent.output_dir_18s, f'{self.uniue_hash}_mantel_result.txt'
+        with open(result_path, 'w') as f:
+            f.write(f'{cor_coef}\t{p_val}')
+        
+        # Now we are done.
+
 
     # BRAYCURTIS METHODS
     def _do_braycurtis_analysis(self):
