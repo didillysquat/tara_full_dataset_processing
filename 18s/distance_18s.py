@@ -45,9 +45,8 @@ class EighteenSDistance(EighteenSBase):
     although, Didier did say that he is also going to send through some categorisations.
     """
     def __init__(
-        self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, 
-        remove_majority_sequence=True, mafft_num_proc=6, braycurtis_normalisation_abundance=10000, 
-        unifrac_normalisation_abundance=1000, normalisation_method='pwr', approach='dist', 
+        self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis'
+        remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0, exclude_no_use_samples=True):
         super().__init__()
         # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
@@ -83,9 +82,18 @@ class EighteenSDistance(EighteenSBase):
             self.snp_dist_df_dict, self.snp_sample_list_dict = self._generate_biallelic_snp_dist_dfs()
         # A dict of genus to the list of representative readsets to include
         self.genus_to_representative_readset_dict = self._generate_genera_readset_dict()
-        self.dist_methods = ['unifrac', 'braycurtis']
+        self.dist_method_18S = dist_method_18S
         self.remove_maj_seq = remove_majority_sequence
         self.mafft_num_proc = mafft_num_proc
+        if normalisation_abundance is not None:
+            self.normalisation_abundance = normalisation_abundance
+        else:
+            if self.dist_method_18S == 'braycurtis':
+                self.normalisation_abundance = 10000
+            elif self.dist_method_18S == 'unifrac':
+                self.normalisation_abundance = 1000
+            else:
+                raise RuntimeError(f'dist_method_18S must be either braycurtis or unifrac. {self.dist_method_18S} given.')
         self.unifrac_norm_abund = unifrac_normalisation_abundance
         self.braycurtis_norm_abund = braycurtis_normalisation_abundance
         self.normalisation_method = normalisation_method
@@ -158,13 +166,12 @@ class EighteenSDistance(EighteenSBase):
             raise RuntimeError('abundance_info_df.p.bz should have been created as part of processing_18s.py')
 
     def compute_distances(self):
-        for dist_method in self.dist_methods:
-            for genus, readset_list in self.genus_to_representative_readset_dict.items():
-                indi_dist = IndiDistanceAnalysis(parent=self,
-                                                 genus=genus, sample_list=readset_list,
-                                                 dist_method=dist_method
-                                                 )
-                indi_dist.do_analysis()
+        for genus, readset_list in self.genus_to_representative_readset_dict.items(): 
+            indi_dist = IndiDistanceAnalysis(parent=self,
+                                                genus=genus, sample_list=readset_list,
+                                                dist_method=self.dist_method_18S
+                                                )
+            indi_dist.do_analysis()
 
     def plot_computed_distances(self):
         """Plot up the PCoA outputs from the computed distances.
@@ -714,6 +721,19 @@ class IndiDistanceAnalysis():
             self._do_unifrac_analysis()
         else:
             self._do_braycurtis_analysis()
+        # At this point we should be able to grab the distmatrix object
+        # and compare it to the snp-based dist matrices and produce the persons correlation
+        # value and the permutation results.
+        # These will need to be written out somewhere using
+        # the unique string as the name
+        self._compare_to_snp()
+
+    def _compare_to_snp(self):
+        # The dist matrix is written out here
+        dist_df_18S = pd.DataFrame(self.dist_out_path)
+        # TODO currently, the BC dist is tab delim and has an extra line that counts the taxa at the top
+        # While the unifrac is comma delim and does not have the extra line.
+        # We should convert both for mats so that they match. But for time being just work with it.
 
     # BRAYCURTIS METHODS
     def _do_braycurtis_analysis(self):
@@ -735,8 +755,8 @@ class IndiDistanceAnalysis():
         # a twoD list and then convert to a numpy array
         temp_two_D_list = []
         sample_names_from_dist_matrix = []
-        for line in self.braycurtis_btwn_sample_distance_file[1:]:
-            temp_elements = line.split('\t')
+        for line in self.braycurtis_btwn_sample_distance_file:
+            temp_elements = line.split(',')
             sample_names_from_dist_matrix.append(temp_elements[0])
             temp_two_D_list.append([float(a) for a in temp_elements[1:]])
         bc_dist_array = np.array(temp_two_D_list)
@@ -756,7 +776,7 @@ class IndiDistanceAnalysis():
     def _make_and_write_braycurtis_distance_file(self):
         # Generate the distance out file from this dictionary
         # from this dict we can produce the distance file that can be passed into the generate_PCoA_coords method
-        distance_out_file = [len(self.samples)]
+        distance_out_file = []
         print('Making braycurtis distance file')
         for sample_outer in self.samples:
             sys.stdout.write(f'\r{sample_outer}')
@@ -770,7 +790,7 @@ class IndiDistanceAnalysis():
             temp_sample_dist_string.extend(temp_dist_list)
 
             distance_out_file.append(
-                '\t'.join([str(distance_item) for distance_item in temp_sample_dist_string]))
+                ','.join([str(distance_item) for distance_item in temp_sample_dist_string]))
         print('\nwriting dist file')
         with open(self.dist_out_path, 'w') as f:
             for line in distance_out_file:
@@ -1102,11 +1122,12 @@ if __name__ == "__main__":
     exclude_secondary_seq_samples = Whether to exclude samples that returned a different most abundant sequence
     compared to the most commonly abundant sequence for the coral taxa in question.
 
-    braycurtis_normalisation_abundance = The absolute abundance that normalisation will be conducted to for braycurtis [10000].
+    dist_method_18S = 'unifrac' | 'braycurtis' [braycurtis]
 
-    unifrac_normalisation_abundance = The absolute abundance that the normalistaion will be conducted to for unifrac [1000].
+    normalisation_abundance = The absolute abundance that normalisation 
+    will be conducted to for braycurtis [10000 for bc or 1000 for unifrac].
 
-    normalisation method = either 'pwr' (pick without replacement), 'rai' (realtive abundance integer convertion) [pwr]
+    normalisation_method = either 'pwr' (pick without replacement), 'rai' (realtive abundance integer convertion) [pwr]
 
     mafft_num_proc = the numper of processes to pass to MAFFT for doing the alignment required for tree creation for
     unifrac-based distance calculations [6].
@@ -1118,7 +1139,6 @@ if __name__ == "__main__":
     use_replicates = whether to use all available technical replicates for samples (i.e. multiple readsets per
     sample) [False]. If False we will use the representative readset noted in the fastq_info_df
 
-    TODO
     exclude_no_use_samples = whether to exlude samples (readsets) that are listed as use==False in the fastq_info_df. [True]
 
     snp_distance_type = The type of distance matrix we will use for the snp data [biallelic].
@@ -1130,11 +1150,38 @@ if __name__ == "__main__":
     a cutoff will be applied so that only the i most abundant sequences in a given sample will be considered. This
     value must be greaer than the min_num_distinct_seqs_per_sample else an error will be thrown. If a non-zero
     value is provided to this argument. It will override the samples_at_lesast_threshold. [0]
+
+    # TODO We now have the basic code for making the distances up and running. We now need to work out how we are
+    going to collect the results.
+    We should also consider how we are going to multi-thread this. I envisage that we will have a huge list of
+    permutations that we will want to run, and we should think to multithread parts or all of this process.
+    At the moment we are working in a very serial manner of faashion and we may need to start working in a batch way
+    to so that for example, we can do all of the alignments at once. Or perhaps, the easiest way forward will be to
+    multi thread at a very high level.
+    We also need to work out some sort of unique identifier so that we can work out what a set of results refer to.
+    The levels are:
+    
+    # Levels that are likely to be invariant
+    remove_majority_sequence = Bool
+    exclude_secondary_seq_samples = Bool
+    exclude_no_use_samples = Bool
+    use_replicates = Bool
+    
+    # Levels for explicit testing
+    snp_distance_type = categorical
+    dist_method_18S = categorical
+    only_snp_samples = Bool
+    normalisation_method = categorical
+    normalisation_abundance = int
+    samples_at_least_threshold = 0 >= float <=1
+    most_abund_seq_cutoff = int
+    min_num_distinct_seqs_per_sample = int
+
+    We will create a string that uniquely identified the parameters that we are using to compute and test
+    We will build this from within for loops. 
     """
+
     dist = EighteenSDistance(
-        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True, most_abund_seq_cutoff=4, mafft_num_proc=100)
-    # Options for resolution_type are:
-    # 'host_only' = 0 filtering of the seqs in the samples and they are only separated by
-    # the gentically identified majority genus.
+        remove_majority_sequence=True, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  most_abund_seq_cutoff=4, mafft_num_proc=100)
 
     dist.make_and_plot_dist_and_pcoa()
