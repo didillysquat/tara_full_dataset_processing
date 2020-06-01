@@ -48,7 +48,7 @@ class EighteenSDistance(EighteenSBase):
         self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, 
         remove_majority_sequence=True, mafft_num_proc=6, braycurtis_normalisation_abundance=10000, 
         unifrac_normalisation_abundance=1000, normalisation_method='pwr', approach='dist', 
-        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3):
+        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0):
         super().__init__()
         # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
         self.genera = ['Pocillopora', 'Porites']
@@ -62,7 +62,18 @@ class EighteenSDistance(EighteenSBase):
         self.only_snp_samples = only_snp_samples
         self.use_replicates = use_replicates
         self.samples_at_least_threshold = samples_at_least_threshold
+        self.most_abund_seq_cutoff = most_abund_seq_cutoff
+        if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
+            print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
+            print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
+            print(f'uing most_abund_seq_cutoff = {self.most_abund_seq_cutoff}')
+            self.samples_at_least_threshold = 0
         self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
+        if self.most_abund_seq_cutoff !=0 and self.most_abund_seq_cutoff < self.min_num_distinct_seqs_per_sample:
+            raise RuntimeError(f'most_abund_seq_cutoff ({self.most_abund_seq_cutoff}) <' 
+                                f' min_num_distinct_seqs_per_sample ({self.min_num_distinct_seqs_per_sample}).'
+                                '\nPlease adjust one of the prarmeters accordingly.')
+        
         try:
             assert(0 <= self.samples_at_least_threshold <= 1)
         except AssertionError:
@@ -528,6 +539,9 @@ class IndiDistanceAnalysis():
             # if working with samples_at_least_threshold, screen out rare seqs here
             if self.parent.samples_at_least_threshold > 0:
                 consolidated_host_seqs_abund_dict = {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
+            elif self.parent.most_abund_seq_cutoff > 0:
+                sorted_dict_keys = sorted(consolidated_host_seqs_abund_dict, key=consolidated_host_seqs_abund_dict.get, reverse=True)[:self.parent.most_abund_seq_cutoff]
+                consolidated_host_seqs_abund_dict =  {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in sorted_dict_keys}
             
             # normalise the consolidated_host_seqs_abund_dict back to 1
             tot = sum(consolidated_host_seqs_abund_dict.values())
@@ -1108,9 +1122,15 @@ if __name__ == "__main__":
 
     min_num_distinct_seqs_per_sample = The minimum number of distinct sequences a given readset must have in its
     abundance dictionary after normalisation. Else the readset will be discarded [3].
+
+    TODO
+    most_abund_seq_cutoff = If this is 0. It will effectively be turned off. If this  is any other value, then
+    a cutoff will be applied so that only the i most abundant sequences in a given sample will be considered. This
+    value must be greaer than the min_num_distinct_seqs_per_sample else an error will be thrown. If a non-zero
+    value is provided to this argument. It will override the samples_at_lesast_threshold. [0]
     """
     dist = EighteenSDistance(
-        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True)
+        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5, remove_majority_sequence=True, most_abund_seq_cutoff=4)
     # Options for resolution_type are:
     # 'host_only' = 0 filtering of the seqs in the samples and they are only separated by
     # the gentically identified majority genus.
