@@ -7,8 +7,8 @@ import sys
 from plumbum import local
 import subprocess
 from scipy.spatial.distance import braycurtis
+from skbio.stats.distance import mantel
 from skbio.stats.ordination import pcoa
-from skbio.math.stats.distance import mantel
 from skbio.tree import TreeNode
 from skbio.diversity import beta_diversity
 import numpy as np
@@ -46,12 +46,11 @@ class EighteenSDistance(EighteenSBase):
     although, Didier did say that he is also going to send through some categorisations.
     """
     def __init__(
-        self, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis'
+        self, host_genus, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis',
         remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0, exclude_no_use_samples=True):
         super().__init__()
-        # Overwrite self.genera to only include Pocillopora and Porites as we are not currently working with Millepora
-        self.genera = ['Pocillopora', 'Porites']
+        self.genus = host_genus
         # Use the meta_info_table produced by output_tables.py
         self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
         self.meta_info_df = self._get_meta_info_df()
@@ -80,11 +79,11 @@ class EighteenSDistance(EighteenSBase):
         except AssertionError:
             raise AssertionError('samples_at_least_threshold must be between 0 and 1')
         if snp_distance_type == 'biallelic':
-            self.snp_dist_df_dict, self.snp_sample_list_dict = self._generate_biallelic_snp_dist_dfs()
+            self.snp_df, self.snp_sample_list = self._generate_biallelic_snp_df_and_sample_list()
         else:
             raise NotImplementedError
         # A dict of genus to the list of representative readsets to include
-        self.genus_to_representative_readset_dict = self._generate_genera_readset_dict()
+        self.readset_list = self._generate_readset_list()
         self.dist_method_18S = dist_method_18S
         self.remove_maj_seq = remove_majority_sequence
         self.mafft_num_proc = mafft_num_proc
@@ -93,34 +92,62 @@ class EighteenSDistance(EighteenSBase):
         else:
             if self.dist_method_18S == 'braycurtis':
                 self.normalisation_abundance = 10000
+                self.abundance_dict = None
             elif self.dist_method_18S == 'unifrac':
                 self.normalisation_abundance = 1000
+                self.abundance_df = None
             else:
                 raise RuntimeError(f'dist_method_18S must be either braycurtis or unifrac. {self.dist_method_18S} given.')
-        self.unifrac_norm_abund = unifrac_normalisation_abundance
-        self.braycurtis_norm_abund = braycurtis_normalisation_abundance
         self.normalisation_method = normalisation_method
         self.approach = approach
+
+        # The unique string and hash of that string that will be used for writing items out
+        # This way we will always have a unique name for streams (for multithreading later)
+        # and we will be able to readback in results predictably.
+        self.unique_string = f'{self.remove_maj_seq}_{self.exclude_secondary_seq_samples}_' \
+        f'{self.exclude_no_use_samples}_{self.use_replicates}_' \
+        f'{snp_distance_type}_{self.dist_method_18S}_' \
+        f'{self.approach}_{self.normalisation_abundance}_{self.normalisation_method}_' \
+        f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
+        f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
+        self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
+        self.temp_dir = os.path.join(os.path.dirname(self.qc_dir), f'{self.unique_string}_temp')
+        os.makedirs(self.temp_dir, exist_ok=True)
+        self.dist_out_path = os.path.join(
+            self.output_dir_18s,
+            f'{self.unique_string}.dist')
+        self.pcoa_out_path = os.path.join(
+            self.output_dir_18s,
+            f'{self.unique_string}_pcoa.csv')
+        self.pcoa_df = None
         
+        # Variables concerned with unifrac
+        self.unaligned_fasta_path = os.path.join(self.temp_dir, 'unaligned_fasta.fasta')
+        self.aligned_fasta_path = os.path.join(self.temp_dir, 'aligned_fasta.fasta')
+        self.tree_path = self.aligned_fasta_path + '.treefile'
+        self.wu = None
+
+        # Variables concerned with braycurtis
+        self.braycurtis_btwn_sample_distance_dictionary = None
         foo = 'bar'
     
-    def _generate_biallelic_snp_dist_dfs(self):
-        poc_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PocG111_biallelic_gaps.tree.distances.txt')
-        por_snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PorG111_biallelic_gaps.tree.distances.txt')
-        snp_dist_df_dict = {}
-        snp_sample_list_dict = {}
-        for dist_path, genus in zip([poc_snp_dist_path, por_snp_dist_path], self.genera):
-            # Read in the distance file. There is no header so we will read in as list and then process
-            with open(dist_path, 'r') as f:
-                dat = [line.rstrip().split('\t') for line in f]
-            # Indices are currently in format (e.g. I01S01C011POR). Need to convert to sample-id.
-            index = [_[0] for _ in dat]
-            index = self._convert_index_to_sample_ids(index)
-            dat = np.array([_[1:] for _ in dat], dtype=float).astype(int)
-            # make the df
-            snp_dist_df_dict[genus] = pd.DataFrame(data=dat, columns=index, index=index).astype(int)
-            snp_sample_list_dict[genus] = index
-        return snp_dist_df_dict, snp_sample_list_dict
+    def _generate_biallelic_snp_df_and_sample_list(self):
+        if self.genus == 'Pocillopora':
+            snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PocG111_biallelic_gaps.tree.distances.txt')
+        elif self.genus == 'Porites':
+            snp_dist_path = os.path.join(self.input_dir_18s, 'snp_dist_matrices', 'MP_PorG111_biallelic_gaps.tree.distances.txt')
+        else:
+            raise NotImplementedError
+        
+        # Read in the distance file. There is no header so we will read in as list and then process
+        with open(snp_dist_path, 'r') as f:
+            dat = [line.rstrip().split('\t') for line in f]
+        # Indices are currently in format (e.g. I01S01C011POR). Need to convert to sample-id.
+        index = [_[0] for _ in dat]
+        index = self._convert_index_to_sample_ids(index)
+        dat = np.array([_[1:] for _ in dat], dtype=float).astype(int)
+        # make the df
+        return pd.DataFrame(data=dat, columns=index, index=index).astype(int), index
 
     def _convert_index_to_sample_ids(self, index):
         # We want to convert these indices to samplie-id
@@ -168,14 +195,6 @@ class EighteenSDistance(EighteenSBase):
         else:
             raise RuntimeError('abundance_info_df.p.bz should have been created as part of processing_18s.py')
 
-    def compute_distances(self):
-        for genus, readset_list in self.genus_to_representative_readset_dict.items(): 
-            indi_dist = IndiDistanceAnalysis(parent=self,
-                                                genus=genus, sample_list=readset_list,
-                                                dist_method=self.dist_method_18S
-                                                )
-            indi_dist.do_analysis()
-
     def plot_computed_distances(self):
         """Plot up the PCoA outputs from the computed distances.
         To start with we will work with a simple 2x3 plot
@@ -206,10 +225,11 @@ class EighteenSDistance(EighteenSBase):
     def make_and_plot_dist_and_pcoa(self):
         # Call the class that will be responsible for calculating the distances
         # Calculating the PCoA and then plotting
-        self.compute_distances()
+        # TODO we are here on the refactoring debug.
+        self._compute_and_test_dist_matrix()
         self.plot_computed_distances()
 
-    def _generate_genera_readset_dict(self):
+    def _generate_readset_list(self):
         """
         For each target coral (i.e. Pocillopora and Porites) get the list of readsets that we should be working with
         We will work with readsets as there are sometimes > 1 readset per sample-id.
@@ -219,305 +239,28 @@ class EighteenSDistance(EighteenSBase):
         use_replicates
         only_snp_samples
         """
-        temp_dict = {}
+        
         # First screen by coral host
         for genus in self.genera:
-            temp_dict[genus] = self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == genus]
+            df = self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == self.genus]
         # Then by replicates
         if not self.use_replicates:
-            for genus in self.genera:
-                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['is_representative_for_sample'] == True]
+            
+            df = df[df['is_representative_for_sample'] == True]
         # Then by exclude_secondary_seq_samples
         if self.exclude_secondary_seq_samples:
-            for genus in self.genera:
-                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['is_different_primary_sequence'] == False]
+            
+            df = df[df['is_different_primary_sequence'] == False]
         # Then by only_snp_samples
         if self.only_snp_samples:
-            for genus in self.genera:
-                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['sample-id'].isin(self.snp_sample_list_dict[genus])]
+            df = df[df['sample-id'].isin(self.snp_sample_list)]
+        
         if self.exclude_no_use_samples:
-            for genus in self.genera:
-                temp_dict[genus] = temp_dict[genus][temp_dict[genus]['use'] == True]
+            df = df[df['use'] == True]
         # Finally, we only want the list of the readsets, so get the indices from the df
-        for genus in self.genera:
-            temp_dict[genus] = list(temp_dict[genus].index)
-        return temp_dict
+        
+        return list(df.index)
 
-class DistancePlotter:
-    def __init__(self, parent, color_by=None, plot_unifrac=True):
-        self.parent = parent
-        if plot_unifrac:
-            self.fig = plt.figure(figsize=(10, 7))
-        else:
-            self.fig = plt.figure(figsize=(12, 4))
-        self.color_by = color_by
-        self.color_dict = self._init_color_dict()
-        self.plot_unifrac = plot_unifrac
-
-    def _init_color_dict(self):
-        color_list = get_colour_list()
-
-        if self.color_by == 'island':
-            island_c_dict = {island: color for island, color in zip(self.parent.info_df['island'].unique(), color_list[:len(self.parent.info_df['island'].unique())])}
-            return {sample_name: island_c_dict[self.parent.info_df.at[sample_name, 'island']] for sample_name in self.parent.info_df.index}
-        elif self.color_by is None:
-            return {sample_name: 'black' for sample_name in self.parent.info_df.index}
-        elif self.color_by == 'maj_seq':
-            maj_seq_c_dict = {maj_seq: color for maj_seq, color in
-                             zip(self.parent.info_df['most_abund_seq_of_coral_genus'].unique(), color_list[:len(self.parent.info_df['most_abund_seq_of_coral_genus'].unique())])}
-            return {sample_name: maj_seq_c_dict[self.parent.info_df.at[sample_name, 'most_abund_seq_of_coral_genus']] for sample_name in
-                    self.parent.info_df.index}
-        elif self.color_by == 'intra_diversity':
-            # If we are colouring by intra div then we will use the return a dict of
-            # sample_name to number of unique sequences
-            return self._create_intra_diversity_dict()
-        elif self.color_by == 'tech_reps':
-            # We are implementing this coloring as a sanity check for the unifrac
-            # find all the tech reps and give them the same color
-            # Keep the same color dict
-            if os.path.isfile(os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz')):
-                return compress_pickle.load(os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz'))
-            tech_rep_base = set()
-            color_dict = {}
-            for sample_name in self.parent.info_df.index:
-                if sample_name[-2] == '_':
-                    # Then this is a tech rep sample name
-                    tech_rep_base.add('_'.join(sample_name.split('_')[:-1]))
-            # Just do the first 10 tech reps
-            tech_rep_color_dict = {tech_rep: color for tech_rep, color in zip(list(tech_rep_base)[:25], color_list[:25])}
-            for sample_name in self.parent.info_df.index:
-                if sample_name[-2] == '_':
-                    try:
-                        # Then this is tech rep
-                        color_dict[sample_name] = tech_rep_color_dict['_'.join(sample_name.split('_')[:-1])]
-                        foo = 'asdf'
-                    except KeyError:
-                        color_dict[sample_name] = (1,1,1,0)
-                else:
-                    color_dict[sample_name] = (1,1,1,0)
-            compress_pickle.dump(color_dict, os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz'))
-            return color_dict
-        else:
-            raise NotImplementedError
-
-
-    def _create_intra_diversity_dict(self):
-        diversity_dict = {}
-        print('Creating intra diversity dict')
-        for sample_name in self.parent.info_df.index:
-            sys.stdout.write(f'\r{sample_name}')
-            sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
-            consolidated_host_seqs_abund_dict = compress_pickle.load(
-                os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-
-            # We need to remove the most abundant sequence from the equation
-            most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
-                                      key=(lambda key: consolidated_host_seqs_abund_dict[key]))
-            # remove the most abund seq
-            del consolidated_host_seqs_abund_dict[most_abund_sequence]
-            diversity_dict[sample_name] = len(consolidated_host_seqs_abund_dict.keys())
-        return diversity_dict
-
-    def plot(self):
-        if self.plot_unifrac:
-            self.gs = gridspec.GridSpec(3, 3, height_ratios=[0.2, 1, 1])
-        else:
-            self.gs = gridspec.GridSpec(2, 3, height_ratios=[0.2,1])
-        if self.plot_unifrac:
-            dist_methods = ['braycurtis', 'unifrac']
-        else:
-            dist_methods = ['braycurtis']
-
-        if self.parent.exclude_secondary_seq_samples:
-            secondary_seq_string = 'exluded'
-        else:
-            secondary_seq_string = 'included'
-
-
-        for i, dist_method in enumerate(dist_methods):
-            for j, genus in enumerate(['Pocillopora', 'Millepora', 'Porites']):
-                ax = self.fig.add_subplot(self.gs[i + 1, j])
-                try:
-                    indi_dist_plotter = IndiDistancePlotter(
-                        eightsdistparent=self.parent, fig=self.fig, ax=ax, genus=genus, dist_method=dist_method,
-                        path_to_csv=os.path.join(
-                            self.parent.output_dir_18s,
-                            f'secondary_seq_{secondary_seq_string}_'
-                            f'{self.parent.samples_at_least_threshold}_{genus}_{dist_method}.csv'),
-                        color_dict=self.color_dict)
-                    indi_dist_plotter.plot()
-                except FileNotFoundError as e:
-                    # Then the .csv hasn't been output yet
-                    print(e)
-                    continue
-
-        if self.plot_unifrac:
-            with_unifrac_string = '_w_unifrac'
-        else:
-            with_unifrac_string = ''
-        title_ax = self.fig.add_subplot(self.gs[0,:])
-        if self.parent.exclude_secondary_seq_samples:
-            secondary_seq_string = 'exluded'
-        else:
-            secondary_seq_string = 'included'
-
-        title_ax.text(x=0.5, y=0.5, s=f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}{with_unifrac_string}', ha='center', va='center')
-        remove_axes_but_allow_labels(title_ax)
-        plt.tight_layout()
-        print(f'saving secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.png')
-        plt.savefig(os.path.join(self.parent.figure_dir, f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.png'), dpi=1200)
-        print(f'saving secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg')
-        plt.savefig(os.path.join(self.parent.figure_dir, f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg'))
-
-
-class IndiDistancePlotter:
-    """Class for plotting an individual axis"""
-    def __init__(self, eightsdistparent, fig, ax, genus, dist_method, path_to_csv, color_dict):
-        self.eightsdistparent = eightsdistparent
-        self.fig = fig
-        self.ax = ax
-        self.category = genus
-        self.dist_method = dist_method
-        self.pcoa_df = pd.read_csv(path_to_csv)
-        self.color_dict = color_dict
-
-
-        # if self.category == 'Porites':
-        #     if self.dist_method == 'unifrac':
-        #         # First get the samples that are in the bottom right and get the seqs that are found in common
-        #         master_set = None
-        #         for i, sample_name in enumerate(self.pcoa_df[self.pcoa_df['PC1'] > 0.18]['sample'].values.tolist()[:-1]):
-        #             master_set = self.get_seqs_in_common(i, master_set, sample_name)
-        #         self.print_master_set(master_set=master_set, prefix='br')
-        #         # second get the samples that are at the top center and get the seqs that are found in common
-        #         master_set = None
-        #         for i, sample_name in enumerate(
-        #                 self.pcoa_df[self.pcoa_df['PC2'] > 0.05]['sample'].values.tolist()[:-1]):
-        #             master_set = self.get_seqs_in_common(i, master_set, sample_name)
-        #         self.print_master_set(master_set=master_set, prefix='top')
-        #
-        #         # Go through all samples and get an abundance dict of the sequences
-        #         # We could even plot this is a hist
-        #         master_count = defaultdict(int)
-        #         for sample_name in self.info_df.index:
-        #             sample_qc_dir = os.path.join(self.qc_dir, sample_name)
-        #             consolidated_host_seqs_abund_dict = compress_pickle.load(
-        #                 os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-        #             for seq in consolidated_host_seqs_abund_dict.keys():
-        #                 master_count[seq] += 1
-        #         # now sort the list
-        #         hist_list = [val for val in master_count.values()]
-        #         # plt.hist(hist_list, bins=100)
-        #         sorted_rev = sorted([_ for _ in master_count.items()], key=lambda x: x[1], reverse=False)
-        #         # Want to do a scatter plot of abundance cutoff effect on the total number of seqs we are working with
-        #         cutoff = 0
-        #         cutoff_list = [_ for _ in master_count.items() if _[1] > cutoff]
-        #         x = []
-        #         y = []
-        #         while cutoff_list:
-        #             print(cutoff)
-        #             x.append(cutoff)
-        #             y.append(len(cutoff_list))
-        #             cutoff += 1
-        #             cutoff_list = [_ for _ in master_count.items() if _[1] > cutoff]
-        #         plt.scatter(x=x, y=y, c='black', s=2)
-        # self.opt = 'foo'
-
-    def print_master_set(self, master_set, prefix):
-        for i, seq in enumerate(list(master_set)):
-            print(f'>{prefix}_{i}')
-            print(seq)
-
-    def get_seqs_in_common(self, i, master_set, sample_name):
-        sample_qc_dir = os.path.join(self.qc_dir, sample_name)
-        consolidated_host_seqs_abund_dict = compress_pickle.load(
-            os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-        # We need to remove the most abundant sequence from the equation
-        most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
-                                  key=(lambda key: consolidated_host_seqs_abund_dict[key]))
-        # remove the most abund seq
-        del consolidated_host_seqs_abund_dict[most_abund_sequence]
-        if i == 0:
-            master_set = set(consolidated_host_seqs_abund_dict.keys())
-        else:
-            master_set = master_set.intersection(set(consolidated_host_seqs_abund_dict.keys()))
-            print(f'now {len(master_set)} elements')
-        island = self.info_df.at[sample_name, "island"]
-        site = self.info_df.at[sample_name, "site"]
-        print(f'{sample_name}: {island} {site}')
-        return master_set
-
-    def plot(self):
-        if self.color_by == 'intra_diversity':
-        # Then we need to use a color map
-        # https://medium.com/better-programming/how-to-use-colormaps-with-matplotlib-to-create-colorful-plots-in-python-969b5a892f0c
-            im = self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1],
-                            c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()], cmap='cool', s=2)
-            cbar = self.ax.figure.colorbar(im, ax=self.ax)
-            cbar.ax.set_ylabel('unique seqs', rotation=-90, va='bottom')
-        elif self.color_by=='tech_reps':
-            self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1],
-                            c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()],
-                            s=8)
-        else:
-            self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1], c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()], s=2)
-        self.ax.set_title(f'{self.category}_{self.dist_method}')
-        pc1_var = format(self.pcoa_df['PC1'].values[-1], '.3f')
-        pc2_var = format(self.pcoa_df['PC2'].values[-1], '.3f')
-        self.ax.set_xlabel(f'PC1 var explained: {pc1_var}')
-        self.ax.set_ylabel(f'PC2 var explained: {pc2_var}')
-        foo = 'bar'
-
-
-class IndiDistanceAnalysis():
-    def __init__(self, parent, genus, sample_list, dist_method):
-        """This is the class that will take care of creating a single between sample
-        distance method
-
-        Also use compression when writing out and then reading in the pcoa output files and the distance files
-        """
-        self.parent = parent
-        self.genus = genus
-        self.samples = sample_list
-        self.dist_method = dist_method
-        # A temp directory where we can write out the unaligned fastas
-        # and aligned fasta and any other intermediate files
-        self.temp_dir = os.path.join(os.path.dirname(self.parent.qc_dir), 'temp')
-        os.makedirs(self.temp_dir, exist_ok=True)
-        # In the initial 18s we were using a normalisation of 10000 seqs for the braycurtis
-        # but 1000 for the unifrac due to the amount of time it was taking to create
-        # the trees. We will start here with 1000 seqs for the unifrac and see
-        # how long it takes to make the tree. If its not too bad then we can up the number
-        if self.dist_method == 'unifrac':
-            self.num_seqs_to_normalise_to = self.parent.unifrac_norm_abund
-            self.abundance_df = None
-        else:
-            self.num_seqs_to_normalise_to = self.parent.braycurtis_norm_abund
-            self.abundance_dict = None
-
-
-        # Generic variables shared between braycurtis and unifrac
-        if self.parent.exclude_secondary_seq_samples:
-            secondary_seq_string = 'exluded'
-        else:
-            secondary_seq_string = 'included'
-        self.dist_out_path = os.path.join(
-            self.parent.output_dir_18s,
-            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_samp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.parent.normalisation_method}_{self.dist_method}.dist')
-        self.pcoa_out_path = os.path.join(
-            self.parent.output_dir_18s,
-            f'secondary_seq_{secondary_seq_string}_maj_seq_remove_{self.parent.remove_maj_seq}_min_smp_{self.parent.samples_at_least_threshold}_{self.genus}_{self.parent.normalisation_method}_{self.dist_method}.csv')
-
-        self.pcoa_df = None
-
-        # Variables concerned with unifrac
-        self.unaligned_fasta_path = os.path.join(self.temp_dir, 'unaligned_fasta.fasta')
-        self.aligned_fasta_path = os.path.join(self.temp_dir, 'aligned_fasta.fasta')
-        self.tree_path = self.aligned_fasta_path + '.treefile'
-        self.wu = None
-
-        # Variables concerned with braycurtis
-        self.braycurtis_btwn_sample_distance_dictionary = None
 
     def _create_abundance_df(self, obj_to_return):
         """For each sample in self.samples, load up the consolidated_host_seqs_abund_dict
@@ -719,8 +462,12 @@ class IndiDistanceAnalysis():
 
         return abundance_dict
 
-    def do_analysis(self):
-        if self.dist_method == 'unifrac':
+    def _compute_and_test_dist_matrix(self):
+        """
+        call one of the  methods responsible for making a dist matrix either BC or UF
+        then run a mantel test and write out the results
+        """
+        if self.dist_method_18S == 'unifrac':
             self._do_unifrac_analysis()
         else:
             self._do_braycurtis_analysis()
@@ -770,7 +517,7 @@ class IndiDistanceAnalysis():
         foo = 'bar'
 
         # Now we can write out the results
-        result_path = os.path.join(self.parent.output_dir_18s, f'{self.uniue_hash}_mantel_result.txt'
+        result_path = os.path.join(self.parent.output_dir_18s, f'{self.uniue_hash}_mantel_result.txt')
         with open(result_path, 'w') as f:
             f.write(f'{cor_coef}\t{p_val}')
         
@@ -1113,6 +860,234 @@ class IndiDistanceAnalysis():
         new_fasta.append(''.join(temp_seq_string_list))
         return new_fasta
 
+class DistancePlotter:
+    def __init__(self, parent, color_by=None, plot_unifrac=True):
+        self.parent = parent
+        if plot_unifrac:
+            self.fig = plt.figure(figsize=(10, 7))
+        else:
+            self.fig = plt.figure(figsize=(12, 4))
+        self.color_by = color_by
+        self.color_dict = self._init_color_dict()
+        self.plot_unifrac = plot_unifrac
+
+    def _init_color_dict(self):
+        color_list = get_colour_list()
+
+        if self.color_by == 'island':
+            island_c_dict = {island: color for island, color in zip(self.parent.info_df['island'].unique(), color_list[:len(self.parent.info_df['island'].unique())])}
+            return {sample_name: island_c_dict[self.parent.info_df.at[sample_name, 'island']] for sample_name in self.parent.info_df.index}
+        elif self.color_by is None:
+            return {sample_name: 'black' for sample_name in self.parent.info_df.index}
+        elif self.color_by == 'maj_seq':
+            maj_seq_c_dict = {maj_seq: color for maj_seq, color in
+                             zip(self.parent.info_df['most_abund_seq_of_coral_genus'].unique(), color_list[:len(self.parent.info_df['most_abund_seq_of_coral_genus'].unique())])}
+            return {sample_name: maj_seq_c_dict[self.parent.info_df.at[sample_name, 'most_abund_seq_of_coral_genus']] for sample_name in
+                    self.parent.info_df.index}
+        elif self.color_by == 'intra_diversity':
+            # If we are colouring by intra div then we will use the return a dict of
+            # sample_name to number of unique sequences
+            return self._create_intra_diversity_dict()
+        elif self.color_by == 'tech_reps':
+            # We are implementing this coloring as a sanity check for the unifrac
+            # find all the tech reps and give them the same color
+            # Keep the same color dict
+            if os.path.isfile(os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz')):
+                return compress_pickle.load(os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz'))
+            tech_rep_base = set()
+            color_dict = {}
+            for sample_name in self.parent.info_df.index:
+                if sample_name[-2] == '_':
+                    # Then this is a tech rep sample name
+                    tech_rep_base.add('_'.join(sample_name.split('_')[:-1]))
+            # Just do the first 10 tech reps
+            tech_rep_color_dict = {tech_rep: color for tech_rep, color in zip(list(tech_rep_base)[:25], color_list[:25])}
+            for sample_name in self.parent.info_df.index:
+                if sample_name[-2] == '_':
+                    try:
+                        # Then this is tech rep
+                        color_dict[sample_name] = tech_rep_color_dict['_'.join(sample_name.split('_')[:-1])]
+                        foo = 'asdf'
+                    except KeyError:
+                        color_dict[sample_name] = (1,1,1,0)
+                else:
+                    color_dict[sample_name] = (1,1,1,0)
+            compress_pickle.dump(color_dict, os.path.join(self.parent.cache_dir, 'tech_reps_color_dict.p.bz'))
+            return color_dict
+        else:
+            raise NotImplementedError
+
+
+    def _create_intra_diversity_dict(self):
+        diversity_dict = {}
+        print('Creating intra diversity dict')
+        for sample_name in self.parent.info_df.index:
+            sys.stdout.write(f'\r{sample_name}')
+            sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
+            consolidated_host_seqs_abund_dict = compress_pickle.load(
+                os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+
+            # We need to remove the most abundant sequence from the equation
+            most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
+                                      key=(lambda key: consolidated_host_seqs_abund_dict[key]))
+            # remove the most abund seq
+            del consolidated_host_seqs_abund_dict[most_abund_sequence]
+            diversity_dict[sample_name] = len(consolidated_host_seqs_abund_dict.keys())
+        return diversity_dict
+
+    def plot(self):
+        if self.plot_unifrac:
+            self.gs = gridspec.GridSpec(3, 3, height_ratios=[0.2, 1, 1])
+        else:
+            self.gs = gridspec.GridSpec(2, 3, height_ratios=[0.2,1])
+        if self.plot_unifrac:
+            dist_methods = ['braycurtis', 'unifrac']
+        else:
+            dist_methods = ['braycurtis']
+
+        if self.parent.exclude_secondary_seq_samples:
+            secondary_seq_string = 'exluded'
+        else:
+            secondary_seq_string = 'included'
+
+
+        for i, dist_method in enumerate(dist_methods):
+            for j, genus in enumerate(['Pocillopora', 'Millepora', 'Porites']):
+                ax = self.fig.add_subplot(self.gs[i + 1, j])
+                try:
+                    indi_dist_plotter = IndiDistancePlotter(
+                        eightsdistparent=self.parent, fig=self.fig, ax=ax, genus=genus, dist_method=dist_method,
+                        path_to_csv=os.path.join(
+                            self.parent.output_dir_18s,
+                            f'secondary_seq_{secondary_seq_string}_'
+                            f'{self.parent.samples_at_least_threshold}_{genus}_{dist_method}.csv'),
+                        color_dict=self.color_dict)
+                    indi_dist_plotter.plot()
+                except FileNotFoundError as e:
+                    # Then the .csv hasn't been output yet
+                    print(e)
+                    continue
+
+        if self.plot_unifrac:
+            with_unifrac_string = '_w_unifrac'
+        else:
+            with_unifrac_string = ''
+        title_ax = self.fig.add_subplot(self.gs[0,:])
+        if self.parent.exclude_secondary_seq_samples:
+            secondary_seq_string = 'exluded'
+        else:
+            secondary_seq_string = 'included'
+
+        title_ax.text(x=0.5, y=0.5, s=f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}{with_unifrac_string}', ha='center', va='center')
+        remove_axes_but_allow_labels(title_ax)
+        plt.tight_layout()
+        print(f'saving secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.png')
+        plt.savefig(os.path.join(self.parent.figure_dir, f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.png'), dpi=1200)
+        print(f'saving secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg')
+        plt.savefig(os.path.join(self.parent.figure_dir, f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg'))
+
+
+class IndiDistancePlotter:
+    """Class for plotting an individual axis"""
+    def __init__(self, eightsdistparent, fig, ax, genus, dist_method, path_to_csv, color_dict):
+        self.eightsdistparent = eightsdistparent
+        self.fig = fig
+        self.ax = ax
+        self.category = genus
+        self.dist_method = dist_method
+        self.pcoa_df = pd.read_csv(path_to_csv)
+        self.color_dict = color_dict
+
+
+        # if self.category == 'Porites':
+        #     if self.dist_method == 'unifrac':
+        #         # First get the samples that are in the bottom right and get the seqs that are found in common
+        #         master_set = None
+        #         for i, sample_name in enumerate(self.pcoa_df[self.pcoa_df['PC1'] > 0.18]['sample'].values.tolist()[:-1]):
+        #             master_set = self.get_seqs_in_common(i, master_set, sample_name)
+        #         self.print_master_set(master_set=master_set, prefix='br')
+        #         # second get the samples that are at the top center and get the seqs that are found in common
+        #         master_set = None
+        #         for i, sample_name in enumerate(
+        #                 self.pcoa_df[self.pcoa_df['PC2'] > 0.05]['sample'].values.tolist()[:-1]):
+        #             master_set = self.get_seqs_in_common(i, master_set, sample_name)
+        #         self.print_master_set(master_set=master_set, prefix='top')
+        #
+        #         # Go through all samples and get an abundance dict of the sequences
+        #         # We could even plot this is a hist
+        #         master_count = defaultdict(int)
+        #         for sample_name in self.info_df.index:
+        #             sample_qc_dir = os.path.join(self.qc_dir, sample_name)
+        #             consolidated_host_seqs_abund_dict = compress_pickle.load(
+        #                 os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+        #             for seq in consolidated_host_seqs_abund_dict.keys():
+        #                 master_count[seq] += 1
+        #         # now sort the list
+        #         hist_list = [val for val in master_count.values()]
+        #         # plt.hist(hist_list, bins=100)
+        #         sorted_rev = sorted([_ for _ in master_count.items()], key=lambda x: x[1], reverse=False)
+        #         # Want to do a scatter plot of abundance cutoff effect on the total number of seqs we are working with
+        #         cutoff = 0
+        #         cutoff_list = [_ for _ in master_count.items() if _[1] > cutoff]
+        #         x = []
+        #         y = []
+        #         while cutoff_list:
+        #             print(cutoff)
+        #             x.append(cutoff)
+        #             y.append(len(cutoff_list))
+        #             cutoff += 1
+        #             cutoff_list = [_ for _ in master_count.items() if _[1] > cutoff]
+        #         plt.scatter(x=x, y=y, c='black', s=2)
+        # self.opt = 'foo'
+
+    def print_master_set(self, master_set, prefix):
+        for i, seq in enumerate(list(master_set)):
+            print(f'>{prefix}_{i}')
+            print(seq)
+
+    def get_seqs_in_common(self, i, master_set, sample_name):
+        sample_qc_dir = os.path.join(self.qc_dir, sample_name)
+        consolidated_host_seqs_abund_dict = compress_pickle.load(
+            os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+        # We need to remove the most abundant sequence from the equation
+        most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
+                                  key=(lambda key: consolidated_host_seqs_abund_dict[key]))
+        # remove the most abund seq
+        del consolidated_host_seqs_abund_dict[most_abund_sequence]
+        if i == 0:
+            master_set = set(consolidated_host_seqs_abund_dict.keys())
+        else:
+            master_set = master_set.intersection(set(consolidated_host_seqs_abund_dict.keys()))
+            print(f'now {len(master_set)} elements')
+        island = self.info_df.at[sample_name, "island"]
+        site = self.info_df.at[sample_name, "site"]
+        print(f'{sample_name}: {island} {site}')
+        return master_set
+
+    def plot(self):
+        if self.color_by == 'intra_diversity':
+        # Then we need to use a color map
+        # https://medium.com/better-programming/how-to-use-colormaps-with-matplotlib-to-create-colorful-plots-in-python-969b5a892f0c
+            im = self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1],
+                            c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()], cmap='cool', s=2)
+            cbar = self.ax.figure.colorbar(im, ax=self.ax)
+            cbar.ax.set_ylabel('unique seqs', rotation=-90, va='bottom')
+        elif self.color_by=='tech_reps':
+            self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1],
+                            c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()],
+                            s=8)
+        else:
+            self.ax.scatter(x=self.pcoa_df['PC1'].values[:-1], y=self.pcoa_df['PC2'].values[:-1], c=[self.color_dict[sample_name] for sample_name in self.pcoa_df['sample'][:-1].tolist()], s=2)
+        self.ax.set_title(f'{self.category}_{self.dist_method}')
+        pc1_var = format(self.pcoa_df['PC1'].values[-1], '.3f')
+        pc2_var = format(self.pcoa_df['PC2'].values[-1], '.3f')
+        self.ax.set_xlabel(f'PC1 var explained: {pc1_var}')
+        self.ax.set_ylabel(f'PC2 var explained: {pc2_var}')
+        foo = 'bar'
+
+
+
+
 def get_colour_list():
     colour_list = ["#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059", "#FFDBE5",
                 "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF", "#997D87", "#5A0007", "#809693",
@@ -1193,6 +1168,10 @@ if __name__ == "__main__":
     value must be greaer than the min_num_distinct_seqs_per_sample else an error will be thrown. If a non-zero
     value is provided to this argument. It will override the samples_at_lesast_threshold. [0]
 
+    TODO refactor out host genus and then refactor in the indi dist method as the granularity will be transferred
+    to the main EighteenSDistance class
+    host_genus = the host genus to work with: Pocillopora | Porites
+
     # TODO We now have the basic code for making the distances up and running. We now need to work out how we are
     going to collect the results.
     We should also consider how we are going to multi-thread this. I envisage that we will have a huge list of
@@ -1223,7 +1202,8 @@ if __name__ == "__main__":
     We will build this from within for loops. 
     """
 
+    
     dist = EighteenSDistance(
-        remove_majority_sequence=True, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  most_abund_seq_cutoff=4, mafft_num_proc=100)
+        host_genus='Pocillopora', remove_majority_sequence=True, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  most_abund_seq_cutoff=4, mafft_num_proc=100)
 
     dist.make_and_plot_dist_and_pcoa()
