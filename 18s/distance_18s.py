@@ -227,7 +227,7 @@ class EighteenSDistance(EighteenSBase):
         # Calculating the PCoA and then plotting
         # TODO we are here on the refactoring debug.
         self._compute_and_test_dist_matrix()
-        self.plot_computed_distances()
+        # self.plot_computed_distances()
 
     def _generate_readset_list(self):
         """
@@ -243,10 +243,11 @@ class EighteenSDistance(EighteenSBase):
         # First screen by coral host
         for genus in self.genera:
             df = self.meta_info_df[self.meta_info_df['genetic_18S_genus_taxonomic_annotation'] == self.genus]
-        # Then by replicates
+        
+        # Then by replicates (must be representative)
         if not self.use_replicates:
-            
             df = df[df['is_representative_for_sample'] == True]
+        
         # Then by exclude_secondary_seq_samples
         if self.exclude_secondary_seq_samples:
             
@@ -271,33 +272,33 @@ class EighteenSDistance(EighteenSBase):
         If obj_to_return=='abund_dict', we will return the master dictionary
         else obj_to_return=='abund_df', we will return a df made from the dict
         """
-        if self.parent.samples_at_least_threshold > 0: # TODO plot cutoff against mean seqs remaining and std.
+        if self.samples_at_least_threshold > 0: # TODO plot cutoff against mean seqs remaining and std.
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
-            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.parent.samples_at_least_threshold}
+            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.samples_at_least_threshold}
         dict_to_create_df_from = {}
         print(f'Creating {obj_to_return}')
         # NB there is one sample that only had one sequence in the consolidated_host_seqs_abund_dict
         # and this sample is causing errors. We will check for empty conolidated dict,
-        # add the sample to a list and then remove it from the self.samples list
+        # add the sample to a list and then remove it from the self.readset_list list
         samples_to_remove_list = []
-        for sample_name in self.samples:
+        for sample_name in self.readset_list:
             sys.stdout.write(f'\r{sample_name}')
             
-            sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
+            sample_qc_dir = os.path.join(self.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
             
             # remove most abundant sequences if this option is set
-            if self.parent.remove_maj_seq:
+            if self.remove_maj_seq:
                 most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(), 
                                         key=(lambda key: consolidated_host_seqs_abund_dict[key]))
                 # remove the most abund seq
                 del consolidated_host_seqs_abund_dict[most_abund_sequence]
             
             # if working with samples_at_least_threshold, screen out rare seqs here
-            if self.parent.samples_at_least_threshold > 0:
+            if self.samples_at_least_threshold > 0:
                 consolidated_host_seqs_abund_dict = {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
-            elif self.parent.most_abund_seq_cutoff > 0:
-                sorted_dict_keys = sorted(consolidated_host_seqs_abund_dict, key=consolidated_host_seqs_abund_dict.get, reverse=True)[:self.parent.most_abund_seq_cutoff]
+            elif self.most_abund_seq_cutoff > 0:
+                sorted_dict_keys = sorted(consolidated_host_seqs_abund_dict, key=consolidated_host_seqs_abund_dict.get, reverse=True)[:self.most_abund_seq_cutoff]
                 consolidated_host_seqs_abund_dict =  {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in sorted_dict_keys}
             
             # normalise the consolidated_host_seqs_abund_dict back to 1
@@ -306,16 +307,16 @@ class EighteenSDistance(EighteenSBase):
 
             # To prevent downstream problems we will insist on there always being at least
             # three sequences. Later we can put this to much higher to look at the effect
-            if len(consolidated_host_seqs_abund_dict.keys()) < self.parent.min_num_distinct_seqs_per_sample:
+            if len(consolidated_host_seqs_abund_dict.keys()) < self.min_num_distinct_seqs_per_sample:
                 samples_to_remove_list.append(sample_name)
                 continue
 
             # Here normalise acorrding to the given normalisation method
-            if self.parent.normalisation_method == 'rai':
+            if self.normalisation_method == 'rai':
                 # Relative abundance integer conversion
                 temp_sample_dict = {}
                 for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
-                    normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
+                    normalised_abund = int(rel_abund*self.normalisation_abundance)
                     if normalised_abund:
                         temp_sample_dict[sequence] = normalised_abund
             else:
@@ -327,20 +328,20 @@ class EighteenSDistance(EighteenSBase):
                 # This dict will have absolute abundances. These will be converted to relaive abundances
                 # outside of this script.
                 seqs, probs = zip(*consolidated_host_seqs_abund_dict.items())
-                seqs_list = np.random.choice(seqs, self.num_seqs_to_normalise_to, p=probs)
+                seqs_list = np.random.choice(seqs, self.normalisation_abundance, p=probs)
                 temp_sample_dict = dict(Counter(seqs_list))
 
             dict_to_create_df_from[sample_name] = temp_sample_dict
         
         for sample_name in samples_to_remove_list:
-            self.samples.remove(sample_name)
+            self.readset_list.remove(sample_name)
 
         # # It may also be very helpful to look at the distribution of the number of minor sequences
         # # a given sample has
         # hist_list = [len(sub_dict.keys()) for sub_dict in dict_to_create_df_from.values()]
         # print('making and writing histogram of sequence diversity')
         # plt.hist(hist_list, bins=30)
-        # plt.savefig(os.path.join(self.parent.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.category}_{self.dist_method}.png'))
+        # plt.savefig(os.path.join(self.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.category}_{self.dist_method}.png'))
         # plt.close()
 
         if obj_to_return == 'abund_dict':
@@ -361,24 +362,24 @@ class EighteenSDistance(EighteenSBase):
         """
         print('Creating sample occurence dictionary')
         print('Checking to see if cache available')
-        sample_list_hash = self._md5sum_from_python_object(self.samples)
-        pickle_path_to_find = os.path.join(self.parent.cache_dir, f'{sample_list_hash}_seq_to_sample_occurence_dict.p.bz')
+        sample_list_hash = self._md5sum_from_python_object(self.readset_list)
+        pickle_path_to_find = os.path.join(self.cache_dir, f'{sample_list_hash}_seq_to_sample_occurence_dict.p.bz')
         if os.path.isfile(pickle_path_to_find):
             print('Cache is available. Loading from cache.')
             seq_to_sample_occurence_dict = compress_pickle.load(pickle_path_to_find)
         else:
             print('Cache is not available. Generating from scratch.')
             seq_to_sample_occurence_dict = defaultdict(int)
-            for read_set in self.samples:
+            for read_set in self.readset_list:
                 sys.stdout.write('f\r{read_set}')
-                sample_qc_dir = os.path.join(self.parent.qc_dir, read_set)
+                sample_qc_dir = os.path.join(self.qc_dir, read_set)
                 consolidated_host_seqs_abund_dict = compress_pickle.load(
                     os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
                 for seq_name in consolidated_host_seqs_abund_dict.keys():
                     seq_to_sample_occurence_dict[seq_name] += 1
             print('Complete')
             # Now convert the absolute abundances to relative abudances for the given set of readsets
-            tot = len(self.samples)
+            tot = len(self.readset_list)
             seq_to_sample_occurence_dict = {k: v/tot for k, v in seq_to_sample_occurence_dict.items()}
             compress_pickle.dump(seq_to_sample_occurence_dict, pickle_path_to_find)
         return seq_to_sample_occurence_dict
@@ -388,23 +389,23 @@ class EighteenSDistance(EighteenSBase):
         Method that produces the abundance dictionary that will hold a set of sub dictionaries
         one for each readset we are concerned with.
         """
-        if self.parent.samples_at_least_threshold:
+        if self.samples_at_least_threshold:
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
-            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.parent.samples_at_least_threshold}
+            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.samples_at_least_threshold}
 
         abundance_dict = {}
         print('Creating abundance dict')
         
         samples_to_remove_list = []
-        for sample_name in self.samples:
+        for sample_name in self.readset_list:
             sys.stdout.write(f'\r{sample_name}')
             
             
-            sample_qc_dir = os.path.join(self.parent.qc_dir, sample_name)
+            sample_qc_dir = os.path.join(self.qc_dir, sample_name)
             consolidated_host_seqs_abund_dict = compress_pickle.load(
                 os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
 
-            if self.parent.remove_maj_seq:
+            if self.remove_maj_seq:
                 # We need to remove the most abundant sequence from the equation
                 most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
                                         key=(lambda key: consolidated_host_seqs_abund_dict[key]))
@@ -412,7 +413,7 @@ class EighteenSDistance(EighteenSBase):
                 del consolidated_host_seqs_abund_dict[most_abund_sequence]
             
             # renormalise
-            if self.parent.samples_at_least_threshold > 0:
+            if self.samples_at_least_threshold > 0:
                 # screen out those sequences that are not found in X or more samples
                 consolidated_host_seqs_abund_dict = {
                     k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
@@ -423,15 +424,15 @@ class EighteenSDistance(EighteenSBase):
 
             # To prevent downstream problems we will insist on there always being at least
             # three sequences. Later we can put this to much higher to look at the effect
-            if len(consolidated_host_seqs_abund_dict.keys()) < self.parent.min_num_distinct_seqs_per_sample:
+            if len(consolidated_host_seqs_abund_dict.keys()) < self.min_num_distinct_seqs_per_sample:
                 samples_to_remove_list.append(sample_name)
                 continue
 
-            if self.parent.normalisation_method == 'rai':
+            if self.normalisation_method == 'rai':
                 # Relative abundance integer conversion
                 temp_sample_dict = {}
                 for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
-                    normalised_abund = int(rel_abund*self.num_seqs_to_normalise_to)
+                    normalised_abund = int(rel_abund*self.normalisation_abundance)
                     if normalised_abund:
                         temp_sample_dict[sequence] = normalised_abund
             else:
@@ -443,13 +444,13 @@ class EighteenSDistance(EighteenSBase):
                 # This dict will have absolute abundances. These will be converted to relaive abundances
                 # outside of this script.
                 seqs, probs = zip(*consolidated_host_seqs_abund_dict.items())
-                seqs_list = np.random.choice(seqs, self.num_seqs_to_normalise_to, p=probs)
+                seqs_list = np.random.choice(seqs, self.normalisation_abundance, p=probs)
                 temp_sample_dict = dict(Counter(seqs_list))
             
             abundance_dict[sample_name] = temp_sample_dict
         
         for sample_name in samples_to_remove_list:
-            self.samples.remove(sample_name)
+            self.readset_list.remove(sample_name)
 
         # It may also be very helpful to look at the distribution of the number of minor sequences
         # a given sample has
@@ -457,7 +458,7 @@ class EighteenSDistance(EighteenSBase):
         # print('making and writing histogram of sequence diversity')
         # plt.hist(hist_list, bins=30)
         # plt.savefig(
-        #     os.path.join(self.parent.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.genus}_{self.dist_method}.png'))
+        #     os.path.join(self.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.genus}_{self.dist_method}.png'))
         # plt.close()
 
         return abundance_dict
@@ -480,16 +481,21 @@ class EighteenSDistance(EighteenSBase):
 
     def _compare_to_snp(self):
         # The dist matrix is written out here
-        df_18S = pd.read_csv(self.dist_out_path, index_col=0)
+        with open(self.dist_out_path, 'r') as f:
+            dat = [line.rstrip().split(',') for line in f]
+        index = [_[0] for _ in dat]
+        dat = [_[1:] for _ in dat]
+        
+        df_18S = pd.DataFrame(dat, index=index, columns=index).astype(float)
         # The SNP and the 18S matrices must contain the same indices and be in the same order.
         # Need to take into account that the indices for the 18S df are readset names.
         # Also need to take into account that replicates may have been used.
         
-        # First get rid of any items (rows and corresponding columns that are tech replicates)
+        # First get rid of any items (rows and corresponding columns that are non-representative tech reps)
         # To do this, work through the present readsets and identify those that are not representative
         drop_list = []
         for ind in df_18S.index:
-            if self.parent.fastq_info_df.at[ind, 'is_replicate']:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
                 drop_list.append(ind)
         
         # Now drop the rows and columns
@@ -498,26 +504,40 @@ class EighteenSDistance(EighteenSBase):
         # Now we need to convert these to sample-id format.
         sample_id_list = []
         for ind in df_18S.index:
-            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
         
         # These should be unique
         assert(len(sample_id_list) == len(set(sample_id_list)))
         df_18S.index = sample_id_list
+        df_18S.columns = sample_id_list
 
-        # Now get rid of the samples not in the corresponding 
-        drop_list = [_ for _ in df_18S.index if _ not in self.parent.snp_dist_df_dict[self.genus].index.values.tolist()]
+        # Now get rid of the samples not in the corresponding snp dist matrix
+        drop_list = [_ for _ in df_18S.index if _ not in self.snp_df.index]
         df_18S.drop(index=drop_list, columns=drop_list, inplace=True)
 
         # Finally, reindex so that the dist info is in the same order
-        assert(len(df_18S.index) == len(self.parent.snp_dist_df_dict[self.genus].index))
-        df_18S = df_18S.reindex(index=self.parent.snp_dist_df_dict[self.genus].index, columns=self.parent.snp_dist_df_dict[self.genus].index)
+        # It appears that there are a not insignficant number of samples missing from the 18S set that are
+        # in the SNP set.
+        missing_samples = [_ for _ in self.snp_df.index if _ not in df_18S]
+        print(f'There are {len(missing_samples)} samples missing from the 18S dataset that are present in the SNP dataset:')
+        for _ in missing_samples:
+            print(f'\t{_};')
+        print('These samples will be removed from the snp dataframe')
+
+        # drop the samples that do not have 18S data associated with them in the snp dataframe.
+        self.snp_df.drop(index=missing_samples, columns=missing_samples, inplace=True)
+
+        assert(len(df_18S.index) == len(self.snp_df.index))
+        df_18S = df_18S.reindex(index=self.snp_df.index, columns=self.snp_df.index)
 
         # At this point the dfs should be ready to compare.
-        cor_coef, p_val = mantel(df_18S, self.parent.snp_dist_df_dict[self.genus])
-        foo = 'bar'
-
+        print('Running mantel test')
+        cor_coef, p_val, n = mantel(df_18S, self.snp_df, strict=True)
+        print('Mantel complete:')
+        print(f'\tCorellation coefficient: {cor_coef}')
+        print(f'\tp-value: {p_val}')
         # Now we can write out the results
-        result_path = os.path.join(self.parent.output_dir_18s, f'{self.uniue_hash}_mantel_result.txt')
+        result_path = os.path.join(self.output_dir_18s, f'{self.unique_string}_mantel_result.txt')
         with open(result_path, 'w') as f:
             f.write(f'{cor_coef}\t{p_val}')
         
@@ -567,14 +587,14 @@ class EighteenSDistance(EighteenSBase):
         # from this dict we can produce the distance file that can be passed into the generate_PCoA_coords method
         distance_out_file = []
         print('Making braycurtis distance file')
-        for sample_outer in self.samples:
+        for sample_outer in self.readset_list:
             sys.stdout.write(f'\r{sample_outer}')
             # The list that will hold the line of distance. This line starts with the name of the sample
             temp_sample_dist_string = [sample_outer]
             temp_dist_list = [
                 self.braycurtis_btwn_sample_distance_dictionary[frozenset([sample_outer, sample_inner])] if
                 sample_outer != sample_inner else
-                0 for sample_inner in self.samples
+                0 for sample_inner in self.readset_list
             ]
             temp_sample_dist_string.extend(temp_dist_list)
 
@@ -595,9 +615,9 @@ class EighteenSDistance(EighteenSBase):
         distance_dict = {}
         # For pairwise comparison of each of these sequences
         print('\nComputing braycurtis distance dictionary\n')
-        tot = len([_ for _ in itertools.combinations(self.samples, 2)])
+        tot = len([_ for _ in itertools.combinations(self.readset_list, 2)])
         count = 0
-        for smp_one, smp_two in itertools.combinations(self.samples, 2):
+        for smp_one, smp_two in itertools.combinations(self.readset_list, 2):
             count += 1
             sys.stdout.write(f'\r{count} out of {tot}: {smp_one}_{smp_two}')
 
@@ -632,7 +652,7 @@ class EighteenSDistance(EighteenSBase):
         # Create a dictionary that will hold the distance between the two samples
         spp_distance_dict = {}
         # For pairwise comparison of each of these sequences
-        for smp_one, smp_two in itertools.combinations(self.samples, 2):
+        for smp_one, smp_two in itertools.combinations(self.readset_list, 2):
             print('Calculating distance for {}_{}'.format(smp_one, smp_two))
             # df containing only the sequences found in either smp_one or smp_two
             sub_df = self.abundance_df.loc[[smp_one, smp_two]]
@@ -659,7 +679,7 @@ class EighteenSDistance(EighteenSBase):
 
     def _clean_temp_dir(self):
         shutil.rmtree(self.temp_dir)
-        os.makedirs(self.temp_dir, exist_ok=True)
+        
 
     def _check_if_pcoa_already_computed(self):
         if os.path.isfile(self.pcoa_out_path):
@@ -700,7 +720,7 @@ class EighteenSDistance(EighteenSBase):
                 for line in seq_fasta_list:
                     f.write(f'{line}\n')
             
-            self._mafft_align_fasta(input_path=self.unaligned_fasta_path, output_path=self.aligned_fasta_path, method='auto', num_proc=self.parent.mafft_num_proc)
+            self._mafft_align_fasta(input_path=self.unaligned_fasta_path, output_path=self.aligned_fasta_path, method='auto', num_proc=self.mafft_num_proc)
 
             # read in the aligned fasta
             with open(self.aligned_fasta_path, 'r') as f:
@@ -725,9 +745,9 @@ class EighteenSDistance(EighteenSBase):
         # Fist get the md5sum of the aligned fasta
         # https://stackoverflow.com/questions/7829499/using-hashlib-to-compute-md5-digest-of-a-file-in-python-3
         hash_of_aligned_fasta = self._md5sum(self.aligned_fasta_path)
-        if os.path.isfile(os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile')):
+        if os.path.isfile(os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile')):
             # Then we have already computed the tree and we can use this tree
-            self.tree_path = os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile')
+            self.tree_path = os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile')
             self.rooted_tree = TreeNode.read(self.tree_path)
         else:
             # Then we need to do the tree from scratch
@@ -739,8 +759,8 @@ class EighteenSDistance(EighteenSBase):
             self.rooted_tree = tree.root_at_midpoint()
             self.rooted_tree.write(self.tree_path)
             # And then rename the tree so that it is the md5sum of the aligned fasta
-            os.rename(self.tree_path, os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile'))
-            self.tree_path = os.path.join(self.parent.cache_dir, f'{hash_of_aligned_fasta}.treefile')
+            os.rename(self.tree_path, os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile'))
+            self.tree_path = os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile')
 
     def _md5sum_from_python_object(self, p_obj):
         """ 
@@ -784,8 +804,8 @@ class EighteenSDistance(EighteenSBase):
         pcoa_output = pcoa(self.wu.data)
         self._rescale_pcoa(pcoa_output)
 
-        # NB We were originally assigning samples as self.samples
-        # This was wrong and was causing a bad bug. The order of self.samples
+        # NB We were originally assigning samples as self.readset_list
+        # This was wrong and was causing a bad bug. The order of self.readset_list
         # is not the same order as the order used in the PCoA index.
         # Rather we need to use the index used in any one of the dataframes we created
         pcoa_output.samples['sample'] = self.wu_df.index.values.tolist()
@@ -1204,6 +1224,9 @@ if __name__ == "__main__":
 
     
     dist = EighteenSDistance(
-        host_genus='Pocillopora', remove_majority_sequence=True, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  most_abund_seq_cutoff=4, mafft_num_proc=100)
+        host_genus='Porites', remove_majority_sequence=True, 
+        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  
+        most_abund_seq_cutoff=15, mafft_num_proc=100, dist_method_18S='unifrac'
+        )
 
     dist.make_and_plot_dist_and_pcoa()
