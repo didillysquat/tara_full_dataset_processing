@@ -113,6 +113,7 @@ class EighteenSDistance(EighteenSBase):
         f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
         self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
+        self.result_path = os.path.join(self.output_dir_18s, f'{self.unique_string}_mantel_result.txt')
         self.temp_dir = os.path.join(os.path.dirname(self.qc_dir), f'{self.unique_string}_temp')
         os.makedirs(self.temp_dir, exist_ok=True)
         self.dist_out_path = os.path.join(
@@ -380,16 +381,19 @@ class EighteenSDistance(EighteenSBase):
         call one of the  methods responsible for making a dist matrix either BC or UF
         then run a mantel test and write out the results
         """
-        if self.dist_method_18S == 'unifrac':
-            self._do_unifrac_analysis()
+        if os.path.isfile(self.result_path):
+            print('Results already computed. Skipping.')
         else:
-            self._do_braycurtis_analysis()
-        # At this point we should be able to grab the distmatrix object
-        # and compare it to the snp-based dist matrices and produce the persons correlation
-        # value and the permutation results.
-        # These will need to be written out somewhere using
-        # the unique string as the name
-        self._compare_to_snp()
+            if self.dist_method_18S == 'unifrac':
+                self._do_unifrac_analysis()
+            else:
+                self._do_braycurtis_analysis()
+            # At this point we should be able to grab the distmatrix object
+            # and compare it to the snp-based dist matrices and produce the persons correlation
+            # value and the permutation results.
+            # These will need to be written out somewhere using
+            # the unique string as the name
+            self._compare_to_snp()
 
     def _compare_to_snp(self):
         # The dist matrix is written out here
@@ -449,8 +453,8 @@ class EighteenSDistance(EighteenSBase):
         print(f'\tCorellation coefficient: {cor_coef}')
         print(f'\tp-value: {p_val}')
         # Now we can write out the results
-        result_path = os.path.join(self.output_dir_18s, f'{self.unique_string}_mantel_result.txt')
-        with open(result_path, 'w') as f:
+        
+        with open(self.result_path, 'w') as f:
             f.write(f'{cor_coef}\t{p_val}')
         
         # Now we are done.
@@ -1147,7 +1151,8 @@ if __name__ == "__main__":
                 most_abund_seq_cutoff=most_abund_seq_cutoff, mafft_num_proc=10, 
                 dist_method_18S=dist_method_18S, only_snp_samples=only_snp_samples
                 ).make_and_plot_dist_and_pcoa()
-            out_q.put('DONE')
+            out_q.put('ONE_DONE')
+        out_q.put('All_DONE')
 
     # TODO we should likely identify roughly which parameters we whould be working with and then fine tune from there
     num_proc = 100
@@ -1162,12 +1167,12 @@ if __name__ == "__main__":
                     in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
                     tot += 1
                 if host_genus == 'Porites':
-                    for most_abund_seq_cutoff in list(range(0,30,1)) + list(range(30, 450, 10)):
+                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
                         samples_at_least_threshold = 0
                         in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
                         tot += 1
                 elif host_genus == 'Pocillopora':
-                    for most_abund_seq_cutoff in list(range(0,30,1)) + list(range(30, 590, 10)):
+                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
                         samples_at_least_threshold = 0
                         in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
                         tot += 1
@@ -1184,9 +1189,10 @@ if __name__ == "__main__":
     prog_count = 0
     while done_count < num_proc:
         item = out_q.get()
-        if item == 'DONE':
+        if item == 'ALL_DONE':
             done_count += 1
         else:
+            # ONE_DONE
             prog_count += 1
             print(f'{prog_count}/{tot} dist analyses complete')
 
