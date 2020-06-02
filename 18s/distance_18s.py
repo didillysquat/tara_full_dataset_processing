@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from base_18s import EighteenSBase
 import os
 import compress_pickle
@@ -21,6 +22,7 @@ import matplotlib.gridspec as gridspec
 from collections import defaultdict, Counter
 import re
 import json
+from multiprocessing import Queue, Process
 
 class EighteenSDistance(EighteenSBase):
     """
@@ -204,23 +206,6 @@ class EighteenSDistance(EighteenSBase):
                 parent=self, color_by=color_by, plot_unifrac=True
             )
             dist_plotter.plot()
-
-    def _identify_most_abund_coral_genus(self, rel_all_seq_abundance_dict, coral_annotation_dict):
-        for sorted_tup in sorted(
-            [(seq_name, rel_abund) for seq_name, rel_abund in rel_all_seq_abundance_dict.items()], 
-            key=lambda x: x[1], 
-            reverse=True
-            ):
-                try:
-                    genus = coral_annotation_dict[sorted_tup[0]]
-                    if genus == 'Porites':
-                        return 'Porites'
-                    elif genus == 'Pocillopora':
-                        return 'Pocillopora'
-                    elif genus == 'Millepora':
-                        return 'Millepora'
-                except KeyError:
-                    continue
     
     def make_and_plot_dist_and_pcoa(self):
         # Call the class that will be responsible for calculating the distances
@@ -252,6 +237,7 @@ class EighteenSDistance(EighteenSBase):
         if self.exclude_secondary_seq_samples:
             
             df = df[df['is_different_primary_sequence'] == False]
+        
         # Then by only_snp_samples
         if self.only_snp_samples:
             df = df[df['sample-id'].isin(self.snp_sample_list)]
@@ -263,7 +249,7 @@ class EighteenSDistance(EighteenSBase):
         return list(df.index)
 
 
-    def _create_abundance_df(self, obj_to_return):
+    def _create_abundance_obj(self, obj_to_return):
         """For each sample in self.samples, load up the consolidated_host_seqs_abund_dict
         and create a dict that is sequence to normalised abundance. Then add this dictionary
         to a master dictionary where sample_name is key. Then finally create a df from this
@@ -271,6 +257,9 @@ class EighteenSDistance(EighteenSBase):
         
         If obj_to_return=='abund_dict', we will return the master dictionary
         else obj_to_return=='abund_df', we will return a df made from the dict
+
+        Because we may want to do some analyses to investigate what effect the various cutoffs
+        and normalisation methods had on the abundances, we will pickle out the created dictionaries.
         """
         if self.samples_at_least_threshold > 0: # TODO plot cutoff against mean seqs remaining and std.
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
@@ -344,6 +333,8 @@ class EighteenSDistance(EighteenSBase):
         # plt.savefig(os.path.join(self.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.category}_{self.dist_method}.png'))
         # plt.close()
 
+        abundance_dict_path = os.path.join(os.path.join(self.cache_dir, f'{self.unique_string}_abundance_dict.p.bz'))
+        compress_pickle.dump(dict_to_create_df_from, abundance_dict_path)
         if obj_to_return == 'abund_dict':
             return dict_to_create_df_from
         else:
@@ -383,85 +374,6 @@ class EighteenSDistance(EighteenSBase):
             seq_to_sample_occurence_dict = {k: v/tot for k, v in seq_to_sample_occurence_dict.items()}
             compress_pickle.dump(seq_to_sample_occurence_dict, pickle_path_to_find)
         return seq_to_sample_occurence_dict
-
-    def _create_abundance_dicts(self):
-        """
-        Method that produces the abundance dictionary that will hold a set of sub dictionaries
-        one for each readset we are concerned with.
-        """
-        if self.samples_at_least_threshold:
-            seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
-            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.samples_at_least_threshold}
-
-        abundance_dict = {}
-        print('Creating abundance dict')
-        
-        samples_to_remove_list = []
-        for sample_name in self.readset_list:
-            sys.stdout.write(f'\r{sample_name}')
-            
-            
-            sample_qc_dir = os.path.join(self.qc_dir, sample_name)
-            consolidated_host_seqs_abund_dict = compress_pickle.load(
-                os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
-
-            if self.remove_maj_seq:
-                # We need to remove the most abundant sequence from the equation
-                most_abund_sequence = max(consolidated_host_seqs_abund_dict.keys(),
-                                        key=(lambda key: consolidated_host_seqs_abund_dict[key]))
-                # remove the most abund seq
-                del consolidated_host_seqs_abund_dict[most_abund_sequence]
-            
-            # renormalise
-            if self.samples_at_least_threshold > 0:
-                # screen out those sequences that are not found in X or more samples
-                consolidated_host_seqs_abund_dict = {
-                    k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
-            
-            # normalise the consolidated_host_seqs_abund_dict back to 1
-            tot = sum(consolidated_host_seqs_abund_dict.values())
-            consolidated_host_seqs_abund_dict = {k: v / tot for k, v in consolidated_host_seqs_abund_dict.items()}
-
-            # To prevent downstream problems we will insist on there always being at least
-            # three sequences. Later we can put this to much higher to look at the effect
-            if len(consolidated_host_seqs_abund_dict.keys()) < self.min_num_distinct_seqs_per_sample:
-                samples_to_remove_list.append(sample_name)
-                continue
-
-            if self.normalisation_method == 'rai':
-                # Relative abundance integer conversion
-                temp_sample_dict = {}
-                for sequence, rel_abund in consolidated_host_seqs_abund_dict.items():
-                    normalised_abund = int(rel_abund*self.normalisation_abundance)
-                    if normalised_abund:
-                        temp_sample_dict[sequence] = normalised_abund
-            else:
-                # pwr
-                # pick without replacement.
-                # If subsample, we will produce a list using np.random.choice
-                # https://docs.scipy.org/doc/numpy-1.16.0/reference/generated/numpy.random.choice.html
-                # We will then convert this to a dict using counter
-                # This dict will have absolute abundances. These will be converted to relaive abundances
-                # outside of this script.
-                seqs, probs = zip(*consolidated_host_seqs_abund_dict.items())
-                seqs_list = np.random.choice(seqs, self.normalisation_abundance, p=probs)
-                temp_sample_dict = dict(Counter(seqs_list))
-            
-            abundance_dict[sample_name] = temp_sample_dict
-        
-        for sample_name in samples_to_remove_list:
-            self.readset_list.remove(sample_name)
-
-        # It may also be very helpful to look at the distribution of the number of minor sequences
-        # a given sample has
-        # hist_list = [len(sub_dict.keys()) for sub_dict in abundance_dict.values()]
-        # print('making and writing histogram of sequence diversity')
-        # plt.hist(hist_list, bins=30)
-        # plt.savefig(
-        #     os.path.join(self.output_dir_18s, f'seq_diversity_hist_3_cutoff_{self.genus}_{self.dist_method}.png'))
-        # plt.close()
-
-        return abundance_dict
 
     def _compute_and_test_dist_matrix(self):
         """
@@ -532,7 +444,7 @@ class EighteenSDistance(EighteenSBase):
 
         # At this point the dfs should be ready to compare.
         print('Running mantel test')
-        cor_coef, p_val, n = mantel(df_18S, self.snp_df, strict=True)
+        cor_coef, p_val, n = mantel(df_18S, self.snp_df, strict=True, permutations=100000)
         print('Mantel complete:')
         print(f'\tCorellation coefficient: {cor_coef}')
         print(f'\tp-value: {p_val}')
@@ -553,7 +465,7 @@ class EighteenSDistance(EighteenSBase):
         # abundance of that sequence normalised to a given number of seuences that depend
         # on the distance calculation method. For braycurtis, this is currently set to 10000
         # or UniFrac this is currently set to 1000.
-        self.abundance_dict = self._create_abundance_df(obj_to_return='abund_dict')
+        self.abundance_dict = self._create_abundance_obj(obj_to_return='abund_dict')
         self.braycurtis_btwn_sample_distance_dictionary = self._compute_braycurtis_distance_dict()
         self.braycurtis_btwn_sample_distance_file = self._make_and_write_braycurtis_distance_file()
         self.pcoa_df = self._make_pcoa_df_braycurtis()
@@ -670,7 +582,7 @@ class EighteenSDistance(EighteenSBase):
     def _do_unifrac_analysis(self):
         if self._check_if_pcoa_already_computed():
             return
-        self.abundance_df = self._create_abundance_df(obj_to_return='abund_df')
+        self.abundance_df = self._create_abundance_obj(obj_to_return='abund_df')
         self._create_tree()
         self._compute_weighted_unifrac()
         self._write_out_unifrac_dist_file()
@@ -752,7 +664,7 @@ class EighteenSDistance(EighteenSBase):
         else:
             # Then we need to do the tree from scratch
             subprocess.run(
-                ['iqtree', '-T', 'AUTO', '--threads-max', '2', '-s', f'{self.aligned_fasta_path}', '-redo', '-mredo'])
+                ['iqtree', '-T', 'AUTO', '--threads-max', '2', '-s', f'{self.aligned_fasta_path}', '-redo', '-mredo'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             print('Tree creation complete')
             print('Rooting the tree at midpoint')
             tree = TreeNode.read(self.tree_path)
@@ -1146,6 +1058,7 @@ def remove_axes_but_allow_labels(ax):
     ax.set_yticks([])
     ax.set_xticks([])
 
+
 if __name__ == "__main__":
     """
     samples_at_least_threshold = The minimum number of samples (as a realtive abundance of the total
@@ -1186,7 +1099,9 @@ if __name__ == "__main__":
     most_abund_seq_cutoff = If this is 0. It will effectively be turned off. If this  is any other value, then
     a cutoff will be applied so that only the i most abundant sequences in a given sample will be considered. This
     value must be greaer than the min_num_distinct_seqs_per_sample else an error will be thrown. If a non-zero
-    value is provided to this argument. It will override the samples_at_lesast_threshold. [0]
+    value is provided to this argument. It will override the samples_at_lesast_threshold. [0]. #NB 456, 592 are the
+    maximum number of distinct sequences in the consolidated dictionaries for Porites and Pocillopora respectively
+    so it doesn't make sense to set this any higher than that.
 
     TODO refactor out host genus and then refactor in the indi dist method as the granularity will be transferred
     to the main EighteenSDistance class
@@ -1212,21 +1127,78 @@ if __name__ == "__main__":
     snp_distance_type = categorical
     dist_method_18S = categorical
     only_snp_samples = Bool
-    normalisation_method = categorical
-    normalisation_abundance = int
+    normalisation_method = categorical # Can test for just one perhaps to see which to work with
+    normalisation_abundance = int # Again, can test for just one after initial run
     samples_at_least_threshold = 0 >= float <=1
     most_abund_seq_cutoff = int
-    min_num_distinct_seqs_per_sample = int
+    min_num_distinct_seqs_per_sample = int # Can test for just one after intial run
 
     We will create a string that uniquely identified the parameters that we are using to compute and test
-    We will build this from within for loops. 
+    We will build this from within for loops.
+  
     """
 
-    
-    dist = EighteenSDistance(
-        host_genus='Porites', remove_majority_sequence=True, 
-        exclude_secondary_seq_samples=True, samples_at_least_threshold=0.5,  
-        most_abund_seq_cutoff=15, mafft_num_proc=100, dist_method_18S='unifrac'
-        )
+    def execute_dist(in_q, out_q):
+        for dist_args in iter(in_q.get, 'STOP'):
+            host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples = dist_args
+            EighteenSDistance(
+                host_genus=host_genus, remove_majority_sequence=True, 
+                exclude_secondary_seq_samples=True, samples_at_least_threshold=samples_at_least_threshold,  
+                most_abund_seq_cutoff=most_abund_seq_cutoff, mafft_num_proc=10, 
+                dist_method_18S=dist_method_18S, only_snp_samples=only_snp_samples
+                ).make_and_plot_dist_and_pcoa()
+            out_q.put('DONE')
 
-    dist.make_and_plot_dist_and_pcoa()
+    # TODO we should likely identify roughly which parameters we whould be working with and then fine tune from there
+    num_proc = 100
+    in_q = Queue()
+    out_q = Queue()
+    tot = 0
+    for host_genus in ['Porites', 'Pocillopora']:
+        for dist_method_18S in ['unifrac', 'braycurtis']:
+            for only_snp_samples in [True, False]:
+                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                    most_abund_seq_cutoff = 0
+                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
+                    tot += 1
+                if host_genus == 'Porites':
+                    for most_abund_seq_cutoff in list(range(0,30,1)) + list(range(30, 450, 10)):
+                        samples_at_least_threshold = 0
+                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
+                        tot += 1
+                elif host_genus == 'Pocillopora':
+                    for most_abund_seq_cutoff in list(range(0,30,1)) + list(range(30, 590, 10)):
+                        samples_at_least_threshold = 0
+                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
+                        tot += 1
+    # Here we have the in_q loaded
+    for n in range(num_proc):
+        in_q.put('STOP')
+    all_processes = []
+    for p in range(num_proc):
+        p = Process(target=execute_dist, args=(in_q, out_q))
+        all_processes.append(p)
+        p.start()
+    
+    done_count = 0
+    prog_count = 0
+    while done_count < num_proc:
+        item = out_q.get()
+        if item == 'DONE':
+            done_count += 1
+        else:
+            prog_count += 1
+            print(f'{prog_count}/{tot} dist analyses complete')
+
+    for p in all_processes:
+        p.join()
+
+    print('All dist analyses complete')
+    
+    # dist = EighteenSDistance(
+    #     host_genus='Pocillopora', remove_majority_sequence=True, 
+    #     exclude_secondary_seq_samples=True, samples_at_least_threshold=0,  
+    #     most_abund_seq_cutoff=200, mafft_num_proc=10, dist_method_18S='braycurtis', only_snp_samples=True
+    #     ).make_and_plot_dist_and_pcoa()
+
+    # dist.make_and_plot_dist_and_pcoa()
