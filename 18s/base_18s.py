@@ -12,11 +12,12 @@ class EighteenSBase:
     def __init__(self):
         self.root_dir = '/home/humebc/projects/tara/tara_full_dataset_processing'
         self.eighteens_dir = os.path.join(self.root_dir, '18s')
+        self.output_dir_18s = os.path.join(self.eighteens_dir, 'output')
         self.input_dir = os.path.join(self.root_dir, 'input')
         # Directory where the fastq.gz 18s files are
         self.seq_dir = os.path.join(self.eighteens_dir, '18s_data')
         self.output_dir = os.path.join(self.root_dir, 'output')
-        self.output_dir_18s = os.path.join(self.eighteens_dir, 'output')
+        
         self.input_dir_18s = os.path.join(self.eighteens_dir, 'input')
         os.makedirs(self.output_dir, exist_ok=True)
         self.fig_output_dir = os.path.join(self.root_dir, 'figures')
@@ -26,6 +27,7 @@ class EighteenSBase:
         self.qc_dir = os.path.join(self.eighteens_dir, 'seq_qc')
         os.makedirs(self.qc_dir, exist_ok=True)
         self.cache_dir = os.path.join(self.root_dir, 'cache')
+        self.cache_dir_18s = os.path.join(self.eighteens_dir, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
         # This is the file that should be used if possible to get meta
         # data for samples

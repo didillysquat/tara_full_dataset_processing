@@ -23,12 +23,14 @@ from collections import defaultdict, Counter
 import re
 import json
 from multiprocessing import Queue, Process
+from exceptions_18s import BadTreeError
 
 class EighteenSDistance(EighteenSBase):
     """
     This script can only be run once we have made the meta_info_table from output_tables.py
     Class concerned with the calculation and presentation of the between sample
     distances calculated based on the low level sequence diversity found within each of the samples.
+    These distances will later be used to create categorical assignements as well.
     We will work with UniFrac and BrayCurtis versions of all of the distances we calculate.
     Eventually we will want to be comparing these distances to the clusters that Didier is going
     to produce. However, for the time being we will just look to see if we can find any natural clustering patterns.
@@ -51,20 +53,18 @@ class EighteenSDistance(EighteenSBase):
         self, host_genus, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis',
         remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0, exclude_no_use_samples=True):
-        super().__init__()
-        self.genus = host_genus
-        # Use the meta_info_table produced by output_tables.py
-        self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
-        self.meta_info_df = self._get_meta_info_df()
-        # Dict where genus if key and primary seq (nucleotide seq) is value.
-        self.primary_seq_dict = self._make_primary_seq_dict()
-        # Here we can make use of the meta_info_table that we created in output_tables.py
+        
+        self.dist_method_18S = dist_method_18S
+        self.remove_maj_seq = remove_majority_sequence
         self.exclude_secondary_seq_samples = exclude_secondary_seq_samples
         self.only_snp_samples = only_snp_samples
         self.use_replicates = use_replicates
         self.exclude_no_use_samples = exclude_no_use_samples
         self.samples_at_least_threshold = samples_at_least_threshold
         self.most_abund_seq_cutoff = most_abund_seq_cutoff
+        self.normalisation_method = normalisation_method
+        self.approach = approach
+        self.genus = host_genus
         if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
             print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
             print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
@@ -80,15 +80,6 @@ class EighteenSDistance(EighteenSBase):
             assert(0 <= self.samples_at_least_threshold <= 1)
         except AssertionError:
             raise AssertionError('samples_at_least_threshold must be between 0 and 1')
-        if snp_distance_type == 'biallelic':
-            self.snp_df, self.snp_sample_list = self._generate_biallelic_snp_df_and_sample_list()
-        else:
-            raise NotImplementedError
-        # A dict of genus to the list of representative readsets to include
-        self.readset_list = self._generate_readset_list()
-        self.dist_method_18S = dist_method_18S
-        self.remove_maj_seq = remove_majority_sequence
-        self.mafft_num_proc = mafft_num_proc
         if normalisation_abundance is not None:
             self.normalisation_abundance = normalisation_abundance
         else:
@@ -100,34 +91,56 @@ class EighteenSDistance(EighteenSBase):
                 self.abundance_df = None
             else:
                 raise RuntimeError(f'dist_method_18S must be either braycurtis or unifrac. {self.dist_method_18S} given.')
-        self.normalisation_method = normalisation_method
-        self.approach = approach
-
         # The unique string and hash of that string that will be used for writing items out
         # This way we will always have a unique name for streams (for multithreading later)
         # and we will be able to readback in results predictably.
-        self.unique_string = f'{self.remove_maj_seq}_{self.exclude_secondary_seq_samples}_' \
+        self.unique_string = f'{self.genus}_{self.remove_maj_seq}_{self.exclude_secondary_seq_samples}_' \
         f'{self.exclude_no_use_samples}_{self.use_replicates}_' \
         f'{snp_distance_type}_{self.dist_method_18S}_' \
         f'{self.approach}_{self.normalisation_abundance}_{self.normalisation_method}_' \
         f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
         self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
-        self.result_path = os.path.join(self.output_dir_18s, f'{self.unique_string}_mantel_result.txt')
-        self.temp_dir = os.path.join(os.path.dirname(self.qc_dir), f'{self.unique_string}_temp')
+        
+        self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
+        if os.path.isfile(self.result_path):
+            self.skip = True
+            return
+        else:
+            self.skip = False
+        super().__init__()
+        
+        # Use the meta_info_table produced by output_tables.py
+        self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
+        self.meta_info_df = self._get_meta_info_df()
+        # Dict where genus if key and primary seq (nucleotide seq) is value.
+        self.primary_seq_dict = self._make_primary_seq_dict()
+        # Here we can make use of the meta_info_table that we created in output_tables.py
+        
+        if snp_distance_type == 'biallelic':
+            self.snp_df, self.snp_sample_list = self._generate_biallelic_snp_df_and_sample_list()
+        else:
+            raise NotImplementedError
+        self.readset_list = self._generate_readset_list()
+        
+        self.mafft_num_proc = mafft_num_proc
+        
+        self.temp_dir = os.path.join(os.path.dirname(self.qc_dir), 'temp', f'{self.unique_string}_temp')
         os.makedirs(self.temp_dir, exist_ok=True)
         self.dist_out_path = os.path.join(
             self.output_dir_18s,
             f'{self.unique_string}.dist')
         self.pcoa_out_path = os.path.join(
             self.output_dir_18s,
-            f'{self.unique_string}_pcoa.csv')
+            f'{self.unique_string}_pcoa.csv.gz')
         self.pcoa_df = None
         
         # Variables concerned with unifrac
         self.unaligned_fasta_path = os.path.join(self.temp_dir, 'unaligned_fasta.fasta')
         self.aligned_fasta_path = os.path.join(self.temp_dir, 'aligned_fasta.fasta')
         self.tree_path = self.aligned_fasta_path + '.treefile'
+        self.tree_cache_dir = os.path.join(self.cache_dir_18s, 'trees')
+        os.makedirs(self.tree_cache_dir, exist_ok=True)
         self.wu = None
 
         # Variables concerned with braycurtis
@@ -209,11 +222,15 @@ class EighteenSDistance(EighteenSBase):
             dist_plotter.plot()
     
     def make_and_plot_dist_and_pcoa(self):
+        if self.skip:
+            print('skipping')
+            return
         # Call the class that will be responsible for calculating the distances
         # Calculating the PCoA and then plotting
         # TODO we are here on the refactoring debug.
         self._compute_and_test_dist_matrix()
         # self.plot_computed_distances()
+
 
     def _generate_readset_list(self):
         """
@@ -394,13 +411,16 @@ class EighteenSDistance(EighteenSBase):
             # These will need to be written out somewhere using
             # the unique string as the name
             self._compare_to_snp()
+            shutil.rmtree(self.temp_dir)
 
     def _compare_to_snp(self):
         # The dist matrix is written out here
+        subprocess.run(['gzip', '-d', f'{self.dist_out_path}.gz'])
         with open(self.dist_out_path, 'r') as f:
             dat = [line.rstrip().split(',') for line in f]
         index = [_[0] for _ in dat]
         dat = [_[1:] for _ in dat]
+        subprocess.run(['gzip', self.dist_out_path])
         
         df_18S = pd.DataFrame(dat, index=index, columns=index).astype(float)
         # The SNP and the 18S matrices must contain the same indices and be in the same order.
@@ -473,7 +493,7 @@ class EighteenSDistance(EighteenSBase):
         self.braycurtis_btwn_sample_distance_dictionary = self._compute_braycurtis_distance_dict()
         self.braycurtis_btwn_sample_distance_file = self._make_and_write_braycurtis_distance_file()
         self.pcoa_df = self._make_pcoa_df_braycurtis()
-        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True)
+        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
     def _make_pcoa_df_braycurtis(self):
         # simultaneously grab the sample names in the order of the distance matrix and put the matrix into
@@ -520,6 +540,8 @@ class EighteenSDistance(EighteenSBase):
         with open(self.dist_out_path, 'w') as f:
             for line in distance_out_file:
                 f.write(f'{line}\n')
+        print('Compressing')
+        subprocess.run(['gzip', self.dist_out_path])
         print('complete')
         return distance_out_file
 
@@ -591,11 +613,6 @@ class EighteenSDistance(EighteenSBase):
         self._compute_weighted_unifrac()
         self._write_out_unifrac_dist_file()
         self._make_pcoa_df_unifrac()
-        self._clean_temp_dir()
-
-    def _clean_temp_dir(self):
-        shutil.rmtree(self.temp_dir)
-        
 
     def _check_if_pcoa_already_computed(self):
         if os.path.isfile(self.pcoa_out_path):
@@ -606,8 +623,6 @@ class EighteenSDistance(EighteenSBase):
         """Unifrac requires a tree."""
         # Create a fasta file that has the hashed sequence as the sequence names
         hash_cols, fasta_as_list = self._make_fasta_and_hash_names()
-        # Set the df column names to the hashes
-        self._set_df_cols_to_hashes(hash_cols)
         # Align the fasta
         self._align_seqs(fasta_as_list)
         # Make and root the tree
@@ -615,20 +630,35 @@ class EighteenSDistance(EighteenSBase):
 
     def _make_fasta_and_hash_names(self):
             # here we have a set of all of the sequences
-            seq_fasta_list = []
+            seq_fasta_tup_list = []
             # we will change the df columns so that they match the seq names in the tree
             columns = []
             for seq in list(self.abundance_df):
                 hash_of_seq = hashlib.md5(seq.encode()).hexdigest()
                 if hash_of_seq in columns:
                     sys.exit('non-unique hash')
-                seq_fasta_list.extend([f'>{hash_of_seq}', seq])
+                seq_fasta_tup_list.append((hash_of_seq, seq))
                 columns.append(hash_of_seq)
-            return columns, seq_fasta_list
-    
-    def _set_df_cols_to_hashes(self, columns):
-            # change the columns of the df
+
+            # Set the df column names to the hashes
             self.abundance_df.columns = columns
+
+            # Now sort the hashes
+            columns = sorted(columns)
+            seq_fasta_tup_list = sorted(seq_fasta_tup_list, key=lambda x: x[0])
+
+            # assert that they are the same
+            assert(columns == [_[0] for _ in seq_fasta_tup_list])
+
+            # Then reindex
+            self.abundance_df = self.abundance_df.reindex(columns=columns)
+
+            # Now write out a fasta for aligning
+            seq_fasta_list = []
+            for h, s in seq_fasta_tup_list:
+                seq_fasta_list.extend([f'>{h}', s])
+            
+            return columns, seq_fasta_list
 
     def _align_seqs(self, seq_fasta_list):
             # Write out the unaligned fasta
@@ -649,7 +679,16 @@ class EighteenSDistance(EighteenSBase):
                 for line in sequential_fasta:
                     f.write(f'{line}\n')
 
-    def _make_and_root_tree(self):
+    # I suspect that the cached version (below this one) was not playing well with the multiprocessing
+    # We will need to reimplement thte cacheing system so that write outs of trees mwill always be unique.
+    # The best way to do this will be to use the unique string. However, we will also still want to use the hash so that we
+    # can use the cache system to find an appropriate tree. In this manner, the same tree may be written out several times
+    # if its the case that the same tree had not been computed at the time that several processes came to compute it.
+    # this small redundancy is fine I think.
+    # Judging by how much slower it is whithout the tree cache. I think it is probably worth while re instigating.
+    # I alslso think it will be a good idea to implement ordering of the sequencs so that there is a higher probablbility
+    # that we identify the sma e trees that have already been computed.
+    def _make_and_root_tree_no_cache(self):
         # make the tree
         print('Testing models and making phylogenetic tree')
         print('This could take some time...')
@@ -677,6 +716,76 @@ class EighteenSDistance(EighteenSBase):
             # And then rename the tree so that it is the md5sum of the aligned fasta
             os.rename(self.tree_path, os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile'))
             self.tree_path = os.path.join(self.cache_dir, f'{hash_of_aligned_fasta}.treefile')
+    
+    def _make_and_root_tree(self):
+        # make the tree
+        print('Testing models and making phylogenetic tree')
+        # making the tree is very computationally expensive.
+        # To see if we have a computed a tree of the aligned fasta in question,
+        # we will name the output tree the md5sum of the aligned fasta file
+        # This way we can check to see if there is already a tree that we can use
+        # by looking for a file called <md5sum_of_fasta>.treefile
+        # Fist get the md5sum of the aligned fasta
+        # https://stackoverflow.com/questions/7829499/using-hashlib-to-compute-md5-digest-of-a-file-in-python-3
+        print('Looking for cached tree')
+        hash_of_aligned_fasta = self._md5sum(self.aligned_fasta_path)
+        candidate_trees = [_ for _ in os.listdir(self.tree_cache_dir) if _.startswith(hash_of_aligned_fasta)]
+        if candidate_trees:
+            tree_found = False
+            for cand_tree in candidate_trees:
+                # Any one of the trees in this list will be good
+                # Then we have already computed the tree and we can use this tree
+                self.tree_path = os.path.join(self.tree_cache_dir, candidate_trees[0])
+                with open(self.tree_path, 'r') as f:
+                    tree_line = f.read().rstrip()
+                if not tree_line.endswith('root;'):
+                    # Then this is an incomplete tree
+                    print('Found cache tree is incomplete')
+                    continue
+                else:
+                    print('Cached tree found')
+                    print("Checking root children < 2 to satisfy numpy")
+                    if len(TreeNode.read(self.tree_path).root().children) > 2:
+                        # Then this will cause the weighted unifrac to throw an error
+                        # so try a different tree or compute from scratch.
+                        print("Cached tree children > 2. Rejecting tree.")
+                        raise BadTreeError('Bad Tree')
+                    self.rooted_tree = TreeNode.read(self.tree_path)
+                    tree_found = True
+                    break
+            if not tree_found:
+                print('No cached tree found. Computing new tree.')
+                self._compute_tree_from_scratch(hash_of_aligned_fasta)
+            else:
+                # we found a tree to use
+                return
+        else:
+            print('No cached tree found. Computing new tree.')
+            self._compute_tree_from_scratch(hash_of_aligned_fasta)
+    
+    def _compute_tree_from_scratch(self, hash_of_aligned_fasta):
+        print('This could take some time...')
+        # Then we need to do the tree from scratch
+        subprocess.run(
+            ['iqtree', '-T', 'AUTO', '--threads-max', '2', '-s', f'{self.aligned_fasta_path}', '-redo', '-mredo'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        print('Tree creation complete')
+        print('Rooting the tree at midpoint')
+        tree = TreeNode.read(self.tree_path)
+        self.rooted_tree = tree.root_at_midpoint()
+        self.rooted_tree.write(self.tree_path)
+        # And then rename the tree so that it is the md5sum of the aligned fasta
+        self.unique_string
+        new_tree_path = os.path.join(self.tree_cache_dir, f'{hash_of_aligned_fasta}_{self.unique_string}.treefile')
+        os.rename(self.tree_path, new_tree_path)
+        self.tree_path = new_tree_path
+        # We will check the tree after it has been written out so that it 
+        # will be found by future processes and we can quickly determine that the tree
+        # will be bad, rather than having to remake it.
+        if len(self.rooted_tree.root().children) > 2:
+            # Then this will cause the weighted unifrac to throw an error
+            # so try a different tree or compute from scratch.
+            print("Cached tree children > 2. Rejecting tree.")
+            raise BadTreeError
 
     def _md5sum_from_python_object(self, p_obj):
         """ 
@@ -707,13 +816,14 @@ class EighteenSDistance(EighteenSBase):
             ids=[str(_) for _ in list(self.abundance_df.index)],
             tree=self.rooted_tree, otu_ids=[str(_) for _ in list(self.abundance_df.columns)])
 
+
     def _write_out_unifrac_dist_file(self):
         self.wu_df = self.wu.to_data_frame()
-        self.wu_df.to_csv(path_or_buf=self.dist_out_path, index=True, header=False)
+        self.wu_df.to_csv(path_or_buf=f'{self.dist_out_path}.gz', index=True, header=False, compression='infer')
         
     def _make_pcoa_df_unifrac(self):
         self.pcoa_df = self._do_pcoa_unifrac()
-        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True)
+        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
     def _do_pcoa_unifrac(self):
         # compute the pcoa
@@ -1144,67 +1254,114 @@ if __name__ == "__main__":
 
     def execute_dist(in_q, out_q):
         for dist_args in iter(in_q.get, 'STOP'):
-            host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples = dist_args
-            EighteenSDistance(
-                host_genus=host_genus, remove_majority_sequence=True, 
-                exclude_secondary_seq_samples=True, samples_at_least_threshold=samples_at_least_threshold,  
-                most_abund_seq_cutoff=most_abund_seq_cutoff, mafft_num_proc=10, 
-                dist_method_18S=dist_method_18S, only_snp_samples=only_snp_samples
-                ).make_and_plot_dist_and_pcoa()
+            host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample = dist_args
+            try:
+                EighteenSDistance(
+                    host_genus=host_genus, remove_majority_sequence=True, 
+                    exclude_secondary_seq_samples=True, samples_at_least_threshold=samples_at_least_threshold,  
+                    most_abund_seq_cutoff=most_abund_seq_cutoff, mafft_num_proc=10, 
+                    dist_method_18S=dist_method_18S, only_snp_samples=only_snp_samples, 
+                    normalisation_abundance=normalisation_abundance, normalisation_method=normalisation_method,
+                    min_num_distinct_seqs_per_sample=min_num_distinct_seqs_per_sample
+                    ).make_and_plot_dist_and_pcoa()
+            except BadTreeError:
+                print('BadTreeError. Skipping.')
+                out_q.put('BAD_TREE')
+                continue
             out_q.put('ONE_DONE')
-        out_q.put('All_DONE')
+        out_q.put('ALL_DONE')
 
     # TODO we should likely identify roughly which parameters we whould be working with and then fine tune from there
-    num_proc = 100
-    in_q = Queue()
-    out_q = Queue()
-    tot = 0
-    for host_genus in ['Porites', 'Pocillopora']:
+    def do_multi_proc_launch():
+        num_proc = 1
+        in_q = Queue()
+        out_q = Queue()
+        tot = 0
         for dist_method_18S in ['unifrac', 'braycurtis']:
-            for only_snp_samples in [True, False]:
-                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                    most_abund_seq_cutoff = 0
-                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
-                    tot += 1
-                if host_genus == 'Porites':
-                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
-                        samples_at_least_threshold = 0
-                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
+            for host_genus in ['Porites', 'Pocillopora']:
+                for only_snp_samples in [True, False]:
+                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                        most_abund_seq_cutoff = 0
+                        normalisation_abundance = None
+                        normalisation_method = 'pwr'
+                        min_num_distinct_seqs_per_sample = 3
+                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                         tot += 1
-                elif host_genus == 'Pocillopora':
-                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
-                        samples_at_least_threshold = 0
-                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples))
-                        tot += 1
-    # Here we have the in_q loaded
-    for n in range(num_proc):
-        in_q.put('STOP')
-    all_processes = []
-    for p in range(num_proc):
-        p = Process(target=execute_dist, args=(in_q, out_q))
-        all_processes.append(p)
-        p.start()
-    
-    done_count = 0
-    prog_count = 0
-    while done_count < num_proc:
-        item = out_q.get()
-        if item == 'ALL_DONE':
-            done_count += 1
-        else:
-            # ONE_DONE
-            prog_count += 1
-            print(f'{prog_count}/{tot} dist analyses complete')
+                    if host_genus == 'Porites':
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
+                            samples_at_least_threshold = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+                    elif host_genus == 'Pocillopora':
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
+                            samples_at_least_threshold = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+                for normalisation_method in ['pwr', 'rai']:
+                    if dist_method_18S == 'braycurtis':
+                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)) + list(range(10000,50000,10000)):
+                            samples_at_least_threshold = 0
+                            most_abund_seq_cutoff = 0
+                            only_snp_samples = False
+                            min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+                    elif dist_method_18S == 'unifrac':
+                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)):
+                            samples_at_least_threshold = 0
+                            most_abund_seq_cutoff = 0
+                            only_snp_samples = False
+                            min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+            for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
+                samples_at_least_threshold = 0
+                most_abund_seq_cutoff = 0
+                only_snp_samples = False
+                normalisation_abundance = None
+                normalisation_method = 'pwr'
+                host_genus = 'Pocillopora'
+                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                tot += 1
+        # Here we have the in_q loaded
+        for n in range(num_proc):
+            in_q.put('STOP')
+        all_processes = []
+        for p in range(num_proc):
+            p = Process(target=execute_dist, args=(in_q, out_q))
+            all_processes.append(p)
+            p.start()
+        
+        done_count = 0
+        prog_count = 0
+        bad_tree = 0
+        while done_count < num_proc:
+            item = out_q.get()
+            if item == 'ALL_DONE':
+                done_count += 1
+            else:
+                if item == 'BAD_TREE':
+                    bad_tree += 1
+                prog_count += 1
+                print(f'{prog_count}/{tot} dist analyses complete')
 
-    for p in all_processes:
-        p.join()
+        for p in all_processes:
+            p.join()
 
-    print('All dist analyses complete')
+        print(f'All dist analyses complete. {bad_tree} bad tree samples.')
+
+    do_multi_proc_launch()
     
     # dist = EighteenSDistance(
     #     host_genus='Pocillopora', remove_majority_sequence=True, 
-    #     exclude_secondary_seq_samples=True, samples_at_least_threshold=0,  
-    #     most_abund_seq_cutoff=200, mafft_num_proc=10, dist_method_18S='braycurtis', only_snp_samples=True
+    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+    #     snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+    #     normalisation_abundance=1000, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0,
+    #     most_abund_seq_cutoff=0, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
     #     ).make_and_plot_dist_and_pcoa()
-
-    # dist.make_and_plot_dist_and_pcoa()
