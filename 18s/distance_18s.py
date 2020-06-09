@@ -1131,9 +1131,6 @@ class IndiDistancePlotter:
         self.ax.set_ylabel(f'PC2 var explained: {pc2_var}')
         foo = 'bar'
 
-
-
-
 def get_colour_list():
     colour_list = ["#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059", "#FFDBE5",
                 "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF", "#997D87", "#5A0007", "#809693",
@@ -1217,8 +1214,6 @@ if __name__ == "__main__":
     maximum number of distinct sequences in the consolidated dictionaries for Porites and Pocillopora respectively
     so it doesn't make sense to set this any higher than that.
 
-    TODO refactor out host genus and then refactor in the indi dist method as the granularity will be transferred
-    to the main EighteenSDistance class
     host_genus = the host genus to work with: Pocillopora | Porites
 
     # TODO We now have the basic code for making the distances up and running. We now need to work out how we are
