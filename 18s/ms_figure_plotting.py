@@ -66,7 +66,7 @@ class ThreeRow:
         self.line_color_dict = {'Pocillopora':'black', 'Porites':'grey'}
 
         
-    def _plot_line(self, ax, genus, linestyle, color, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
+    def _plot_line_first_row(self, ax, genus, linestyle, color, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
         # We want to find all files in the 18s output directory where:
         # genus == g
         results_dict = {}
@@ -98,6 +98,86 @@ class ThreeRow:
         # ax.legend(fontsize=2, loc='best')
         foo = 'bar'
 
+    def _plot_line_second_row(self, ax, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
+        # We want to find all files in the 18s output directory where:
+        # genus == g
+        results_dict = {}
+        for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
+            if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}'):
+                # inbetween these to conditions is the nomalisation_abundance
+                if result_file.endswith(f'_0_3_mantel_result.txt'):
+                    # Then this is a set of points for plotting
+                    # We want to get them in order
+                    # the samples_at_least_threshold is the 8th item
+                    # create a dict of samples_at_least_threshold to tuple.
+                    # Where tuple is p_value and correlation coef.
+                    with open(os.path.join(self.parent.output_dir_18s, result_file), 'r') as f:
+                            (cor_coef, p_val) = [float(_) for _ in f.read().rstrip().lstrip().split('\t')]
+                    norm_value = float(result_file.split('_')[11])
+                    if norm_value not in results_dict:
+                        results_dict[norm_value] = (cor_coef, p_val)
+                    else:
+                        if norm_value != 0:
+                            raise RuntimeError('Dict already contains norm_value')
+                        else:
+                            # We have _0_ and _0.0_ because of how the distances were calculated.
+                            # They are actually different but both give p_val >> 0.05 and coef ~ 0.
+                            pass
+        
+        # Here we have a results dict ready for plotting for one of the g/m/snp combos.
+        # For starters plot up the line plain. Then changge line characters. then annotate with p value
+        sorted_norm = sorted(results_dict.keys())
+        # ax2=ax.twinx()
+        ax.plot(
+            sorted_norm, 
+            [results_dict[_][0] for _ in sorted_norm],
+            label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+            color=color,
+            linestyle=linestyle,
+            linewidth=0.5)
+        # ax.legend(fontsize=2, loc='best')
+        foo = 'bar'
+
+    def _plot_line_third_row(self, ax, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
+        
+        results_dict = {}
+        for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
+            if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}'):
+                # inbetween these to conditions is the nomalisation_abundance
+                if result_file.endswith(f'_0_3_mantel_result.txt'):
+                    # Then this is a set of points for plotting
+                    # We want to get them in order
+                    # the samples_at_least_threshold is the 8th item
+                    # create a dict of samples_at_least_threshold to tuple.
+                    # Where tuple is p_value and correlation coef.
+                    with open(os.path.join(self.parent.output_dir_18s, result_file), 'r') as f:
+                            (cor_coef, p_val) = [float(_) for _ in f.read().rstrip().lstrip().split('\t')]
+                    norm_value = float(result_file.split('_')[11])
+                    if norm_value not in results_dict:
+                        results_dict[norm_value] = (cor_coef, p_val)
+                    else:
+                        if norm_value != 0:
+                            raise RuntimeError('Dict already contains norm_value')
+                        else:
+                            # We have _0_ and _0.0_ because of how the distances were calculated.
+                            # They are actually different but both give p_val >> 0.05 and coef ~ 0.
+                            pass
+        
+        # Here we have a results dict ready for plotting for one of the g/m/snp combos.
+        # For starters plot up the line plain. Then changge line characters. then annotate with p value
+        sorted_norm = sorted(results_dict.keys())
+        # ax2=ax.twinx()
+        ax.plot(
+            sorted_norm, 
+            [results_dict[_][0] for _ in sorted_norm],
+            label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+            color=color,
+            linestyle=linestyle,
+            linewidth=0.5)
+        # ax.legend(fontsize=2, loc='best')
+        foo = 'bar'
+
+
     def plot(self):
         """
         For the record, the results string format:
@@ -109,12 +189,37 @@ class ThreeRow:
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
         """
-
-        # First look up for genus
-        # We will fix the normalisation method to 'pwr'
-        # We will fix samples_at_least_threshold and most_abund_seq_cutoff to 0
-        # we will fix min_num_distinct_seqs_per_sample to 3
         
+        # self._plot_first_row()
+        # self._plot_second_row()
+        self._plot_thrid_row()
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=1200)
+        self.foo = 'bar'
+
+    def _plot_third_row(self):
+        for g in self.genera:
+            for m in ['unifrac', 'braycurtis']:
+                if m == 'unifrac':
+                    norm_abund = 1000
+                else:
+                    norm_abund = 10000
+                self._plot_line_third_row(ax=self.ax[1][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+
+    
+    def _plot_second_row(self):
+        # RESULT This shows us that the effect of the samples_at_least_threshold is dependent on the genus
+        # being investigated. For Porites it has a negative effect.
+        # However, for Pocillopora, it hav a positive effect.
+        # The distance method i.e. unifrac or braycurtis has little effect.
+        for g in self.genera:
+            for m in ['unifrac', 'braycurtis']:
+                if m == 'unifrac':
+                    norm_abund = 1000
+                else:
+                    norm_abund = 10000
+                self._plot_line_second_row(ax=self.ax[1][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+
+    def _plot_first_row(self):
         # RESULT This plot shows us that UniFrac is bascially going mental
         # The results basically look random.
         # RESULT For Bray curtis we see a slight improvement
@@ -129,24 +234,24 @@ class ThreeRow:
         # correlation between porties (almost double). This may be due to the lack of structuring in Pocillopora.
         # This means that it works well to have both genera in each of the plots. I think we can do a plot for
         # distance method, normalisation method and for only_smp_samples.
+        # TODO given that the unifrac basically doesn't work with the 0 cutoff, there's not much point testing it using
+        # this value. So Rather, we should test it using one of the cutoffs that will be determined in row 2 I guess.
         for g in self.genera:
             for m in ['unifrac', 'braycurtis']:
-                self._plot_line(ax=self.ax[0][0], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[m], normalisation_method='rai', distance_method=m, snp_only=False)
+                self._plot_line_first_row(ax=self.ax[0][0], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[m], normalisation_method='rai', distance_method=m, snp_only=False)
 
             for n_m in ['pwr', 'rai']:
-                self._plot_line(ax=self.ax[0][1], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[n_m],normalisation_method=n_m, distance_method='braycurtis', snp_only=False)
+                self._plot_line_first_row(ax=self.ax[0][1], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[n_m],normalisation_method=n_m, distance_method='braycurtis', snp_only=False)
 
             # NB the only way that having SNP samples can make a difference is during the Unifrac and Unifrac isn't really working here
             # Otherwise, if you think about it, exactly the same pairwise comparisons are going to be considered for the braycurtis and
             # then we're already stripping down to only the SNP comparison in the mantel.
             # We want to be looking at the SNP/noSNP for the cluster assignment.
             # for only_snp_samples in [True, False]: # We are computing this now.
-            #     self._plot_line(ax=self.ax[0][2], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[only_snp_samples],normalisation_method='rai', distance_method='unifrac', snp_only=only_snp_samples)
+            #     self._plot_line_first_row(ax=self.ax[0][2], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[only_snp_samples],normalisation_method='rai', distance_method='unifrac', snp_only=only_snp_samples)
         
         self.ax[0][0].set_title('dist_method')
         self.ax[0][1].set_title('norm_method')
         # self.ax[0][2].set_title('snp_samples_only')
-        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=1200)
-        self.foo = 'bar'
 
 MSPlots().plot_three_row()
