@@ -1272,48 +1272,66 @@ if __name__ == "__main__":
         tot = 0
         for dist_method_18S in ['unifrac', 'braycurtis']:
             for host_genus in ['Porites', 'Pocillopora']:
-                for only_snp_samples in [True, False]:
-                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                        most_abund_seq_cutoff = 0
+                # for only_snp_samples in [True, False]:
+                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                    most_abund_seq_cutoff = 0
+                    normalisation_abundance = None
+                    normalisation_method = 'pwr'
+                    min_num_distinct_seqs_per_sample = 3
+                    only_snp_samples = False
+                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                    tot += 1
+                if host_genus == 'Porites':
+                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
+                        samples_at_least_threshold = 0
                         normalisation_abundance = None
                         normalisation_method = 'pwr'
                         min_num_distinct_seqs_per_sample = 3
+                        only_snp_samples = False
                         in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                         tot += 1
-                    if host_genus == 'Porites':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
+                elif host_genus == 'Pocillopora':
+                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
+                        samples_at_least_threshold = 0
+                        normalisation_abundance = None
+                        normalisation_method = 'pwr'
+                        min_num_distinct_seqs_per_sample = 3
+                        only_snp_samples = False
+                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                        tot += 1
+                for normalisation_method in ['pwr', 'rai']:
+                    if dist_method_18S == 'braycurtis':
+                        # TODO take the step from 1000 to 10 000 from 1000 to 200
+                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
                             samples_at_least_threshold = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
+                            most_abund_seq_cutoff = 0
+                            only_snp_samples = False
                             min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+                    elif dist_method_18S == 'unifrac':
+                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)):
+                            samples_at_least_threshold = 0
+                            most_abund_seq_cutoff = 0
+                            only_snp_samples = False
+                            min_num_distinct_seqs_per_sample = 3
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                            tot += 1
+                # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
+                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                    # most_abund_seq_cutoff = 0
+                    normalisation_abundance = None
+                    normalisation_method = 'pwr'
+                    min_num_distinct_seqs_per_sample = 3
+                    only_snp_samples = False
+                    if host_genus == 'Porites':
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
                     elif host_genus == 'Pocillopora':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
-                            samples_at_least_threshold = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
-                            min_num_distinct_seqs_per_sample = 3
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
-                    for normalisation_method in ['pwr', 'rai']:
-                        if dist_method_18S == 'braycurtis':
-                            # TODO take the step from 1000 to 10 000 from 1000 to 200
-                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
-                                samples_at_least_threshold = 0
-                                most_abund_seq_cutoff = 0
-                                # only_snp_samples = False
-                                min_num_distinct_seqs_per_sample = 3
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                                tot += 1
-                        elif dist_method_18S == 'unifrac':
-                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)):
-                                samples_at_least_threshold = 0
-                                most_abund_seq_cutoff = 0
-                                # only_snp_samples = False
-                                min_num_distinct_seqs_per_sample = 3
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                                tot += 1
             for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
                 samples_at_least_threshold = 0
                 most_abund_seq_cutoff = 0
@@ -1350,12 +1368,12 @@ if __name__ == "__main__":
 
         print(f'All dist analyses complete. {bad_tree} bad tree samples.')
 
-    # do_multi_proc_launch()
+    do_multi_proc_launch()
     
-    dist = EighteenSDistance(
-        host_genus='Pocillopora', remove_majority_sequence=True, 
-        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-        snp_distance_type='biallelic', dist_method_18S='braycurtis', approach='dist',
-        normalisation_abundance=400, normalisation_method='rai',  only_snp_samples=True, samples_at_least_threshold=0,
-        most_abund_seq_cutoff=0, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
-        ).make_and_plot_dist_and_pcoa()
+    # dist = EighteenSDistance(
+    #     host_genus='Pocillopora', remove_majority_sequence=True, 
+    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+    #     snp_distance_type='biallelic', dist_method_18S='braycurtis', approach='dist',
+    #     normalisation_abundance=400, normalisation_method='rai',  only_snp_samples=True, samples_at_least_threshold=0,
+    #     most_abund_seq_cutoff=0, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
+    #     ).make_and_plot_dist_and_pcoa()

@@ -142,9 +142,9 @@ class ThreeRow:
         
         results_dict = {}
         for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
-            if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}'):
+            if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_0_'):
                 # inbetween these to conditions is the nomalisation_abundance
-                if result_file.endswith(f'_0_3_mantel_result.txt'):
+                if result_file.endswith(f'_3_mantel_result.txt'):
                     # Then this is a set of points for plotting
                     # We want to get them in order
                     # the samples_at_least_threshold is the 8th item
@@ -152,7 +152,7 @@ class ThreeRow:
                     # Where tuple is p_value and correlation coef.
                     with open(os.path.join(self.parent.output_dir_18s, result_file), 'r') as f:
                             (cor_coef, p_val) = [float(_) for _ in f.read().rstrip().lstrip().split('\t')]
-                    norm_value = float(result_file.split('_')[11])
+                    norm_value = int(result_file.split('_')[12])
                     if norm_value not in results_dict:
                         results_dict[norm_value] = (cor_coef, p_val)
                     else:
@@ -190,22 +190,25 @@ class ThreeRow:
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
         """
         
-        # self._plot_first_row()
-        # self._plot_second_row()
-        self._plot_thrid_row()
+        self._plot_first_row()
+        self._plot_second_row()
+        self._plot_third_row()
         plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=1200)
         self.foo = 'bar'
 
     def _plot_third_row(self):
+        # RESULTS This shows us that once again, the effect is very genus dependent
+        # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
+        # However for Pocillopora it appears to have little or no effect.
+        # TODO test some combinations of these two factors to see if we find some surprising results.
         for g in self.genera:
             for m in ['unifrac', 'braycurtis']:
                 if m == 'unifrac':
                     norm_abund = 1000
                 else:
                     norm_abund = 10000
-                self._plot_line_third_row(ax=self.ax[1][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_third_row(ax=self.ax[2][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
 
-    
     def _plot_second_row(self):
         # RESULT This shows us that the effect of the samples_at_least_threshold is dependent on the genus
         # being investigated. For Porites it has a negative effect.
