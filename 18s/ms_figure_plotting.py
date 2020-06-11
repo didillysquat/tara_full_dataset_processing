@@ -201,13 +201,56 @@ class ThreeRow:
         # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
         # However for Pocillopora it appears to have little or no effect.
         # TODO test some combinations of these two factors to see if we find some surprising results.
+        # for g in self.genera:
+        #     for m in ['unifrac', 'braycurtis']:
+        #         if m == 'unifrac':
+        #             norm_abund = 1000
+        #         else:
+        #             norm_abund = 10000
+        #         self._plot_line_third_row(ax=self.ax[2][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+            
+        # We can additionally now in theory work on the corsses of the samples_at_least_threshold and the 
+        # most_abund_seq_cutoff.
+        # We will need to look at a countor for each variable combination I guess
+        # so one for each of the genera and dist methods
         for g in self.genera:
             for m in ['unifrac', 'braycurtis']:
                 if m == 'unifrac':
                     norm_abund = 1000
                 else:
                     norm_abund = 10000
-                self._plot_line_third_row(ax=self.ax[2][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_countour(ax=self.ax[2][0], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
+
+    def _plot_countour(self, ax, genus, distance_method, normalisation_abundance, normalisation_method='pwr', snp_only=False):
+        # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
+        # and then the coef on the z.
+        x_samples_at_least_threshold = []
+        y_most_abund_seq_cutoff = []
+        z_coef = []
+        z_p_val = []
+        for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
+            if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_'):
+                # inbetween these to conditions is the nomalisation_abundance
+                if result_file.endswith(f'_3_mantel_result.txt'):
+                    # Then this is a set of points for plotting
+                    
+                    with open(os.path.join(self.parent.output_dir_18s, result_file), 'r') as f:
+                            (cor_coef, p_val) = [float(_) for _ in f.read().rstrip().lstrip().split('\t')]
+                    samples_at_least_threshold = float(result_file.split('_')[11])
+                    most_abund_seq_cutoff = int(result_file.split('_')[12])
+                    x_samples_at_least_threshold.append(samples_at_least_threshold)
+                    y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
+                    z_coef.append(cor_coef)
+                    z_p_val.append(p_val)
+                    
+        df = pd.DataFrame(columns=[int(_) for _ in set(y_most_abund_seq_cutoff)], index=list(set(x_samples_at_least_threshold)))
+        
+        for x,y,z in zip(x_samples_at_least_threshold, y_most_abund_seq_cutoff, z_coef):
+            df.at[x,y] = z
+        
+        ax.contourf(x=list(df.index), y=list(df), z=df.to_numpy(dtype=float))
+        foo = 'bar'
+
 
     def _plot_second_row(self):
         # RESULT This shows us that the effect of the samples_at_least_threshold is dependent on the genus

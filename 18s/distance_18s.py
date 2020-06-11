@@ -65,11 +65,11 @@ class EighteenSDistance(EighteenSBase):
         self.normalisation_method = normalisation_method
         self.approach = approach
         self.genus = host_genus
-        if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
-            print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
-            print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
-            print(f'uing most_abund_seq_cutoff = {self.most_abund_seq_cutoff}')
-            self.samples_at_least_threshold = 0
+        # if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
+        #     print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
+        #     print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
+        #     print(f'uing most_abund_seq_cutoff = {self.most_abund_seq_cutoff}')
+        #     self.samples_at_least_threshold = 0
         self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
         if self.most_abund_seq_cutoff !=0 and self.most_abund_seq_cutoff < self.min_num_distinct_seqs_per_sample:
             raise RuntimeError(f'most_abund_seq_cutoff ({self.most_abund_seq_cutoff}) <' 
@@ -302,7 +302,7 @@ class EighteenSDistance(EighteenSBase):
             # if working with samples_at_least_threshold, screen out rare seqs here
             if self.samples_at_least_threshold > 0:
                 consolidated_host_seqs_abund_dict = {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
-            elif self.most_abund_seq_cutoff > 0:
+            if self.most_abund_seq_cutoff > 0:
                 sorted_dict_keys = sorted(consolidated_host_seqs_abund_dict, key=consolidated_host_seqs_abund_dict.get, reverse=True)[:self.most_abund_seq_cutoff]
                 consolidated_host_seqs_abund_dict =  {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in sorted_dict_keys}
             
@@ -1270,6 +1270,7 @@ if __name__ == "__main__":
         in_q = Queue()
         out_q = Queue()
         tot = 0
+        test_list = []
         for dist_method_18S in ['unifrac', 'braycurtis']:
             for host_genus in ['Porites', 'Pocillopora']:
                 # for only_snp_samples in [True, False]:
@@ -1328,10 +1329,13 @@ if __name__ == "__main__":
                         for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
+                            to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample)
+                            test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                     elif host_genus == 'Pocillopora':
                         for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
+                            test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
             for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
                 samples_at_least_threshold = 0
                 most_abund_seq_cutoff = 0
@@ -1373,7 +1377,7 @@ if __name__ == "__main__":
     # dist = EighteenSDistance(
     #     host_genus='Pocillopora', remove_majority_sequence=True, 
     #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-    #     snp_distance_type='biallelic', dist_method_18S='braycurtis', approach='dist',
-    #     normalisation_abundance=400, normalisation_method='rai',  only_snp_samples=True, samples_at_least_threshold=0,
-    #     most_abund_seq_cutoff=0, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
+    #     snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+    #     normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=0.01,
+    #     most_abund_seq_cutoff=3, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
     #     ).make_and_plot_dist_and_pcoa()
