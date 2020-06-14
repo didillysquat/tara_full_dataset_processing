@@ -42,6 +42,7 @@ import os
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
+from clustering_18s import Cluster18S
 
 class MSPlots(EighteenSBase):
     def __init__(self):
@@ -51,6 +52,8 @@ class MSPlots(EighteenSBase):
         """
         The three row plot.
         """
+        # Plot the SNP clustering
+        cl = Cluster18S(parent=self)
         tr = ThreeRow(parent=self)
         tr.plot()
 
@@ -98,7 +101,7 @@ class ThreeRow:
         # ax.legend(fontsize=2, loc='best')
         foo = 'bar'
 
-    def _plot_line_second_row(self, ax, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
+    def _plot_line_second_row(self, ax, plot_type, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
         # We want to find all files in the 18s output directory where:
         # genus == g
         results_dict = {}
@@ -128,17 +131,26 @@ class ThreeRow:
         # For starters plot up the line plain. Then changge line characters. then annotate with p value
         sorted_norm = sorted(results_dict.keys())
         # ax2=ax.twinx()
-        ax.plot(
-            sorted_norm, 
-            [results_dict[_][0] for _ in sorted_norm],
-            label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
-            color=color,
-            linestyle=linestyle,
-            linewidth=0.5)
+        if plot_type == 'coef':
+            ax.plot(
+                sorted_norm, 
+                [results_dict[_][0] for _ in sorted_norm],
+                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                color=color,
+                linestyle=linestyle,
+                linewidth=0.5)
+        else:
+            ax.plot(
+                sorted_norm, 
+                [results_dict[_][1] for _ in sorted_norm],
+                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                color=color,
+                linestyle=linestyle,
+                linewidth=0.5)
         # ax.legend(fontsize=2, loc='best')
         foo = 'bar'
 
-    def _plot_line_third_row(self, ax, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
+    def _plot_line_third_row(self, ax, plot_type, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
         
         results_dict = {}
         for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
@@ -167,13 +179,22 @@ class ThreeRow:
         # For starters plot up the line plain. Then changge line characters. then annotate with p value
         sorted_norm = sorted(results_dict.keys())
         # ax2=ax.twinx()
-        ax.plot(
-            sorted_norm, 
-            [results_dict[_][0] for _ in sorted_norm],
-            label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
-            color=color,
-            linestyle=linestyle,
-            linewidth=0.5)
+        if plot_type == 'coef':
+            ax.plot(
+                sorted_norm, 
+                [results_dict[_][0] for _ in sorted_norm],
+                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                color=color,
+                linestyle=linestyle,
+                linewidth=0.5)
+        else:
+            ax.plot(
+                sorted_norm, 
+                [results_dict[_][1] for _ in sorted_norm],
+                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                color=color,
+                linestyle=linestyle,
+                linewidth=0.5)
         # ax.legend(fontsize=2, loc='best')
         foo = 'bar'
 
@@ -201,25 +222,27 @@ class ThreeRow:
         # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
         # However for Pocillopora it appears to have little or no effect.
         # TODO test some combinations of these two factors to see if we find some surprising results.
-        # for g in self.genera:
-        #     for m in ['unifrac', 'braycurtis']:
-        #         if m == 'unifrac':
-        #             norm_abund = 1000
-        #         else:
-        #             norm_abund = 10000
-        #         self._plot_line_third_row(ax=self.ax[2][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-            
-        # We can additionally now in theory work on the corsses of the samples_at_least_threshold and the 
-        # most_abund_seq_cutoff.
-        # We will need to look at a countor for each variable combination I guess
-        # so one for each of the genera and dist methods
         for g in self.genera:
             for m in ['unifrac', 'braycurtis']:
                 if m == 'unifrac':
                     norm_abund = 1000
                 else:
                     norm_abund = 10000
-                self._plot_countour(ax=self.ax[2][0], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_third_row(ax=self.ax[2][0], genus=g, plot_type='coef', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_third_row(ax=self.ax[2][1], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_third_row(ax=self.ax[2][2], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self.ax[2][2].set_ylim(-0.01,0.05)
+        # We can additionally now in theory work on the corsses of the samples_at_least_threshold and the 
+        # most_abund_seq_cutoff.
+        # We will need to look at a countor for each variable combination I guess
+        # so one for each of the genera and dist methods
+        # for g in self.genera:
+        #     for m in ['unifrac', 'braycurtis']:
+        #         if m == 'unifrac':
+        #             norm_abund = 1000
+        #         else:
+        #             norm_abund = 10000
+        #         self._plot_countour(ax=self.ax[2][0], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
 
     def _plot_countour(self, ax, genus, distance_method, normalisation_abundance, normalisation_method='pwr', snp_only=False):
         # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
@@ -263,7 +286,10 @@ class ThreeRow:
                     norm_abund = 1000
                 else:
                     norm_abund = 10000
-                self._plot_line_second_row(ax=self.ax[1][0], genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_second_row(ax=self.ax[1][0], plot_type='coef', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_second_row(ax=self.ax[1][1], plot_type='p_val', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_second_row(ax=self.ax[1][2], plot_type='p_val', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self.ax[1][2].set_ylim(-0.01, 0.05)
 
     def _plot_first_row(self):
         # RESULT This plot shows us that UniFrac is bascially going mental
