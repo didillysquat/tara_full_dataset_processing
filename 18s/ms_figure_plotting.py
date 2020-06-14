@@ -51,8 +51,31 @@ class MSPlots(EighteenSBase):
     def plot_three_row(self):
         """
         The three row plot.
+        TODO. We are quite advanced with this figure now. In the end it looks like we may split this
+        into three figures that can each likely go into the suppelementary figures.
+        
+        FIG ONE can be norm abundance testing and norm ethod testing.
+        TODO - redo the plotting of the norm abundance using the best cutoff arguments.
+        You'll need to write this in in distance.py and then write in the plotting here.
+        The effect of normalisation can also be done on these parameters. These will be computed
+        as a result of changing distance.py. Scale the X of these down to ~20000, as there is little change.
+        TODO see if with these new parameters being used the unifrac settles down a bit and whether it is
+        worth testing a greater normalisation abundance for unifrac (hopefully not).
+        
+        FIG TWO
+        This will be the line plots. Do this as a 2x2 with rows as the samples_at_least_threshold and 
+        most_abund_seq_cutoff. Columns will be the coeficient and p_value.
+        TODO put the vlines on here that represent the maximums/areas of interest. Maybe make these a shaded vertical
+        area using an alpha.
+
+        Fig three
+        The contours of coefficient for each of the species and dist methods.
+        TODO increase the values up to 300 for the most_abund_seq_cutoff (these are calculating now).
+        Then make into a 2 x 2 and put a scale for each.
+
+        TODO then it will be time to move towards seeing the level of agreement we're getting.
         """
-        # Plot the SNP clustering
+        
         tr = ThreeRow(parent=self)
         tr.plot()
 
@@ -62,13 +85,13 @@ class ThreeRow:
         self.genera = ['Pocillopora', 'Porites']
         # Let's start with the first plot quick and dirty and then we can add the others
         # and refactorize.
-        self.fig, self.ax = plt.subplots(4,4, figsize=(8,8))
+        
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=300)
         self.line_style_dict = {'rai':'-', 'pwr':'--', 'braycurtis':'-', 'unifrac':'--', True:'-', False:'--'}
         self.line_color_dict = {'Pocillopora':'black', 'Porites':'grey'}
 
         
-    def _plot_line_first_row(self, ax, genus, linestyle, color, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
+    def _plot_line_first_row(self, ax, genus, linestyle, color, label, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
         # We want to find all files in the 18s output directory where:
         # genus == g
         results_dict = {}
@@ -96,11 +119,11 @@ class ThreeRow:
         ax.plot(
             sorted_norm, 
             [results_dict[_][0] for _ in sorted_norm],
-            label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', color=color, linestyle=linestyle, linewidth=0.5)
+            label=f'{label}', color=color, linestyle=linestyle, linewidth=0.5)
         # ax.legend(fontsize=2, loc='best')
         foo = 'bar'
 
-    def _plot_line_second_row(self, ax, plot_type, genus, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
+    def _plot_line_second_row(self, ax, plot_type, genus, label, linestyle, color, normalisation_abundance, normalisation_method='pwr', distance_method='braycurtis', snp_only=False):
         # We want to find all files in the 18s output directory where:
         # genus == g
         results_dict = {}
@@ -134,7 +157,7 @@ class ThreeRow:
             ax.plot(
                 sorted_norm, 
                 [results_dict[_][0] for _ in sorted_norm],
-                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                label=f'{label}', 
                 color=color,
                 linestyle=linestyle,
                 linewidth=0.5)
@@ -142,7 +165,7 @@ class ThreeRow:
             ax.plot(
                 sorted_norm, 
                 [results_dict[_][1] for _ in sorted_norm],
-                label=f'{genus}_{normalisation_method}_{distance_method}_{snp_only}', 
+                label=f'{label}', 
                 color=color,
                 linestyle=linestyle,
                 linewidth=0.5)
@@ -209,13 +232,97 @@ class ThreeRow:
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
         """
-        
+        self.norm_fig, self.norm_ax = plt.subplots(1,2, figsize=(8,4))
         self._plot_first_row()
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_norm_fig.png'), dpi=1200)
+
+        self.cutoff_fig, self.cutoff_ax = plt.subplots(2,2, figsize=(8,8))
         self._plot_second_row()
         self._plot_third_row()
+        self.cutoff_ax[0,0].set_ylabel('correlation coef.')
+        self.cutoff_ax[1,0].set_ylabel('correlation coef.')
+        self.cutoff_ax[0,1].set_ylabel('p_val')
+        self.cutoff_ax[1,1].set_ylabel('p_val')
+        self.cutoff_ax[0,0].set_xlabel('samples_at_least_threshold')
+        self.cutoff_ax[1,0].set_xlabel('most_abund_seq_cutoff')
+        self.cutoff_ax[0,1].set_xlabel('samples_at_least_threshold')
+        self.cutoff_ax[1,1].set_xlabel('most_abund_seq_cutoff')
+        self.cutoff_ax[0,1].legend(loc='upper left', fontsize='x-small')
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_cutoff_fig.png'), dpi=1200)
+        
+        self.contour_fig, self.contour_ax = plt.subplots(2,2, figsize=(8,8))
         self._plot_fourth_row()
-        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=1200)
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_contour_fig.png'), dpi=1200)
+        
         self.foo = 'bar'
+
+    def _plot_first_row(self):
+        # RESULT This plot shows us that UniFrac is bascially going mental
+        # The results basically look random.
+        # RESULT For Bray curtis we see a slight improvement
+        # up to about the 10 000 point. So I think this looks like a sensible cutoff to work with.
+        # RESULT The pwr vs rai makes very little difference so I would say that we can work with either
+        # The only difference being that one comes from below and one from above. We can work with either moving forwards
+        # RESULT For the with and without SNP samples there is almost no difference. I think we can put a very positive
+        # spin on this. This means that the additional samples are not effecting how they are being resolved.
+        # TODO plot out an example pcoa plot of this to show that the poosition of samples does not change much
+        # actually not sure that this is possible but maybe investigate.
+        # As for displaying these facts, Porites and Pocillopora separate nicely as there appears to be a far stronger
+        # correlation between porties (almost double). This may be due to the lack of structuring in Pocillopora.
+        # This means that it works well to have both genera in each of the plots. I think we can do a plot for
+        # distance method, normalisation method and for only_smp_samples.
+        # TODO given that the unifrac basically doesn't work with the 0 cutoff, there's not much point testing it using
+        # this value. So Rather, we should test it using one of the cutoffs that will be determined in row 2 I guess.
+        for g in self.genera:
+            for m in ['unifrac', 'braycurtis']:
+                self._plot_line_first_row(ax=self.norm_ax[0], genus=g, label=f'{g}_{m}', color=self.line_color_dict[g], linestyle=self.line_style_dict[m], normalisation_method='rai', distance_method=m, snp_only=False)
+
+            for n_m in ['pwr', 'rai']:
+                self._plot_line_first_row(ax=self.norm_ax[1], genus=g, label=f'{g}_{n_m}', color=self.line_color_dict[g], linestyle=self.line_style_dict[n_m],normalisation_method=n_m, distance_method='braycurtis', snp_only=False)
+
+        for ax in self.norm_ax:
+            ax.set_xlabel('normalisation abundance')
+            ax.set_xlim(0,20000)
+            ax.set_ylim(-0.1,0.25)
+            ax.legend(loc='lower right', fontsize='x-small')
+            # NB the only way that having SNP samples can make a difference is during the Unifrac and Unifrac isn't really working here
+            # Otherwise, if you think about it, exactly the same pairwise comparisons are going to be considered for the braycurtis and
+            # then we're already stripping down to only the SNP comparison in the mantel.
+            # We want to be looking at the SNP/noSNP for the cluster assignment.
+            # for only_snp_samples in [True, False]: # We are computing this now.
+            #     self._plot_line_first_row(ax=self.ax[0][2], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[only_snp_samples],normalisation_method='rai', distance_method='unifrac', snp_only=only_snp_samples)
+        
+        self.norm_ax[0].set_title('distance_method')
+        self.norm_ax[1].set_title('normalisation_method')
+
+    def _plot_second_row(self):
+        # RESULT This shows us that the effect of the samples_at_least_threshold is dependent on the genus
+        # being investigated. For Porites it has a negative effect.
+        # However, for Pocillopora, it hav a positive effect.
+        # The distance method i.e. unifrac or braycurtis has little effect.
+        for g in self.genera:
+            for m in ['unifrac', 'braycurtis']:
+                if m == 'unifrac':
+                    norm_abund = 1000
+                else:
+                    norm_abund = 10000
+                self._plot_line_second_row(ax=self.cutoff_ax[0][0], plot_type='coef', genus=g, label=f'{g}_{m}', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_second_row(ax=self.cutoff_ax[0][1], plot_type='p_val', genus=g, label=f'{g}_{m}', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+
+    def _plot_third_row(self):
+        # RESULTS This shows us that once again, the effect is very genus dependent
+        # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
+        # However for Pocillopora it appears to have little or no effect.
+        # TODO test some combinations of these two factors to see if we find some surprising results.
+        for g in self.genera:
+            for m in ['unifrac', 'braycurtis']:
+                if m == 'unifrac':
+                    norm_abund = 1000
+                else:
+                    norm_abund = 10000
+                self._plot_line_third_row(ax=self.cutoff_ax[1][0], genus=g, plot_type='coef', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+                self._plot_line_third_row(ax=self.cutoff_ax[1][1], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
+     
 
     def _plot_fourth_row(self):
         # RESULT. This has worked pretty well. It shows us that we can basically take a linear combination
@@ -242,22 +349,7 @@ class ThreeRow:
                 self.ax[3][ax_index].set_title(f'{g}_{m}', fontsize='x-small')
         cbar = self.fig.colorbar(contour, ax=self.ax[3][0])
         cbar.ax.set_ylabel('verbosity coefficient')
-    def _plot_third_row(self):
-        # RESULTS This shows us that once again, the effect is very genus dependent
-        # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
-        # However for Pocillopora it appears to have little or no effect.
-        # TODO test some combinations of these two factors to see if we find some surprising results.
-        for g in self.genera:
-            for m in ['unifrac', 'braycurtis']:
-                if m == 'unifrac':
-                    norm_abund = 1000
-                else:
-                    norm_abund = 10000
-                self._plot_line_third_row(ax=self.ax[2][0], genus=g, plot_type='coef', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self._plot_line_third_row(ax=self.ax[2][1], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self._plot_line_third_row(ax=self.ax[2][2], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self.ax[2][2].set_ylim(-0.01,0.05)
-        
+       
     def _plot_countour(self, ax, genus, distance_method, normalisation_abundance, normalisation_method='pwr', snp_only=False):
         # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
         # and then the coef on the z.
@@ -292,55 +384,6 @@ class ThreeRow:
         return contour
 
 
-    def _plot_second_row(self):
-        # RESULT This shows us that the effect of the samples_at_least_threshold is dependent on the genus
-        # being investigated. For Porites it has a negative effect.
-        # However, for Pocillopora, it hav a positive effect.
-        # The distance method i.e. unifrac or braycurtis has little effect.
-        for g in self.genera:
-            for m in ['unifrac', 'braycurtis']:
-                if m == 'unifrac':
-                    norm_abund = 1000
-                else:
-                    norm_abund = 10000
-                self._plot_line_second_row(ax=self.ax[1][0], plot_type='coef', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self._plot_line_second_row(ax=self.ax[1][1], plot_type='p_val', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self._plot_line_second_row(ax=self.ax[1][2], plot_type='p_val', genus=g, color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
-                self.ax[1][2].set_ylim(-0.01, 0.05)
-
-    def _plot_first_row(self):
-        # RESULT This plot shows us that UniFrac is bascially going mental
-        # The results basically look random.
-        # RESULT For Bray curtis we see a slight improvement
-        # up to about the 10 000 point. So I think this looks like a sensible cutoff to work with.
-        # RESULT The pwr vs rai makes very little difference so I would say that we can work with either
-        # The only difference being that one comes from below and one from above. We can work with either moving forwards
-        # RESULT For the with and without SNP samples there is almost no difference. I think we can put a very positive
-        # spin on this. This means that the additional samples are not effecting how they are being resolved.
-        # TODO plot out an example pcoa plot of this to show that the poosition of samples does not change much
-        # actually not sure that this is possible but maybe investigate.
-        # As for displaying these facts, Porites and Pocillopora separate nicely as there appears to be a far stronger
-        # correlation between porties (almost double). This may be due to the lack of structuring in Pocillopora.
-        # This means that it works well to have both genera in each of the plots. I think we can do a plot for
-        # distance method, normalisation method and for only_smp_samples.
-        # TODO given that the unifrac basically doesn't work with the 0 cutoff, there's not much point testing it using
-        # this value. So Rather, we should test it using one of the cutoffs that will be determined in row 2 I guess.
-        for g in self.genera:
-            for m in ['unifrac', 'braycurtis']:
-                self._plot_line_first_row(ax=self.ax[0][0], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[m], normalisation_method='rai', distance_method=m, snp_only=False)
-
-            for n_m in ['pwr', 'rai']:
-                self._plot_line_first_row(ax=self.ax[0][1], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[n_m],normalisation_method=n_m, distance_method='braycurtis', snp_only=False)
-
-            # NB the only way that having SNP samples can make a difference is during the Unifrac and Unifrac isn't really working here
-            # Otherwise, if you think about it, exactly the same pairwise comparisons are going to be considered for the braycurtis and
-            # then we're already stripping down to only the SNP comparison in the mantel.
-            # We want to be looking at the SNP/noSNP for the cluster assignment.
-            # for only_snp_samples in [True, False]: # We are computing this now.
-            #     self._plot_line_first_row(ax=self.ax[0][2], genus=g, color=self.line_color_dict[g], linestyle=self.line_style_dict[only_snp_samples],normalisation_method='rai', distance_method='unifrac', snp_only=only_snp_samples)
-        
-        self.ax[0][0].set_title('dist_method')
-        self.ax[0][1].set_title('norm_method')
-        # self.ax[0][2].set_title('snp_samples_only')
-
+    
+    
 MSPlots().plot_three_row()
