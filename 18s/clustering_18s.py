@@ -117,4 +117,6 @@ class Cluster18S(EighteenSBase):
         # Convert the index to sample-id
         return [sample_name_dict[ind] for ind in index]
 
-Cluster18S().visalise_snp_df()
+if __name__ == "__main__":
+
+    Cluster18S().visalise_snp_df()

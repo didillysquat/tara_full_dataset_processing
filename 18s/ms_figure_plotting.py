@@ -42,7 +42,7 @@ import os
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
-from clustering_18s import Cluster18S
+import pandas as pd
 
 class MSPlots(EighteenSBase):
     def __init__(self):
@@ -53,7 +53,6 @@ class MSPlots(EighteenSBase):
         The three row plot.
         """
         # Plot the SNP clustering
-        cl = Cluster18S(parent=self)
         tr = ThreeRow(parent=self)
         tr.plot()
 
@@ -63,7 +62,7 @@ class ThreeRow:
         self.genera = ['Pocillopora', 'Porites']
         # Let's start with the first plot quick and dirty and then we can add the others
         # and refactorize.
-        self.fig, self.ax = plt.subplots(3,3, figsize=(5,5))
+        self.fig, self.ax = plt.subplots(4,4, figsize=(8,8))
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=300)
         self.line_style_dict = {'rai':'-', 'pwr':'--', 'braycurtis':'-', 'unifrac':'--', True:'-', False:'--'}
         self.line_color_dict = {'Pocillopora':'black', 'Porites':'grey'}
@@ -214,9 +213,35 @@ class ThreeRow:
         self._plot_first_row()
         self._plot_second_row()
         self._plot_third_row()
+        self._plot_fourth_row()
         plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=1200)
         self.foo = 'bar'
 
+    def _plot_fourth_row(self):
+        # RESULT. This has worked pretty well. It shows us that we can basically take a linear combination
+        # of the results from the individual testing of the samples_at_least_threshold and the most_abund_seq_cutoff
+        # and predict the result with the combination. Similar to the individual results it shows us that
+        # the approach needs to be species specific. Pocillopora shoud have a samples_at_least_threshold of
+        # approximately 0.1 (we should draw this onto the plot as a vline on the individual and contour.
+        # And that the Porites should use a most_abundant_seq_cutoff of approximately 60 or 70 (draw on as vline).
+        # We should also extend the values for which we have results in the contours upto 300 so that we can compare
+        # better to the individual plots. TODO scale the individual plots down to 300.
+        # We can additionally now in theory work on the crosses of the samples_at_least_threshold and the 
+        # most_abund_seq_cutoff.
+        # We will need to look at a countour for each variable combination I guess
+        # so one for each of the genera and dist methods
+        for g_i, g in enumerate(self.genera):
+            for m_i, m in enumerate(['unifrac', 'braycurtis']):
+                if m == 'unifrac':
+                    norm_abund = 1000
+                else:
+                    norm_abund = 10000
+                ax_index = (g_i * 2) + m_i
+                contour = self._plot_countour(ax=self.ax[3][ax_index], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
+                
+                self.ax[3][ax_index].set_title(f'{g}_{m}', fontsize='x-small')
+        cbar = self.fig.colorbar(contour, ax=self.ax[3][0])
+        cbar.ax.set_ylabel('verbosity coefficient')
     def _plot_third_row(self):
         # RESULTS This shows us that once again, the effect is very genus dependent
         # For Porites, using this threshold argubly has some benefit to a small degree but questionable.
@@ -232,18 +257,7 @@ class ThreeRow:
                 self._plot_line_third_row(ax=self.ax[2][1], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
                 self._plot_line_third_row(ax=self.ax[2][2], genus=g, plot_type='p_val', color=self.line_color_dict[g], normalisation_abundance=norm_abund, linestyle=self.line_style_dict[m], normalisation_method='pwr', distance_method=m, snp_only=False)
                 self.ax[2][2].set_ylim(-0.01,0.05)
-        # We can additionally now in theory work on the corsses of the samples_at_least_threshold and the 
-        # most_abund_seq_cutoff.
-        # We will need to look at a countor for each variable combination I guess
-        # so one for each of the genera and dist methods
-        # for g in self.genera:
-        #     for m in ['unifrac', 'braycurtis']:
-        #         if m == 'unifrac':
-        #             norm_abund = 1000
-        #         else:
-        #             norm_abund = 10000
-        #         self._plot_countour(ax=self.ax[2][0], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
-
+        
     def _plot_countour(self, ax, genus, distance_method, normalisation_abundance, normalisation_method='pwr', snp_only=False):
         # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
         # and then the coef on the z.
@@ -266,13 +280,16 @@ class ThreeRow:
                     z_coef.append(cor_coef)
                     z_p_val.append(p_val)
                     
-        df = pd.DataFrame(columns=[int(_) for _ in set(y_most_abund_seq_cutoff)], index=list(set(x_samples_at_least_threshold)))
+        df = pd.DataFrame(columns=sorted([int(_) for _ in set(y_most_abund_seq_cutoff)]), index=sorted(list(set(x_samples_at_least_threshold))))
         
         for x,y,z in zip(x_samples_at_least_threshold, y_most_abund_seq_cutoff, z_coef):
             df.at[x,y] = z
         
-        ax.contourf(x=list(df.index), y=list(df), z=df.to_numpy(dtype=float))
-        foo = 'bar'
+        # the samples_at_least_threshold has most_abund_seq_cutoff up to 580, but the combinations
+        # were only computed up to 100 so crop to this
+        df = df.iloc[:,:df.columns.get_loc(90)+1]
+        contour = ax.contourf(list(df), list(df.index), df.to_numpy())
+        return contour
 
 
     def _plot_second_row(self):
