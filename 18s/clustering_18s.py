@@ -28,25 +28,48 @@ class Cluster18S(EighteenSBase):
     
     def visalise_snp_df(self):
         # first let's just get the pcoA plotted up
-        self.fig, self.axar = plt.subplots(1,2, figsize=(5,5))
+        self.fig, self.axar = plt.subplots(2,2, figsize=(5,5))
         
-        self.axar[0].scatter(self.poc_snp_pcoa_df['PC1'], self.poc_snp_pcoa_df['PC2'])
-        self.axar[1].scatter(self.por_snp_pcoa_df['PC1'], self.por_snp_pcoa_df['PC2'])
-        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster.png'), dpi=600)
+        self.axar[0,0].scatter(self.poc_snp_pcoa_df['PC1'], self.poc_snp_pcoa_df['PC2'])
+        self.axar[0,1].scatter(self.por_snp_pcoa_df['PC1'], self.por_snp_pcoa_df['PC2'])
+        
+        self.axar[0,0].set_title('POC')
+        self.axar[0,1].set_title('POR')
 
         # Now do a clustering and shoulder analysis
-        poc_np = self.poc_snp_pcoa_df.to_numpy()
-        poc_inertia = []
-        for i in range(10):
-            kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(poc_np)
-            poc_inertia.append(kmeans.inertia_)
-        
-        por_np = self.por_snp_pcoa_df.to_numpy()
-        por_inertia = []
-        for i in range(10):
-            kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(por_np)
-            por_inertia.append(kmeans.inertia_)
+        # poc_np = self.poc_snp_pcoa_df.to_numpy()
+        # poc_inertia = []
+        # for i in range(10):
+        #     kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(poc_np)
+        #     poc_inertia.append(kmeans.inertia_)
+        # self.axar[1,0].plot([_ + 1 for _ in range(10)], poc_inertia, 'k-')
+        # self.axar[1,0].set_xticks([_ + 1 for _ in range(10)])
+
+        # por_np = self.por_snp_pcoa_df.to_numpy()
+        # por_inertia = []
+        # for i in range(10):
+        #     kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(por_np)
+        #     por_inertia.append(kmeans.inertia_)
+        # self.axar[1,1].plot([_ + 1 for _ in range(10)], por_inertia, 'k-')
+        # self.axar[1,1].set_xticks([_ + 1 for _ in range(10)])
             
+        # Here we have the inertia ready to plot:
+
+        # Elbows would suggest k==5 for POC and k==3 for POR.
+        # Plot up a coloured version using the first two components.
+        poc_kmeans = KMeans(n_clusters=5, n_init=100, algorithm='full').fit(self.poc_snp_pcoa_df)
+        for i in range(poc_kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            scat = self.axar[1,0].scatter(self.poc_snp_pcoa_df.iloc[np.where(poc_kmeans.labels_==i)[0],0], self.poc_snp_pcoa_df.iloc[np.where(poc_kmeans.labels_==i)[0],1])
+            self.axar[1,0].scatter(poc_kmeans.cluster_centers_[i][0], poc_kmeans.cluster_centers_[i][1], c=scat._original_facecolor, marker='x')
+        # Add the predicted cluster to the df
+        
+        por_kmeans = KMeans(n_clusters=3, n_init=100, algorithm='full').fit(self.por_snp_pcoa_df)
+        for i in range(por_kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            scat = self.axar[1,1].scatter(self.por_snp_pcoa_df.iloc[np.where(por_kmeans.labels_==i)[0],0], self.por_snp_pcoa_df.iloc[np.where(por_kmeans.labels_==i)[0],1])
+            self.axar[1,1].scatter(por_kmeans.cluster_centers_[i][0], por_kmeans.cluster_centers_[i][1], c=scat._original_facecolor, marker='x')
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster.png'), dpi=600)
         foo = 'bar'
 
     
