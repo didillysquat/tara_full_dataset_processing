@@ -227,7 +227,6 @@ class EighteenSDistance(EighteenSBase):
             return
         # Call the class that will be responsible for calculating the distances
         # Calculating the PCoA and then plotting
-        # TODO we are here on the refactoring debug.
         self._compute_and_test_dist_matrix()
         # self.plot_computed_distances()
 
@@ -1264,7 +1263,6 @@ if __name__ == "__main__":
             out_q.put('ONE_DONE')
         out_q.put('ALL_DONE')
 
-    # TODO we should likely identify roughly which parameters we whould be working with and then fine tune from there
     def do_multi_proc_launch():
         num_proc = 100
         in_q = Queue()
@@ -1302,18 +1300,32 @@ if __name__ == "__main__":
                         tot += 1
                 for normalisation_method in ['pwr', 'rai']:
                     if dist_method_18S == 'braycurtis':
-                        # TODO take the step from 1000 to 10 000 from 1000 to 200
+                        # We will test the normalisation abundance using optimised 
+                        # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
+                        # For both species, the same the same value for both distance methods can be used.
+                        if host_genus == 'Pocillopora':
+                            samples_at_least_threshold = 0.08
+                            most_abund_seq_cutoff = 150
+                        else:
+                            samples_at_least_threshold = 0.02
+                            most_abund_seq_cutoff = 75
                         for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
-                            samples_at_least_threshold = 0
-                            most_abund_seq_cutoff = 0
+                            # samples_at_least_threshold = 0
+                            # most_abund_seq_cutoff = 0
                             only_snp_samples = False
                             min_num_distinct_seqs_per_sample = 3
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
                     elif dist_method_18S == 'unifrac':
+                        if host_genus == 'Pocillopora':
+                            samples_at_least_threshold = 0.08
+                            most_abund_seq_cutoff = 150
+                        else:
+                            samples_at_least_threshold = 0.02
+                            most_abund_seq_cutoff = 75
                         for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)):
-                            samples_at_least_threshold = 0
-                            most_abund_seq_cutoff = 0
+                            # samples_at_least_threshold = 0
+                            # most_abund_seq_cutoff = 0
                             only_snp_samples = False
                             min_num_distinct_seqs_per_sample = 3
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
@@ -1326,13 +1338,13 @@ if __name__ == "__main__":
                     min_num_distinct_seqs_per_sample = 3
                     only_snp_samples = False
                     if host_genus == 'Porites':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
                             to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample)
                             test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                     elif host_genus == 'Pocillopora':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 100, 10)):
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
                             in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                             tot += 1
                             test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
