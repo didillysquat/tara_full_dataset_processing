@@ -16,6 +16,7 @@ import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
+import subprocess
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -44,7 +45,7 @@ class Cluster18S(EighteenSBase):
             poc_inertia.append(kmeans.inertia_)
         self.axar[0,0].plot([_ + 1 for _ in range(10)], poc_inertia, 'k-')
         self.axar[0,0].set_xticks([_ + 1 for _ in range(10)])
-        self.axar[0,0].set_title('POC')
+        self.axar[0,0].set_title('Pocillopora')
         self.axar[0,0].set_xlabel('k')
         self.axar[0,0].set_ylabel('inertia')
 
@@ -55,7 +56,7 @@ class Cluster18S(EighteenSBase):
             por_inertia.append(kmeans.inertia_)
         self.axar[0,1].plot([_ + 1 for _ in range(10)], por_inertia, 'k-')
         self.axar[0,1].set_xticks([_ + 1 for _ in range(10)])
-        self.axar[0,1].set_title('POR')
+        self.axar[0,1].set_title('Porites')
         self.axar[0,1].set_xlabel('k')
         self.axar[0,1].set_ylabel('inertia')
 
@@ -158,6 +159,62 @@ class Cluster18S(EighteenSBase):
         # Convert the index to sample-id
         return [sample_name_dict[ind] for ind in index]
 
-if __name__ == "__main__":
+    def category_scores(self):
+        """
+        We now have a selection of parameter sets that look to be giving the highest correlation coefficients.
+        We will work these initially to generate a set of categorisation agreement scores. I.e. we will
+        work with the distance matrices generated from these scores to do clustering and then check the agreement
+        of this clustering with the kmeans labels from the SNP biallelic data.
 
-    Cluster18S().visalise_snp_df()
+        hard code in a set of parameters to work with, then in series fetch their pcoas and perform kmeans clustering
+        on them. We will not yet know what the Ks will be so the first step will be to plot these up.
+        Perhaps we can start with one species method combinations (i.e. Porites braycurtis.). Produce a plot that
+        is the first components of the pcoa, produce the elbow plot, and we can do this for each of the parameter 
+        combinations that we want to try.
+
+        NB it is here that we will want to be testing the with and without the SNP samples for the 18S clustering.
+        """
+        genus = 'Porites'
+        dist_method = 'braycurtis'
+        misco_range = np.arange(0.1, 0.6, 0.1)
+        masco = 80
+        figure, ax = plt.subplots(2, len(misco_range), figsize=(24,8))
+        
+        for misco_i, misco_v in enumerate(misco_range):
+            # Read in the pcoa file of interest as a df
+            pcoa_file_name = f'{genus}_True_True_True_False_biallelic_{dist_method}_dist_10000_pwr_False_{misco_v}_{masco}_3_pcoa.csv.gz'
+            pcoa_path = os.path.join(self.output_dir_18s, pcoa_file_name)
+            subprocess.run(['gzip', '-d', pcoa_path], check=True)
+            pcoa_df = pd.read_csv(pcoa_path.replace('.gz', ''))
+            pcoa_df = pcoa_df.iloc[:-1, 1:]
+            subprocess.run(['gzip', pcoa_path.replace('.gz', '')], check=True)
+            
+            # Use the df to calculate k-means.
+            inertia = []
+            for i in range(10):
+                kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(pcoa_df)
+                inertia.append(kmeans.inertia_)
+
+            # here we have the inertia ready to be plotted up
+            ax[0,misco_i].plot([_ + 1 for _ in range(10)], inertia, 'k-')
+            ax[0,misco_i].set_xticks([_ + 1 for _ in range(10)])
+            ax[0,misco_i].set_title(f'misco: {misco_v}; masco {masco}')
+            ax[0,misco_i].set_xlabel('k')
+            ax[0,misco_i].set_ylabel('inertia')
+
+            #For the time being just plot up the 2d pcoa on the bottom ax
+            ax[1,misco_i].scatter(pcoa_df['PC1'], pcoa_df['PC2'])
+
+            plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster_18s.png'), dpi=600)
+            foo = 'bar'
+
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster_18s.png'), dpi=600)
+        foo = 'bar'
+        
+        
+        
+
+if __name__ == "__main__":
+    c = Cluster18S()
+    # c.visalise_snp_df()
+    c.category_scores()
