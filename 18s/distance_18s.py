@@ -1323,7 +1323,7 @@ if __name__ == "__main__":
                         else:
                             samples_at_least_threshold = 0.02
                             most_abund_seq_cutoff = 75
-                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,1000)):
+                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
                             # samples_at_least_threshold = 0
                             # most_abund_seq_cutoff = 0
                             only_snp_samples = False
