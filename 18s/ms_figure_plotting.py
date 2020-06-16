@@ -89,7 +89,7 @@ class ThreeRow:
         
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=300)
         self.line_style_dict = {'rai':'-', 'pwr':'--', 'braycurtis':'-', 'unifrac':'--', True:'-', False:'--'}
-        self.line_color_dict = {'Pocillopora':'black', 'Porites':'grey'}
+        self.line_color_dict = {'Pocillopora':'black', 'Porites':'red'}
 
     def plot(self):
         """
@@ -103,33 +103,36 @@ class ThreeRow:
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
         """
         self.norm_fig, self.norm_ax = plt.subplots(1,2, figsize=(8,4))
+        self.norm_ax[0].set_ylabel("Pearson's correlation coefficient")
+        self.norm_ax[1].set_ylabel("Pearson's correlation coefficient")
         self._plot_first_row()
+        plt.tight_layout()
         plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_norm_fig.png'), dpi=1200)
 
         self.cutoff_fig, self.cutoff_ax = plt.subplots(2,2, figsize=(8,8))
         self._plot_second_row()
         self._plot_third_row()
-        self.cutoff_ax[0,0].set_ylabel('correlation coef.')
-        self.cutoff_ax[1,0].set_ylabel('correlation coef.')
-        self.cutoff_ax[0,1].set_ylabel('p_val')
-        self.cutoff_ax[1,1].set_ylabel('p_val')
-        self.cutoff_ax[0,0].set_xlabel('samples_at_least_threshold')
-        self.cutoff_ax[1,0].set_xlabel('most_abund_seq_cutoff')
-        self.cutoff_ax[0,1].set_xlabel('samples_at_least_threshold')
-        self.cutoff_ax[1,1].set_xlabel('most_abund_seq_cutoff')
+        self.cutoff_ax[0,0].set_ylabel("Pearson's correlation coefficient")
+        self.cutoff_ax[1,0].set_ylabel("Pearson's correlation coefficient")
+        self.cutoff_ax[0,1].set_ylabel('p-value')
+        self.cutoff_ax[1,1].set_ylabel('p-value')
+        self.cutoff_ax[0,0].set_xlabel('minimum in sample cutoff')
+        self.cutoff_ax[1,0].set_xlabel('most abundant sequence cutoff')
+        self.cutoff_ax[0,1].set_xlabel('minimum in sample cutoff')
+        self.cutoff_ax[1,1].set_xlabel('most abundant sequence cutoff')
         self.cutoff_ax[0,1].legend(loc='upper left', fontsize='x-small')
         plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_cutoff_fig.png'), dpi=1200)
         
         self.contour_fig, self.contour_ax = plt.subplots(2,2, figsize=(8,8))
         self._plot_fourth_row()
-        self.contour_ax[0,0].set_ylabel('samples_at_least_threshold', fontsize='x-small')
-        self.contour_ax[1,0].set_ylabel('samples_at_least_threshold', fontsize='x-small')
-        self.contour_ax[0,1].set_ylabel('samples_at_least_threshold', fontsize='x-small')
-        self.contour_ax[1,1].set_ylabel('samples_at_least_threshold', fontsize='x-small')
-        self.contour_ax[0,0].set_xlabel('most_abund_seq_cutoff', fontsize='x-small')
-        self.contour_ax[1,0].set_xlabel('most_abund_seq_cutoff', fontsize='x-small')
-        self.contour_ax[0,1].set_xlabel('most_abund_seq_cutoff', fontsize='x-small')
-        self.contour_ax[1,1].set_xlabel('most_abund_seq_cutoff', fontsize='x-small')
+        self.contour_ax[0,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[1,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[0,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[1,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[0,0].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[1,0].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[0,1].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[1,1].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
         # 00
         # hlines
         self.contour_ax[0,0].plot([0,300], [0.08,0.08], 'r-', linewidth=0.5)
@@ -188,8 +191,8 @@ class ThreeRow:
 
         for ax in self.norm_ax:
             ax.set_xlabel('normalisation abundance')
-            ax.set_xlim(0,20000)
-            ax.set_ylim(-0.1,0.25)
+            ax.set_xlim(0,10000)
+            ax.set_ylim(0,0.25)
             ax.legend(loc='lower right', fontsize='x-small')
             # NB the only way that having SNP samples can make a difference is during the Unifrac and Unifrac isn't really working here
             # Otherwise, if you think about it, exactly the same pairwise comparisons are going to be considered for the braycurtis and
@@ -251,16 +254,23 @@ class ThreeRow:
                 contour = self._plot_countour(ax=self.contour_ax[g_i,m_i], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False)
                 self.contour_ax[g_i,m_i].set_title(f'{g}_{m}', fontsize='x-small')
                 cbar = self.contour_fig.colorbar(contour, ax=self.contour_ax[g_i,m_i])
-                cbar.ax.set_ylabel('correlation coefficient')
+                cbar.ax.set_ylabel("Pearson's correlation coefficient")
        
     def _plot_line_first_row(self, ax, genus, linestyle, color, label, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
-        # We want to find all files in the 18s output directory where:
-        # genus == g
+        
+        # We are testing the normalisation values using optimised parameters that are genus dependent.
+        # As such, the file we search for needs to be adjusted per genus
+        if genus == 'Pocillopora':
+            samples_at_least_threshold = str(0.08)
+            most_abund_seq_cutoff = str(150)
+        else: # genus == 'Porites':
+            samples_at_least_threshold = str(0.02)
+            most_abund_seq_cutoff = str(75)
         results_dict = {}
         for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
             if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist'):
                 # inbetween these to conditions is the nomalisation_abundance
-                if result_file.endswith(f'{normalisation_method}_{snp_only}_0_0_3_mantel_result.txt'):
+                if result_file.endswith(f'{normalisation_method}_{snp_only}_{samples_at_least_threshold}_{most_abund_seq_cutoff}_3_mantel_result.txt'):
                 # if result_file.endswith(f'{n_m}_False_0_0_3_mantel_result.txt'):
                     # Then this is a set of points for plotting
                     # We want to get them in order
@@ -398,6 +408,11 @@ class ThreeRow:
                             (cor_coef, p_val) = [float(_) for _ in f.read().rstrip().lstrip().split('\t')]
                     samples_at_least_threshold = float(result_file.split('_')[11])
                     most_abund_seq_cutoff = int(result_file.split('_')[12])
+                    # We need to through out the 75 value most_abund_seq_cutoff as we only have this for a single
+                    # samples_at_least_threshold due to the normalistaion testing.
+                    # If we leave this 75 in it creates a vertical white stripe at 75.
+                    if most_abund_seq_cutoff == 75:
+                        continue
                     x_samples_at_least_threshold.append(samples_at_least_threshold)
                     y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
                     z_coef.append(cor_coef)
