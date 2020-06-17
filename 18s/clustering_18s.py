@@ -284,6 +284,39 @@ class Cluster18S(EighteenSBase):
                 plt.savefig(os.path.join(self.eighteens_dir, f'temp_fig_cluster_{genus}_{dist_method}_18s.png'), dpi=600)
                 foo = 'bar'
 
+    def check_old_clustering_agreement(self):
+        """
+        We want to read in the old clustering assignments for Pocillopora
+        that we were able to get high agreement with.
+        """
+        old_df = pd.read_csv("/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv")
+        old_df.drop(columns='Colony', inplace=True)
+        old_df.rename(columns={'code pangea': 'sample-id', 'snmf/PCA':'label'}, inplace=True)
+        old_df.set_index('sample-id', inplace=True, drop=True)
+        poc_snp_kmeans_dict = compress_pickle.load(os.path.join(self.cache_dir, 'poc_biallelic_snp_kmeans_dict.p.bz'))
+        poc_kmeans = poc_snp_kmeans_dict[3]
+        poc_label_series = pd.Series(poc_kmeans.labels_, index=self.poc_snp_df.index, name='label')
+        in_common_sample_ids = [_ for _ in old_df.index if _ in poc_label_series.index]
+        # I think the fastest and clearest way to display this is to plot up the 
+        # poc SNP pcoa in 2D and colour (according to categories in old_df) the 27 in common samples
+        # all others should be grey
+        fig, ax = plt.subplots(1,1, figsize=(4,4))
+        # first plot up in grey
+        ax.scatter(self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC2'], c='lightgrey')
+        # Then plot up each of the ks
+        for i in range(3):
+            samples_to_plot = old_df[old_df['label']==i+1].index
+            ax.scatter(self.poc_snp_pcoa_df.loc[samples_to_plot,'PC1'], self.poc_snp_pcoa_df.loc[samples_to_plot,'PC2'])
+
+        ax.set_title('Old POC SNP classifications')
+        ax.set_xlabel('PC1')
+        ax.set_xlabel('PC2')
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_old_poc_snp_classification.png'), dpi=600)
+        
+        # Now do two plots below one same as above but within the context of the 18S pcoas
+        # one for each dist method.
+        foo = 'bar'
+
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
         self.parent = parent
@@ -595,7 +628,7 @@ class OneClusterCol:
 if __name__ == "__main__":
     c = Cluster18S()
     # c.visalise_snp_df()
-    c.category_scores()
+    # c.category_scores()
     c.check_old_clustering_agreement()
 
 # TODO
