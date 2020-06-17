@@ -234,272 +234,6 @@ class Cluster18S(EighteenSBase):
         poc_snp_dict = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)
         por_snp_dict = compress_pickle.load(self.por_snp_kmeans_dict_pickle_path)
         return poc_snp_dict, por_snp_dict
-    
-    def _get_pcoa_df(self, genus, dist_method, misco_v, masco):
-        # Read in the pcoa file of interest as a df
-        # get rid of tech reps and convert readset names to sample-id
-        pcoa_file_name = f'{genus}_True_True_True_False_biallelic_{dist_method}_dist_10000_pwr_False_{misco_v}_{masco}_3_pcoa.csv.gz'
-        pcoa_path = os.path.join(self.output_dir_18s, pcoa_file_name)
-        try:
-            subprocess.run(['gzip', '-d', pcoa_path], check=True)
-        except CalledProcessError:
-            # The file may already be unzipped
-            pass
-        pcoa_df = pd.read_csv(pcoa_path.replace('.gz', ''))
-        pcoa_df.set_index('sample', drop=True, inplace=True)
-        # Get rid of the proportion explained
-        pcoa_df = pcoa_df.iloc[:-1,:]
-        # Get rid of tech replicates and convert readset to sample-id
-        drop_list = []
-        for ind in pcoa_df.index:
-            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
-                drop_list.append(ind)
-        
-        # Now drop the rows and columns
-        pcoa_df.drop(index=drop_list, inplace=True)
-
-        # Now we need to convert these to sample-id format.
-        sample_id_list = []
-        for ind in pcoa_df.index:
-            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
-        
-        pcoa_df.index = sample_id_list
-        
-        subprocess.run(['gzip', pcoa_path.replace('.gz', '')], check=True)
-        return pcoa_df
-
-    def _calculate_inertia_silhoutte_scores(self, pcoa_df, k_range):
-        inertia = []
-        sil = {}
-        # Save the kmeans calculations so that we don't have to re-calculate below
-        kmeans_dict = {}
-        for i in k_range:
-            kmeans = KMeans(n_clusters=i, n_init=100, algorithm='full').fit(pcoa_df)
-            kmeans_dict[i] = kmeans
-            inertia.append(kmeans.inertia_)
-            sil[i] = silhouette_score(pcoa_df, kmeans.labels_, metric = 'euclidean')
-        return inertia, sil, kmeans_dict
-
-    def _plot_inertia_silhoutte(self, ax, k_range, inertia, sil, misco_v, masco):
-        # here we have the inertia ready to be plotted up
-        ax.plot([_ for _ in k_range], inertia, 'k-')
-        ax.set_xticks([_ for _ in k_range])
-        ax.set_title(f'misco: {misco_v}; masco {masco}')
-        ax.set_xlabel('k')
-        ax.set_ylabel('inertia')
-        ax2 = ax.twinx()
-        ax2.plot([_ for _ in k_range], [sil[_] for _ in k_range], 'r-')
-        ax2.set_ylabel('silhouette score')
-        ax.spines['right'].set_color('red')
-        ax2.spines['right'].set_color('red')
-        ax2.yaxis.label.set_color('red')
-        ax2.tick_params(axis='y', colors='red')
-
-    def _create_agreement_dict(self, genus, dist_method, misco_v, masco):
-        """We have created a cache system for these dictionaries as they take considerable time to compute
-        The dictionaries hold for a given k, 
-        'data' - the agreement between the 18s and snp based on the data
-        'random' - the same but using random labels
-        'ratios' - the ratio of the best data agreement and the best random. We did this so that we can judge
-        which k worked best taking into account the fact that agreement might be better soley due to the fact
-        that k was smaller.
-        """
-        max_agreement_dict_data_pickle_path = os.path.join(self.cache_dir_18s, f'{genus}_{dist_method}_biallelic_{misco_v}_{masco}_max_agreement_dict_data.p.bz')
-        max_agreement_dict_random_pickle_path = os.path.join(self.cache_dir_18s, f'{genus}_{dist_method}_biallelic_{misco_v}_{masco}_max_agreement_dict_random.p.bz')
-        max_agreement_dict_ratios_pickle_path = os.path.join(self.cache_dir_18s, f'{genus}_{dist_method}_biallelic_{misco_v}_{masco}_max_agreement_dict_ratios.p.bz')
-        if os.path.exists(max_agreement_dict_data_pickle_path) and os.path.exists(max_agreement_dict_random_pickle_path) and os.path.exists(max_agreement_dict_ratios_pickle_path):
-            max_agreement_dict_data = compress_pickle.load(max_agreement_dict_data_pickle_path)
-            max_agreement_dict_random = compress_pickle.load(max_agreement_dict_random_pickle_path)
-            max_agreement_dict_ratios = compress_pickle.load(max_agreement_dict_ratios_pickle_path)
-        else:
-            max_agreement_dict_data = {}
-            max_agreement_dict_random = {}
-            max_agreement_dict_ratios = {}
-        return (max_agreement_dict_data, max_agreement_dict_random, max_agreement_dict_ratios, 
-        max_agreement_dict_data_pickle_path, max_agreement_dict_random_pickle_path, max_agreement_dict_ratios_pickle_path)
-
-    def _generate_label_dfs(self, genus, kmeans_dict, pcoa_df):
-        # create label dfs for both the 18s and the snp.
-        
-        # 18S
-        label_df_18s_data = pd.Series(kmeans_dict[k].labels_, index=pcoa_df.index, name='label')
-        # Also create a label df where the labels have been randomly shuffled
-        # So that we can compare the agreement scores against agreement scores based
-        # on chance alone.
-        random_labels = random.sample(list(label_df_18s_data), len(label_df_18s_data))
-        label_df_18s_random = pd.Series(random_labels, index=label_df_18s_data.index, name='label_random')
-
-        # SNP
-        if genus == 'Pocillopora':
-            label_df_snp_data = pd.Series(self.poc_snp_kmeans_dict[k].labels_, index=self.poc_snp_df.index, name='label')
-        else:
-            label_df_snp_data = pd.Series(self.por_snp_kmeans_dict[k].labels_, index=self.por_snp_df.index, name='label')
-        random_labels = random.sample(list(label_df_snp_data), len(label_df_snp_data))
-        label_df_snp_random = pd.Series(random_labels, index=label_df_snp_data.index, name='label_random')
-        return label_df_18s_data, label_df_18s_random, label_df_snp_data, label_df_snp_random
-
-    def _agreement_data(self, label_df_18s_data, label_df_snp_data):
-        count = 0
-        agree = 0
-        for sample, label in label_df_18s_data.items():
-            if sample in label_df_snp_data:
-                count += 1
-                if cat_mapping_dict[label_df_18s_data[sample]] == label_df_snp_data[sample]:
-                    agree += 1
-        return agree/count
-
-    def _agreement_random(self, label_df_18s_random, label_df_snp_random):
-        count = 0
-        agree = 0
-        for sample, label in label_df_18s_random.items():
-            if sample in label_df_snp_random:
-                count += 1
-                if cat_mapping_dict[label_df_18s_random[sample]] == label_df_snp_random[sample]:
-                    agree += 1
-        return agree/count
-
-    def _calculate_agreement_for_given_k(
-        self, cat_mapping_dicts, label_df_18s_data, 
-        label_df_snp_data, label_df_18s_random, label_df_snp_random):
-        agreements_data = []
-        agreements_random = []
-        print(f'Assessing mapped agreements for k = {k}')
-        tot = len(cat_mapping_dicts)
-        # We can actually perhaps calculate the best agreement between the 
-        # the mappings by looking at the centroids of both kmeans.
-        for cat_i, cat_mapping_dict in enumerate(cat_mapping_dicts):
-            sys.stdout.write(f'\r{cat_i}/{tot}')
-            # DATA
-            # Calculate agreement for each of the category mappings
-            agreement_data = self._agreement_data(label_df_18s_data, label_df_snp_data)
-            agreements_data.append(agreement_data)
-            
-            agreement_random = self._agreement_random(label_df_18s_random, label_df_snp_random)
-            agreements_random.append(agreement_random)
-        print(f'\nComplete for k={k}')
-        return agreements_data, agreements_random
-
-    def _populate_and_pickle_agreement_dicts(self, agreements_data, agreements_random, 
-        max_agreement_dict_data_pickle_path, max_agreement_dict_random_pickle_path, 
-        max_agreement_dict_ratios_pickle_path):
-        max_agreement_dict_data[k] = max(agreements_data)
-        max_agreement_dict_random[k] = max(agreements_random)
-        max_agreement_dict_ratios[k] = max(agreements_data)/max(agreements_random)
-        compress_pickle.dump(max_agreement_dict_data, max_agreement_dict_data_pickle_path)
-        compress_pickle.dump(max_agreement_dict_random, max_agreement_dict_random_pickle_path)
-        compress_pickle.dump(max_agreement_dict_ratios, max_agreement_dict_ratios_pickle_path)
-
-    def _compute_18s_snp_agreements(
-        self, k_range, max_agreement_dict_ratios, genus, kmeans_dict, pcoa_df, 
-        max_agreement_dict_data_pickle_path, max_agreement_dict_random_pickle_path, 
-        max_agreement_dict_ratios_pickle_path):
-        for k in k_range:
-            if k in max_agreement_dict_ratios:
-                continue
-            
-            # pandas Series of sample to label
-            label_df_18s_data, label_df_18s_random, label_df_snp_data, label_df_snp_random = self._generate_label_dfs(genus=genus, kmeans_dict=kmeans_dict, pcoa_df=pcoa_df)
-            assert(set(label_df_18s_data.unique()) == set(label_df_snp_data.unique()))
-            
-            # For each 18S sample, look up the call and see if it agrees
-            # We need to take into acount that the label names are likely different between the two clusterings.
-            # As such we'll need to work out the best possible agreement.
-            # The list of the differnt category mappings can be generated using permutations
-            cat_mapping_dicts = [{k:v for k, v in zip(label_df_18s_data.unique(), _)} for _ in itertools.permutations(label_df_18s_data.unique(), len(label_df_18s_data.unique()))]
-            
-            agreements_data, agreements_random = self._calculate_agreement_for_given_k(
-                cat_mapping_dicts, label_df_18s_data, label_df_snp_data, label_df_18s_random, label_df_snp_random)
-            
-            self._populate_and_pickle_agreement_dicts(agreements_data, agreements_random, max_agreement_dict_data_pickle_path, max_agreement_dict_random_pickle_path, max_agreement_dict_ratios_pickle_path)
-            
-            print(f'max agreement: {max(agreements_data)}')
-
-    def _plot_agreement_values(self, ax, max_agreement_dict_data, k_range, max_agreement_dict_ratios):
-        # Here we are ready to plot up the agreement values
-        ax.plot([_ for _ in k_range], [max_agreement_dict_data[_] for _ in k_range], 'k-')
-        ax.set_xticks([_ for _ in k_range])
-        ax.set_xlabel('k')
-        ax.set_ylabel('agreement score')
-        ax2 = ax.twinx()
-        ax2.plot([_ for _ in k_range], [max_agreement_dict_ratios[_] for _ in k_range], 'r-')
-        ax2.set_ylabel('data/random ratio')
-        ax.spines['right'].set_color('red')
-        ax2.spines['right'].set_color('red')
-        ax2.yaxis.label.set_color('red')
-        ax2.tick_params(axis='y', colors='red')
-
-    def _plot_scatter_cluster_agreement(self, ax, max_agreement_dict_ratios, kmeans_dict, pcoa_df):
-        """
-        Plot up the first two comonents of the 18S pcoa and colour according to the kmeans categores
-        given at the max_k.
-        """
-        max_k = sorted(max_agreement_dict_ratios, key=max_agreement_dict_ratios.get, reverse=True)[0]
-        kmeans = kmeans_dict[max_k]
-        colours = []
-        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
-            # plot up the centroid and the points in the same colour
-            scat = ax.scatter(pcoa_df.iloc[np.where(kmeans.labels_==i)[0],0], pcoa_df.iloc[np.where(kmeans.labels_==i)[0],1], s=16)
-            colours.append(scat._original_facecolor[0])
-            
-        reset_xlim = ax.get_xlim()
-        reset_ylim = ax.get_ylim()
-        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
-            # plot up the centroid and the points in the same colour
-            # Plot the centroid as vline hline intersect
-            #vline
-            centroid_x = kmeans.cluster_centers_[i][0]
-            centorid_y = kmeans.cluster_centers_[i][1]
-            
-            ax.plot([centroid_x, centroid_x],[ax.get_ylim()[0], ax.get_ylim()[1]], c=colours[i])
-            ax.plot([ax.get_xlim()[0], ax.get_xlim()[1]],[centorid_y, centorid_y], c=colours[i])
-        # lims need resetting as the plotting of the lines changes them.
-        ax.set_xlim(reset_xlim)
-        ax.set_ylim(reset_ylim)
-        ax.set_title(f'k={max_k}')
-        return max_k, kmeans
-
-    def _plot_scatter_cluster_snp_cats(self, ax, genus, max_k, pcoa_df, kmeans):
-        """
-        Plot up the 18s first two components but coloured according to the snp categories at the max_k k.
-        Where categories are not available (most samples), plot as grey.
-        """
-        if genus == 'Pocillopora':
-            label_df_snp = pd.Series(self.poc_snp_kmeans_dict[max_k].labels_, index=self.poc_snp_df.index, name='label')
-        else:
-            label_df_snp = pd.Series(self.por_snp_kmeans_dict[max_k].labels_, index=self.por_snp_df.index, name='label')
-
-        colours = []
-        # Firstly we want to scatter up the samples that aren't found in the snp
-        # as light grey 
-        scat_samples = [_ for _ in pcoa_df.index if _ not in label_df_snp.index]
-        ax.scatter(pcoa_df.loc[scat_samples,'PC1'], pcoa_df.loc[scat_samples,'PC2'], s=16, c='lightgrey')
-        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
-            # Get a list of samples that we want to plot up
-            # This gives us the rows where the lables are i in the snp
-            i_samples = label_df_snp[label_df_snp==i].index
-            # Then we want to scatter those samples that are in the pcoa_df
-            scat_samples = [_ for _ in pcoa_df.index if _ in i_samples]
-            scat = ax.scatter(pcoa_df.loc[scat_samples,'PC1'], pcoa_df.loc[scat_samples,'PC2'], s=16)
-            
-            colours.append(scat._original_facecolor[0])
-            
-        reset_xlim = ax.get_xlim()
-        reset_ylim = ax.get_ylim()
-        
-        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
-            # plot up the centroid and the points in the same colour
-            # Plot the centroid as vline hline intersect
-            #vline
-            centroid_x = kmeans.cluster_centers_[i][0]
-            centorid_y = kmeans.cluster_centers_[i][1]
-            
-            ax.plot([centroid_x, centroid_x],[ax.get_ylim()[0], ax.get_ylim()[1]], c=colours[i])
-            ax.plot([ax.get_xlim()[0], ax.get_xlim()[1]],[centorid_y, centorid_y], c=colours[i])
-        
-        # lims need resetting as the plotting of the lines changes them.
-        ax.set_xlim(reset_xlim)
-        ax.set_ylim(reset_ylim)
-        ax.set_title(f'k={max_k}')
 
     def category_scores(self):
         """
@@ -522,48 +256,322 @@ class Cluster18S(EighteenSBase):
         genus = 'Porites'
         dist_method = 'braycurtis'
         misco_range = [f'{num:.1f}' for num in np.arange(0.1, 0.6, 0.1)]
-        masco = 80
-        figure, ax = plt.subplots(4, len(misco_range), figsize=(24,12))
+        masco_range = [80]
+        num_param_combs = len(misco_range) * len(masco_range)
+        figure, ax = plt.subplots(num_param_combs, 4, figsize=(24, 2*num_param_combs))
         
         # Make a figure set for each of the misco values
-        for misco_i, misco_v in enumerate(misco_range):
-            pcoa_df = self._get_pcoa_df(genus, dist_method, misco_v, masco)
+        for misco_i, misco in enumerate(misco_range):
+            for masco_i, masco in enumerate(masco_range):
+                occ = OneClusterCol(genus=genus, dist_method=dist_method, misco=misco, masco=masco, ax=ax[(misco_i * len(masco_range)) + masco_i], parent=self)
+                occ.plot_col()
 
-            # Use the df to calculate k-means.
-            k_range = range(2,11,1)
-            inertia, sil, kmeans_dict = self._calculate_inertia_silhoutte_scores(pcoa_df=pcoa_df, k_range=range(2,11,1))
-            
-            self._plot_inertia_silhoutte(ax=ax[0,misco_i], k_range=k_range, inertia=inertia, sil=sil, misco_v=misco_v, masco=masco)
-            
-            # Now plot up a line plot underneath the elbow and silhoutte plot that gives
-            # the percentage agreement between the 18S and SNP categorsations.
-            (max_agreement_dict_data, max_agreement_dict_random, max_agreement_dict_ratios, 
-            max_agreement_dict_data_pickle_path, max_agreement_dict_random_pickle_path, 
-            max_agreement_dict_ratios_pickle_path) = self._create_agreement_dict(genus, dist_method, misco_v, masco)
-            
-            k_range = range(2,7,1)
-            self._compute_18s_snp_agreements(
-                k_range, max_agreement_dict_ratios, genus, kmeans_dict,
-                pcoa_df, max_agreement_dict_data_pickle_path,
-                max_agreement_dict_random_pickle_path, max_agreement_dict_ratios_pickle_path)
-            
-            self._plot_agreement_values(ax[1,misco_i], max_agreement_dict_data, k_range, max_agreement_dict_ratios)
-            
-            # Plot up the first 2 coords coloured according to the clustering with the best agreement
-            max_k, kmeans = self._plot_scatter_cluster_agreement(ax[2,misco_i], max_agreement_dict_ratios, kmeans_dict, pcoa_df)
-            
-            # Then plot up coloured according to the snp clustering
-            # For this we will only be able to plot up those points
-            # that have an snp classficiation as coloured. For the others, plot as grey.
-            self._plot_scatter_cluster_snp_cats(ax[3, misco_i], genus, max_k, pcoa_df, kmeans)
-            
         # Once plotting is complete for all parameter combinatinos. Write out fig.
         plt.tight_layout()
-        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster_18s.png'), dpi=600)
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster_{genus}_{dist_method}_18s.png'), dpi=600)
         foo = 'bar'
+
+class OneClusterCol:
+    def __init__(self, genus, dist_method, misco, masco, ax, parent):
+        self.parent = parent
+        self.genus = genus
+        self.dist_method = dist_method
+        self.misco = misco
+        self.masco = masco
+        # Ax is an array of the axes (a single column worths)
+        self.ax = ax
+        self.figure_path = os.path.join(self.parent.eighteens_dir, 'temp_fig_cluster_{self.genus}_{self.dist_method}_18s.png')
+        self.pcoa_df = self._get_pcoa_df()
+        self.k_range = range(2,11,1)
+        self.inertia = []
+        self.sil = {}
+        # The KMeans objects for the ks computed for the given genus, dist method and parameter set
+        self.kmeans_dict = {}
+        self._set_agreement_dicts()
         
+        # These will be set dynamically after the kmeans have been calculated
+        # and will be recalculated with every kmeans
+        self.label_df_18s_data = None
+        self.label_df_18s_random = None
+        self.label_df_snp_data = None
+        self.label_df_snp_random = None
+        # The category mapping dicts will also be generated with every kmeans calculation
+        self.cat_mapping_dicts = None
+        self.agreements_data = None
+        self.agreements_random = None
+        self.max_k = None
+        self.kmeans = None
         
+    def _set_agreement_dicts(self):
+        """We have created a cache system for these dictionaries as they take considerable time to compute
+        The dictionaries hold for a given k, 
+        'data' - the agreement between the 18s and snp based on the data
+        'random' - the same but using random labels
+        'ratios' - the ratio of the best data agreement and the best random. We did this so that we can judge
+        which k worked best taking into account the fact that agreement might be better soley due to the fact
+        that k was smaller.
+        """
+        self.max_agreement_dict_data_pickle_path = os.path.join(self.parent.cache_dir_18s, f'{self.genus}_{self.dist_method}_biallelic_{self.misco}_{self.masco}_max_agreement_dict_data.p.bz')
+        self.max_agreement_dict_random_pickle_path = os.path.join(self.parent.cache_dir_18s, f'{self.genus}_{self.dist_method}_biallelic_{self.misco}_{self.masco}_max_agreement_dict_random.p.bz')
+        self.max_agreement_dict_ratios_pickle_path = os.path.join(self.parent.cache_dir_18s, f'{self.genus}_{self.dist_method}_biallelic_{self.misco}_{self.masco}_max_agreement_dict_ratios.p.bz')
+        if os.path.exists(self.max_agreement_dict_data_pickle_path) and os.path.exists(self.max_agreement_dict_random_pickle_path) and os.path.exists(self.max_agreement_dict_ratios_pickle_path):
+            self.max_agreement_dict_data = compress_pickle.load(self.max_agreement_dict_data_pickle_path)
+            self.max_agreement_dict_random = compress_pickle.load(self.max_agreement_dict_random_pickle_path)
+            self.max_agreement_dict_ratios = compress_pickle.load(self.max_agreement_dict_ratios_pickle_path)
+        else:
+            self.max_agreement_dict_data = {}
+            self.max_agreement_dict_random = {}
+            self.max_agreement_dict_ratios = {}
+    
+    def plot_col(self):
+        # first calculate the inertial values and silhoutte scores to produce elbow plot
+        # and silhoutte plot on same axes to inform fit of k values.
+        self._calculate_inertia_silhoutte_scores()
+        self._plot_inertia_silhoutte()
         
+        # For calculating the agreements we will temporarily work with a reduced number of k values
+        # as checking the agreements using the category mapping dictionaries is very expensive for larger
+        # values of k
+        self.k_range = range(2,7,1)
+        self._compute_18s_snp_agreements()
+        self._plot_agreement_values()
+        
+        # Plot up the first 2 coords coloured according to the clustering with the best agreement
+        self._plot_scatter_cluster_agreement()
+
+        # Then plot up coloured according to the snp clustering
+        # For this we will only be able to plot up those points
+        # that have an snp classficiation as coloured. For the others, plot as grey.
+        self._plot_scatter_cluster_snp_cats()
+
+    def _plot_scatter_cluster_snp_cats(self):
+        """
+        Plot up the 18s first two components but coloured according to the snp categories at the max_k k.
+        Where categories are not available (most samples), plot as grey.
+        """
+        if self.genus == 'Pocillopora':
+            label_df_snp = pd.Series(self.parent.poc_snp_kmeans_dict[self.max_k].labels_, index=self.parent.poc_snp_df.index, name='label')
+        else:
+            label_df_snp = pd.Series(self.parent.por_snp_kmeans_dict[self.max_k].labels_, index=self.parent.por_snp_df.index, name='label')
+
+        colours = []
+        # Firstly we want to scatter up the samples that aren't found in the snp
+        # as light grey 
+        scat_samples = [_ for _ in self.pcoa_df.index if _ not in label_df_snp.index]
+        self.ax[3].scatter(self.pcoa_df.loc[scat_samples,'PC1'], self.pcoa_df.loc[scat_samples,'PC2'], s=16, c='lightgrey')
+        for i in range(self.kmeans.cluster_centers_.shape[0]): # for each k
+            # Get a list of samples that we want to plot up
+            # This gives us the rows where the lables are i in the snp
+            i_samples = label_df_snp[label_df_snp==i].index
+            # Then we want to scatter those samples that are in the pcoa_df
+            scat_samples = [_ for _ in self.pcoa_df.index if _ in i_samples]
+            scat = self.ax[3].scatter(self.pcoa_df.loc[scat_samples,'PC1'], self.pcoa_df.loc[scat_samples,'PC2'], s=16)
+            
+            colours.append(scat._original_facecolor[0])
+            
+        reset_xlim = self.ax[3].get_xlim()
+        reset_ylim = self.ax[3].get_ylim()
+        
+        for i in range(self.kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            # Plot the centroid as vline hline intersect
+            #vline
+            centroid_x = self.kmeans.cluster_centers_[i][0]
+            centorid_y = self.kmeans.cluster_centers_[i][1]
+            
+            self.ax[3].plot([centroid_x, centroid_x],[self.ax[3].get_ylim()[0], self.ax[3].get_ylim()[1]], c=colours[i])
+            self.ax[3].plot([self.ax[3].get_xlim()[0], self.ax[3].get_xlim()[1]],[centorid_y, centorid_y], c=colours[i])
+        
+        # lims need resetting as the plotting of the lines changes them.
+        self.ax[3].set_xlim(reset_xlim)
+        self.ax[3].set_ylim(reset_ylim)
+        self.ax[3].set_title(f'k={self.max_k}')
+
+    def _plot_scatter_cluster_agreement(self):
+        """
+        Plot up the first two comonents of the 18S pcoa and colour according to the kmeans categores
+        given at the max_k.
+        """
+        self.max_k = sorted(self.max_agreement_dict_ratios, key=self.max_agreement_dict_ratios.get, reverse=True)[0]
+        self.kmeans = self.kmeans_dict[self.max_k]
+        colours = []
+        for i in range(self.kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            scat = self.ax[2].scatter(self.pcoa_df.iloc[np.where(self.kmeans.labels_==i)[0],0], self.pcoa_df.iloc[np.where(self.kmeans.labels_==i)[0],1], s=16)
+            colours.append(scat._original_facecolor[0])
+            
+        reset_xlim = self.ax[2].get_xlim()
+        reset_ylim = self.ax[2].get_ylim()
+        for i in range(self.kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            # Plot the centroid as vline hline intersect
+            #vline
+            centroid_x = self.kmeans.cluster_centers_[i][0]
+            centorid_y = self.kmeans.cluster_centers_[i][1]
+            
+            self.ax[2].plot([centroid_x, centroid_x],[self.ax[2].get_ylim()[0], self.ax[2].get_ylim()[1]], c=colours[i])
+            self.ax[2].plot([self.ax[2].get_xlim()[0], self.ax[2].get_xlim()[1]],[centorid_y, centorid_y], c=colours[i])
+        # lims need resetting as the plotting of the lines changes them.
+        self.ax[2].set_xlim(reset_xlim)
+        self.ax[2].set_ylim(reset_ylim)
+        self.ax[2].set_title(f'k={self.max_k}')
+
+    def _plot_agreement_values(self):
+        # Here we are ready to plot up the agreement values
+        self.ax[1].plot([_ for _ in self.k_range], [self.max_agreement_dict_data[_] for _ in self.k_range], 'k-')
+        self.ax[1].set_xticks([_ for _ in self.k_range])
+        self.ax[1].set_xlabel('k')
+        self.ax[1].set_ylabel('agreement score')
+        ax2 = self.ax[1].twinx()
+        ax2.plot([_ for _ in self.k_range], [self.max_agreement_dict_ratios[_] for _ in self.k_range], 'r-')
+        ax2.set_ylabel('data/random ratio')
+        self.ax[1].spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+
+    def _generate_label_dfs(self):
+        # create label dfs for both the 18s and the snp.
+        
+        # 18S
+        self.label_df_18s_data = pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label')
+        # Also create a label df where the labels have been randomly shuffled
+        # So that we can compare the agreement scores against agreement scores based
+        # on chance alone.
+        random_labels = random.sample(list(self.label_df_18s_data), len(self.label_df_18s_data))
+        self.label_df_18s_random = pd.Series(random_labels, index=self.label_df_18s_data.index, name='label_random')
+
+        # SNP
+        if self.genus == 'Pocillopora':
+            self.label_df_snp_data = pd.Series(self.parent.poc_snp_kmeans_dict[k].labels_, index=self.parent.poc_snp_df.index, name='label')
+        else:
+            self.label_df_snp_data = pd.Series(self.parent.por_snp_kmeans_dict[k].labels_, index=self.parent.por_snp_df.index, name='label')
+        random_labels = random.sample(list(self.label_df_snp_data), len(self.label_df_snp_data))
+        self.label_df_snp_random = pd.Series(random_labels, index=self.label_df_snp_data.index, name='label_random')
+        
+    def _agreement_data(self):
+        count = 0
+        agree = 0
+        for sample, label in self.label_df_18s_data.items():
+            if sample in self.label_df_snp_data:
+                count += 1
+                if cat_mapping_dict[self.label_df_18s_data[sample]] == self.label_df_snp_data[sample]:
+                    agree += 1
+        return agree/count
+
+    def _agreement_random(self):
+        count = 0
+        agree = 0
+        for sample, label in self.label_df_18s_random.items():
+            if sample in self.label_df_snp_random:
+                count += 1
+                if cat_mapping_dict[self.label_df_18s_random[sample]] == self.label_df_snp_random[sample]:
+                    agree += 1
+        return agree/count
+
+    def _calculate_agreement_for_given_k(self):
+        self.agreements_data = []
+        self.agreements_random = []
+        print(f'Assessing mapped agreements for k = {k}')
+        tot = len(self.cat_mapping_dicts)
+        # We can actually perhaps calculate the best agreement between the 
+        # the mappings by looking at the centroids of both kmeans.
+        for cat_i, cat_mapping_dict in enumerate(self.cat_mapping_dicts):
+            sys.stdout.write(f'\r{cat_i}/{tot}')
+            # DATA
+            # Calculate agreement for each of the category mappings
+            agreement_data = self._agreement_data()
+            self.agreements_data.append(agreement_data)
+            
+            agreement_random = self._agreement_random()
+            self.agreements_random.append(agreement_random)
+        print(f'\nComplete for k={k}')
+
+    def _compute_18s_snp_agreements(self):
+        for k in self.k_range:
+            if k in self.max_agreement_dict_ratios:
+                continue
+            
+            # pandas Series of sample to label
+            self._generate_label_dfs()
+            assert(set(self.label_df_18s_data.unique()) == set(self.label_df_snp_data.unique()))
+            
+            # For each 18S sample, look up the call and see if it agrees
+            # We need to take into acount that the label names are likely different between the two clusterings.
+            # As such we'll need to work out the best possible agreement.
+            # The list of the differnt category mappings can be generated using permutations
+            self.cat_mapping_dicts = [{k:v for k, v in zip(self.label_df_18s_data.unique(), _)} for _ in itertools.permutations(label_df_18s_data.unique(), len(label_df_18s_data.unique()))]
+            
+            self._calculate_agreement_for_given_k()
+            
+            self._populate_and_pickle_agreement_dicts()
+            
+            print(f'max agreement: {max(agreements_data)}')
+
+    def _populate_and_pickle_agreement_dicts(self):
+        self.max_agreement_dict_data[k] = max(self.agreements_data)
+        self.max_agreement_dict_random[k] = max(self.agreements_random)
+        self.max_agreement_dict_ratios[k] = max(agreements_data)/max(agreements_random)
+        compress_pickle.dump(self.max_agreement_dict_data, self.max_agreement_dict_data_pickle_path)
+        compress_pickle.dump(self.max_agreement_dict_random, self.max_agreement_dict_random_pickle_path)
+        compress_pickle.dump(self.max_agreement_dict_ratios, self.max_agreement_dict_ratios_pickle_path)
+
+    def _plot_inertia_silhoutte(self):
+        # here we have the inertia ready to be plotted up
+        self.ax[0].plot([_ for _ in self.k_range], self.inertia, 'k-')
+        self.ax[0].set_xticks([_ for _ in self.k_range])
+        self.ax[0].set_title(f'misco: {self.misco}; masco {self.masco}')
+        self.ax[0].set_xlabel('k')
+        self.ax[0].set_ylabel('inertia')
+        ax2 = self.ax[0].twinx()
+        ax2.plot([_ for _ in self.k_range], [self.sil[_] for _ in self.k_range], 'r-')
+        ax2.set_ylabel('silhouette score')
+        self.ax[0].spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+    
+    def _calculate_inertia_silhoutte_scores(self):
+        # Save the kmeans calculations so that we don't have to re-calculate below
+        for i in self.k_range:
+            kmeans = KMeans(n_clusters=i, n_init=100, algorithm='full').fit(self.pcoa_df)
+            self.kmeans_dict[i] = kmeans
+            self.inertia.append(kmeans.inertia_)
+            self.sil[i] = silhouette_score(self.pcoa_df, kmeans.labels_, metric = 'euclidean')
+        
+
+    def _get_pcoa_df(self):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+        pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
+        try:
+            subprocess.run(['gzip', '-d', pcoa_path], check=True)
+        except CalledProcessError:
+            # The file may already be unzipped
+            pass
+        pcoa_df = pd.read_csv(pcoa_path.replace('.gz', ''))
+        pcoa_df.set_index('sample', drop=True, inplace=True)
+        # Get rid of the proportion explained
+        pcoa_df = pcoa_df.iloc[:-1,:]
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in pcoa_df.index:
+            if not self.parent.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        pcoa_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in pcoa_df.index:
+            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+        
+        pcoa_df.index = sample_id_list
+        
+        subprocess.run(['gzip', pcoa_path.replace('.gz', '')], check=True)
+        return pcoa_df
 
 if __name__ == "__main__":
     c = Cluster18S()
