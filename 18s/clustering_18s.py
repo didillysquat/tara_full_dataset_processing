@@ -253,23 +253,36 @@ class Cluster18S(EighteenSBase):
         
         self.poc_snp_kmeans_dict, self.por_snp_kmeans_dict = self._load_snp_kmeans_dicts()
         
-        genus = 'Porites'
-        dist_method = 'braycurtis'
-        misco_range = [f'{num:.1f}' for num in np.arange(0.1, 0.6, 0.1)]
-        masco_range = [80]
-        num_param_combs = len(misco_range) * len(masco_range)
-        figure, ax = plt.subplots(num_param_combs, 4, figsize=(24, 2*num_param_combs))
+        for genus in ['Pocillopora', 'Porites']:
+            for dist_method in ['braycurtis', 'unifrac']:
+                if genus == 'Porites' and dist_method == 'braycurtis':
+                    misco_range = [f'{num:.1f}' for num in np.arange(0.1, 0.6, 0.1)]
+                    masco_range = [80]
+                elif genus == 'Porites' and dist_method == 'unifrac':
+                    misco_range = ['0.02', '0.66']
+                    masco_range = [50,100]
+                elif genus == 'Pocillopora' and dist_method == 'braycurtis':
+                    misco_range = ['0.08']
+                    masco_range = range(100,250,50)
+                elif genus == 'Pocillopora' and dist_method == 'unifrac':
+                    #DONE
+                    misco_range = ['0.08']
+                    masco_range = range(100,300,50)
+                
+                
+                num_param_combs = len(misco_range) * len(masco_range)
+                figure, ax = plt.subplots(4, num_param_combs, figsize=(4*num_param_combs, 12))
         
-        # Make a figure set for each of the misco values
-        for misco_i, misco in enumerate(misco_range):
-            for masco_i, masco in enumerate(masco_range):
-                occ = OneClusterCol(genus=genus, dist_method=dist_method, misco=misco, masco=masco, ax=ax[(misco_i * len(masco_range)) + masco_i], parent=self)
-                occ.plot_col()
+                # Make a figure set for each of the misco values
+                for misco_i, misco in enumerate(misco_range):
+                    for masco_i, masco in enumerate(masco_range):
+                        occ = OneClusterCol(genus=genus, dist_method=dist_method, misco=misco, masco=masco, ax=ax[:,(misco_i * len(masco_range)) + masco_i], parent=self)
+                        occ.plot_col()
 
-        # Once plotting is complete for all parameter combinatinos. Write out fig.
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.eighteens_dir, 'temp_fig_cluster_{genus}_{dist_method}_18s.png'), dpi=600)
-        foo = 'bar'
+                # Once plotting is complete for all parameter combinatinos. Write out fig.
+                plt.tight_layout()
+                plt.savefig(os.path.join(self.eighteens_dir, f'temp_fig_cluster_{genus}_{dist_method}_18s.png'), dpi=600)
+                foo = 'bar'
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
@@ -430,7 +443,7 @@ class OneClusterCol:
         ax2.yaxis.label.set_color('red')
         ax2.tick_params(axis='y', colors='red')
 
-    def _generate_label_dfs(self):
+    def _generate_label_dfs(self, k):
         # create label dfs for both the 18s and the snp.
         
         # 18S
@@ -449,7 +462,7 @@ class OneClusterCol:
         random_labels = random.sample(list(self.label_df_snp_data), len(self.label_df_snp_data))
         self.label_df_snp_random = pd.Series(random_labels, index=self.label_df_snp_data.index, name='label_random')
         
-    def _agreement_data(self):
+    def _agreement_data(self, cat_mapping_dict):
         count = 0
         agree = 0
         for sample, label in self.label_df_18s_data.items():
@@ -459,7 +472,7 @@ class OneClusterCol:
                     agree += 1
         return agree/count
 
-    def _agreement_random(self):
+    def _agreement_random(self, cat_mapping_dict):
         count = 0
         agree = 0
         for sample, label in self.label_df_18s_random.items():
@@ -469,7 +482,7 @@ class OneClusterCol:
                     agree += 1
         return agree/count
 
-    def _calculate_agreement_for_given_k(self):
+    def _calculate_agreement_for_given_k(self, k):
         self.agreements_data = []
         self.agreements_random = []
         print(f'Assessing mapped agreements for k = {k}')
@@ -480,10 +493,10 @@ class OneClusterCol:
             sys.stdout.write(f'\r{cat_i}/{tot}')
             # DATA
             # Calculate agreement for each of the category mappings
-            agreement_data = self._agreement_data()
+            agreement_data = self._agreement_data(cat_mapping_dict)
             self.agreements_data.append(agreement_data)
             
-            agreement_random = self._agreement_random()
+            agreement_random = self._agreement_random(cat_mapping_dict)
             self.agreements_random.append(agreement_random)
         print(f'\nComplete for k={k}')
 
@@ -493,25 +506,25 @@ class OneClusterCol:
                 continue
             
             # pandas Series of sample to label
-            self._generate_label_dfs()
+            self._generate_label_dfs(k)
             assert(set(self.label_df_18s_data.unique()) == set(self.label_df_snp_data.unique()))
             
             # For each 18S sample, look up the call and see if it agrees
             # We need to take into acount that the label names are likely different between the two clusterings.
             # As such we'll need to work out the best possible agreement.
             # The list of the differnt category mappings can be generated using permutations
-            self.cat_mapping_dicts = [{k:v for k, v in zip(self.label_df_18s_data.unique(), _)} for _ in itertools.permutations(label_df_18s_data.unique(), len(label_df_18s_data.unique()))]
+            self.cat_mapping_dicts = [{k:v for k, v in zip(self.label_df_18s_data.unique(), _)} for _ in itertools.permutations(self.label_df_18s_data.unique(), len(self.label_df_18s_data.unique()))]
             
-            self._calculate_agreement_for_given_k()
+            self._calculate_agreement_for_given_k(k)
             
-            self._populate_and_pickle_agreement_dicts()
+            self._populate_and_pickle_agreement_dicts(k)
             
-            print(f'max agreement: {max(agreements_data)}')
+            print(f'max agreement: {max(self.agreements_data)}')
 
-    def _populate_and_pickle_agreement_dicts(self):
+    def _populate_and_pickle_agreement_dicts(self, k):
         self.max_agreement_dict_data[k] = max(self.agreements_data)
         self.max_agreement_dict_random[k] = max(self.agreements_random)
-        self.max_agreement_dict_ratios[k] = max(agreements_data)/max(agreements_random)
+        self.max_agreement_dict_ratios[k] = max(self.agreements_data)/max(self.agreements_random)
         compress_pickle.dump(self.max_agreement_dict_data, self.max_agreement_dict_data_pickle_path)
         compress_pickle.dump(self.max_agreement_dict_random, self.max_agreement_dict_random_pickle_path)
         compress_pickle.dump(self.max_agreement_dict_ratios, self.max_agreement_dict_ratios_pickle_path)
@@ -543,7 +556,11 @@ class OneClusterCol:
     def _get_pcoa_df(self):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
-        pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+        if self.dist_method == 'unifrac':
+            pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+        else:
+            pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+
         pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
         try:
             subprocess.run(['gzip', '-d', pcoa_path], check=True)
@@ -573,7 +590,23 @@ class OneClusterCol:
         subprocess.run(['gzip', pcoa_path.replace('.gz', '')], check=True)
         return pcoa_df
 
+
+
 if __name__ == "__main__":
     c = Cluster18S()
     # c.visalise_snp_df()
     c.category_scores()
+    c.check_old_clustering_agreement()
+
+# TODO
+# Run permanovas of the dist matrices with meta data for site, island, 
+# sequencing depth pre normalisation, richness post-normalisation.
+# Do this for both the 18S and the SNP
+
+# TODO check clustering of between old poc and new poc.
+
+# TODO, plot up ordination figures one for poc and one for por
+# comparing between the 18S structure and the SNP structure.
+# 2 ordinations for the SNP (at low and high k)
+# and 4 for the 18S, one for each dist method also at high and low k.
+# We can use the in detail cluster figs for the 18S to choose which can be representative.
