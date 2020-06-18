@@ -288,6 +288,10 @@ class Cluster18S(EighteenSBase):
         """
         We want to read in the old clustering assignments for Pocillopora
         that we were able to get high agreement with.
+        We want to see how these correspond to the new SNP PCoA and to the old
+        Plot up all points that don't have an annotation in the old set as grey 
+        and the those that do with a colour corresponding to their categorisation.
+        DONE
         """
         old_df = pd.read_csv("/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv")
         old_df.drop(columns='Colony', inplace=True)
@@ -300,22 +304,76 @@ class Cluster18S(EighteenSBase):
         # I think the fastest and clearest way to display this is to plot up the 
         # poc SNP pcoa in 2D and colour (according to categories in old_df) the 27 in common samples
         # all others should be grey
-        fig, ax = plt.subplots(1,1, figsize=(4,4))
+        fig, ax = plt.subplots(3,1, figsize=(4,12))
         # first plot up in grey
-        ax.scatter(self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC2'], c='lightgrey')
+        ax[0].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in poc_label_series.index  if _ not in old_df.index],'PC2'], c='lightgrey')
         # Then plot up each of the ks
         for i in range(3):
             samples_to_plot = old_df[old_df['label']==i+1].index
-            ax.scatter(self.poc_snp_pcoa_df.loc[samples_to_plot,'PC1'], self.poc_snp_pcoa_df.loc[samples_to_plot,'PC2'])
+            ax[0].scatter(self.poc_snp_pcoa_df.loc[samples_to_plot,'PC1'], self.poc_snp_pcoa_df.loc[samples_to_plot,'PC2'])
 
-        ax.set_title('Old POC SNP classifications')
-        ax.set_xlabel('PC1')
-        ax.set_xlabel('PC2')
-        plt.savefig(os.path.join(self.eighteens_dir, 'temp_old_poc_snp_classification.png'), dpi=600)
+        ax[0].set_title('Old POC SNP classifications')
+        ax[0].set_xlabel('PC1')
+        ax[0].set_xlabel('PC2')
+        
         
         # Now do two plots below one same as above but within the context of the 18S pcoas
         # one for each dist method.
+        # FOr the Poc braycurtis use misco 0.08 masco 200.
+        # For the poc unifrac use misco 0.08 masco 200
+        
+        # First BC
+        pcoa_file_name = f'Pocillopora_True_True_True_False_biallelic_braycurtis_dist_10000_pwr_False_0.08_200_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax[1].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index  if _ not in old_df.index], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index  if _ not in old_df.index],'PC2'], c='lightgrey')
+        for i in range(3):
+            samples_to_plot = old_df[old_df['label']==i+1].index
+            ax[1].scatter(pcoa_df.loc[samples_to_plot,'PC1'], pcoa_df.loc[samples_to_plot,'PC2'])
+
+        # Then Unifrac
+        pcoa_file_name = f'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_pwr_False_0.08_200_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax[2].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index  if _ not in old_df.index], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index  if _ not in old_df.index],'PC2'], c='lightgrey')
+        for i in range(3):
+            samples_to_plot = old_df[old_df['label']==i+1].index
+            ax[2].scatter(pcoa_df.loc[samples_to_plot,'PC1'], pcoa_df.loc[samples_to_plot,'PC2'])
+        
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_old_poc_snp_classification.png'), dpi=600)
         foo = 'bar'
+
+    def _get_pcoa_df(self, pcoa_path=None):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        if pcoa_path is None:
+            if self.dist_method == 'unifrac':
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+            else:
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+
+            pcoa_path = os.path.join(self.output_dir_18s, pcoa_file_name)
+        
+        pcoa_df = pd.read_csv(pcoa_path)
+        pcoa_df.set_index('sample', drop=True, inplace=True)
+        # Get rid of the proportion explained
+        pcoa_df = pcoa_df.iloc[:-1,:]
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in pcoa_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        pcoa_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in pcoa_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        
+        pcoa_df.index = sample_id_list
+        
+        
+        return pcoa_df
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
@@ -348,6 +406,40 @@ class OneClusterCol:
         self.max_k = None
         self.kmeans = None
         
+    def _get_pcoa_df(self, pcoa_path=None):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        if pcoa_path is None:
+            if self.dist_method == 'unifrac':
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+            else:
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+
+            pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
+        
+        pcoa_df = pd.read_csv(pcoa_path)
+        pcoa_df.set_index('sample', drop=True, inplace=True)
+        # Get rid of the proportion explained
+        pcoa_df = pcoa_df.iloc[:-1,:]
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in pcoa_df.index:
+            if not self.parent.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        pcoa_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in pcoa_df.index:
+            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+        
+        pcoa_df.index = sample_id_list
+        
+        
+        return pcoa_df
+    
     def _set_agreement_dicts(self):
         """We have created a cache system for these dictionaries as they take considerable time to compute
         The dictionaries hold for a given k, 
@@ -586,42 +678,7 @@ class OneClusterCol:
             self.sil[i] = silhouette_score(self.pcoa_df, kmeans.labels_, metric = 'euclidean')
         
 
-    def _get_pcoa_df(self):
-        # Read in the pcoa file of interest as a df
-        # get rid of tech reps and convert readset names to sample-id
-        if self.dist_method == 'unifrac':
-            pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
-        else:
-            pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
-
-        pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
-        try:
-            subprocess.run(['gzip', '-d', pcoa_path], check=True)
-        except CalledProcessError:
-            # The file may already be unzipped
-            pass
-        pcoa_df = pd.read_csv(pcoa_path.replace('.gz', ''))
-        pcoa_df.set_index('sample', drop=True, inplace=True)
-        # Get rid of the proportion explained
-        pcoa_df = pcoa_df.iloc[:-1,:]
-        # Get rid of tech replicates and convert readset to sample-id
-        drop_list = []
-        for ind in pcoa_df.index:
-            if not self.parent.meta_info_df.at[ind, 'is_representative_for_sample']:
-                drop_list.append(ind)
-        
-        # Now drop the rows and columns
-        pcoa_df.drop(index=drop_list, inplace=True)
-
-        # Now we need to convert these to sample-id format.
-        sample_id_list = []
-        for ind in pcoa_df.index:
-            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
-        
-        pcoa_df.index = sample_id_list
-        
-        subprocess.run(['gzip', pcoa_path.replace('.gz', '')], check=True)
-        return pcoa_df
+    
 
 
 
@@ -637,6 +694,7 @@ if __name__ == "__main__":
 # Do this for both the 18S and the SNP
 
 # TODO check clustering of between old poc and new poc.
+# DONE
 
 # TODO, plot up ordination figures one for poc and one for por
 # comparing between the 18S structure and the SNP structure.
