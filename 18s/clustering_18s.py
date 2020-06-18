@@ -375,6 +375,143 @@ class Cluster18S(EighteenSBase):
         
         return pcoa_df
 
+    def clustering_overview(self):
+        """
+        Produce a 3 x 6 figure that gives an overview of the clustering for the SNP and 18S.
+        Top row is SNP, first three cols = POC second three = POR. First col == no categories,
+        second col = low k categoris thrid col = high k categories. Then repeat for POR
+        Second row is Brayurtis 18S
+        Thrid row is Unifrac 18S
+        """
+        fig, ax_arr = plt.subplots(3,6, figsize=(36,18))
+        # SNP
+        poc_snp_kmeans_dict = compress_pickle.load(os.path.join(self.cache_dir, 'poc_biallelic_snp_kmeans_dict.p.bz'))
+        por_snp_kmeans_dict = compress_pickle.load(os.path.join(self.cache_dir, 'por_biallelic_snp_kmeans_dict.p.bz'))
+        # POC do k at 5 and 10
+        ax_arr[0,0].scatter(self.poc_snp_pcoa_df['PC1'], self.poc_snp_pcoa_df['PC2'], c='black')
+        ax_arr[0,0].set_title(f'SNP_Pocillopora_biallelic')
+        
+        # k = 5
+        kmeans = poc_snp_kmeans_dict[5]
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[0,1].scatter(self.poc_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], self.poc_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[0,1].set_title(f'SNP_Pocillopora_biallelic k=5')
+        
+        # k = 10
+        kmeans = poc_snp_kmeans_dict[10]
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[0,2].scatter(self.poc_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], self.poc_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[0,2].set_title(f'SNP_Pocillopora_biallelic k=10')
+        
+        # POR do k at 3 and 7
+        ax_arr[0,3].scatter(self.poc_snp_pcoa_df['PC1'], self.poc_snp_pcoa_df['PC2'], c='black')
+        ax_arr[0,3].set_title(f'SNP_Porites_biallelic')
+        
+        # k = 3
+        kmeans = por_snp_kmeans_dict[3]
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[0,4].scatter(self.por_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], self.por_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[0,4].set_title(f'SNP_Porites_biallelic k=3')
+
+        # k = 7
+        kmeans = por_snp_kmeans_dict[7]
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[0,5].scatter(self.por_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], self.por_snp_pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[0,5].set_title(f'SNP_Porites_biallelic k=7')
+
+        # 18S
+        # Bray
+        # POC k at 4 and 7
+        pcoa_file_name = f'Pocillopora_True_True_True_False_biallelic_braycurtis_dist_10000_pwr_False_0.08_200_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax_arr[1,0].scatter(pcoa_df['PC1'], pcoa_df['PC2'], c='black')
+        ax_arr[1,0].set_title(f'18S_Pocillopora_braycurtis misco=0.08 masco=200')
+        #k = 4
+        kmeans = KMeans(n_clusters=4, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[1,1].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[1,1].set_title(f'18S_Pocillopora_braycurtis misco=0.08 masco=200 k=4')
+        
+        # k = 7
+        kmeans = KMeans(n_clusters=7, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[1,2].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[1,2].set_title(f'18S_Pocillopora_braycurtis misco=0.08 masco=200 k=7')
+
+        # POR k at 4 and 6 on misco 0.2 masco 80
+        pcoa_file_name = f'Porites_True_True_True_False_biallelic_braycurtis_dist_10000_pwr_False_0.2_80_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax_arr[1,3].scatter(pcoa_df['PC1'], pcoa_df['PC2'], c='black')
+        ax_arr[1,3].set_title(f'18S_Porites_braycurtis misco=0.20 masco=80')
+        
+        #k = 4
+        kmeans = KMeans(n_clusters=4, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[1,4].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[1,4].set_title(f'18S_Porites_braycurtis misco=0.20 masco=80 k=4')
+        
+        # k = 6
+        kmeans = KMeans(n_clusters=6, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[1,5].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[1,5].set_title(f'18S_Porites_braycurtis misco=0.20 masco=80 k=6')
+        
+        # Unifrac
+        # POC misco at 0.08 masco at 200, k at 3 and 6
+        pcoa_file_name = f'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_pwr_False_0.08_200_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax_arr[2,0].scatter(pcoa_df['PC1'], pcoa_df['PC2'], c='black')
+        ax_arr[2,0].set_title(f'18S_Poocillopora_unifrac misco=0.08 masco=200')
+        
+        #k = 3
+        kmeans = KMeans(n_clusters=3, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[2,1].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[2,1].set_title(f'18S_Poocillopora_unifrac misco=0.08 masco=200 k=3')
+        
+        # k = 6
+        kmeans = KMeans(n_clusters=6, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[2,2].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[2,2].set_title(f'18S_Poocillopora_unifrac misco=0.08 masco=200 k=6')
+
+        # POR misco at 0.66 masco at 100, k at 3 and 5
+        pcoa_file_name = f'Porites_True_True_True_False_biallelic_unifrac_dist_1000_pwr_False_0.66_100_3_pcoa.csv.gz'
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, pcoa_file_name))
+        ax_arr[2,3].scatter(pcoa_df['PC1'], pcoa_df['PC2'], c='black')
+        ax_arr[2,3].set_title(f'18S_Porites_unifrac misco=0.66 masco=100')
+
+        #k = 3
+        kmeans = KMeans(n_clusters=3, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[2,4].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[2,4].set_title(f'18S_Porites_unifrac misco=0.66 masco=100 k=3')
+        
+        # k = 5
+        kmeans = KMeans(n_clusters=5, n_init=100, algorithm='full').fit(pcoa_df)
+        for i in range(kmeans.cluster_centers_.shape[0]):
+            ax_arr[2,5].scatter(pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 0], pcoa_df.iloc[np.where(kmeans.labels_ == i)[0], 1])
+        ax_arr[2,5].set_title(f'18S_Porites_unifrac misco=0.66 masco=100 k=5')
+
+        plt.savefig(os.path.join(self.eighteens_dir, 'temp_clustering_overview.png'), dpi=300)
+
+    # def produce_r_input(self):
+    #     """
+    #     We will run 6 PERMANOVAs. One for each species, marker, dist method combination.
+    #     We will run these in R but we will output the input files here.
+    #     For each PERMANOVA we will need a pair of files. One distance matrix and one meta info df.
+    #     What details are included in the meta info files will differ between the SNP and 18S analyses.
+    #     For both we will have Island and site. For the 18S we will also have, pre-QC seq depth, pre-QC richness
+    #     post-QC richness. We will need to look back at the qc_output_dictionaries to get these values.
+    #     """
+
+    #     # SNP POC output
+    #     # dist matrice
+    #     self.poc_snp_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_snp_biallelic.dist'))
+    #     meta_df = self.meta_info_df.loc[self.meta_info_df['sample-id'].isin(self.poc_snp_df.index) & (self.meta_info_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')]
+    #     meta_df.set_index('sample-id', inplace=True, drop=True)
+    #     meta_df = meta_df.loc[:,['ISLAND#', 'SITE#']]
+
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
         self.parent = parent
@@ -686,12 +823,15 @@ if __name__ == "__main__":
     c = Cluster18S()
     # c.visalise_snp_df()
     # c.category_scores()
-    c.check_old_clustering_agreement()
+    # c.check_old_clustering_agreement()
+    # c.clustering_overview()
+    c.produce_r_input()
 
 # TODO
 # Run permanovas of the dist matrices with meta data for site, island, 
 # sequencing depth pre normalisation, richness post-normalisation.
 # Do this for both the 18S and the SNP
+# We will presumably need a distance matrix to pass in and then a meta info df.
 
 # TODO check clustering of between old poc and new poc.
 # DONE
@@ -701,3 +841,6 @@ if __name__ == "__main__":
 # 2 ordinations for the SNP (at low and high k)
 # and 4 for the 18S, one for each dist method also at high and low k.
 # We can use the in detail cluster figs for the 18S to choose which can be representative.
+# DONE
+
+# TODO autocorrelation between different 18S distance methods. for k=3 
