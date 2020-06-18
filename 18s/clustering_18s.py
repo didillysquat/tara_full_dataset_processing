@@ -404,7 +404,7 @@ class Cluster18S(EighteenSBase):
         ax_arr[0,2].set_title(f'SNP_Pocillopora_biallelic k=10')
         
         # POR do k at 3 and 7
-        ax_arr[0,3].scatter(self.poc_snp_pcoa_df['PC1'], self.poc_snp_pcoa_df['PC2'], c='black')
+        ax_arr[0,3].scatter(self.por_snp_pcoa_df['PC1'], self.por_snp_pcoa_df['PC2'], c='black')
         ax_arr[0,3].set_title(f'SNP_Porites_biallelic')
         
         # k = 3
@@ -495,22 +495,113 @@ class Cluster18S(EighteenSBase):
 
         plt.savefig(os.path.join(self.eighteens_dir, 'temp_clustering_overview.png'), dpi=300)
 
-    # def produce_r_input(self):
-    #     """
-    #     We will run 6 PERMANOVAs. One for each species, marker, dist method combination.
-    #     We will run these in R but we will output the input files here.
-    #     For each PERMANOVA we will need a pair of files. One distance matrix and one meta info df.
-    #     What details are included in the meta info files will differ between the SNP and 18S analyses.
-    #     For both we will have Island and site. For the 18S we will also have, pre-QC seq depth, pre-QC richness
-    #     post-QC richness. We will need to look back at the qc_output_dictionaries to get these values.
-    #     """
+    def produce_r_input(self):
+        """
+        We will run 6 PERMANOVAs. One for each species, marker, dist method combination.
+        We will run these in R but we will output the input files here.
+        For each PERMANOVA we will need a pair of files. One distance matrix and one meta info df.
+        What details are included in the meta info files will differ between the SNP and 18S analyses.
+        For both we will have Island and site. For the 18S we will also have, pre-QC seq depth, pre-QC richness
+        post-QC richness. We will need to look back at the qc_output_dictionaries to get these values.
+        """
 
-    #     # SNP POC output
-    #     # dist matrice
-    #     self.poc_snp_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_snp_biallelic.dist'))
-    #     meta_df = self.meta_info_df.loc[self.meta_info_df['sample-id'].isin(self.poc_snp_df.index) & (self.meta_info_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')]
-    #     meta_df.set_index('sample-id', inplace=True, drop=True)
-    #     meta_df = meta_df.loc[:,['ISLAND#', 'SITE#']]
+        # SNP POC output
+        # dist matrice
+        self.poc_snp_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_snp_biallelic.dist.csv'), index=False, header=False)
+        # meta df
+        meta_df = self.sample_provenance_df.loc[self.poc_snp_df.index]
+        meta_df = meta_df[meta_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L']
+        meta_df = meta_df.loc[:,['ISLAND#', 'SITE#']]
+        meta_df.rename(columns={'ISLAND#':'ISLAND', 'SITE#':'SITE'}, inplace=True)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_snp_biallelic.meta.csv'), index_label='sample_id', index=True, header=True)
+
+        # SNP POR output
+        # dist matrice
+        self.por_snp_df.to_csv(os.path.join(self.output_dir_18s, 'porites_snp_biallelic.dist.csv'), index=False, header=False)
+        # meta df
+        meta_df = self.sample_provenance_df.loc[self.por_snp_df.index]
+        meta_df = meta_df[meta_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L']
+        meta_df = meta_df.loc[:,['ISLAND#', 'SITE#']]
+        meta_df.rename(columns={'ISLAND#':'ISLAND', 'SITE#':'SITE'}, inplace=True)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'porites_snp_biallelic.meta.csv'), index_label='sample_id', index=True, header=True)
+
+        # 18S
+        # POC BrayCurtis
+        dist_file_name = f'Pocillopora_True_True_True_False_biallelic_braycurtis_dist_10000_pwr_False_0.08_200_3.dist.gz'
+        dist_df, meta_df = self._get_dist_meta_df(dist_path=os.path.join(self.output_dir_18s, dist_file_name), abundance_dict_file_name=dist_file_name.replace('.dist.gz', '_abundance_dict.p.bz'), genus='Pocillopora')
+        dist_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_18S_braycurtis_0.08_200.dist.csv'), index=False, header=False)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_18S_braycurtis_0.08_200.meta.csv'), index=True, header=True, index_label='sample_id')
+
+        # POC Unifrac
+        dist_file_name = f'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_pwr_False_0.08_200_3.dist.gz'
+        dist_df, meta_df = self._get_dist_meta_df(dist_path=os.path.join(self.output_dir_18s, dist_file_name), abundance_dict_file_name=dist_file_name.replace('.dist.gz', '_abundance_dict.p.bz'), genus='Pocillopora')
+        dist_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_18S_unifrac_0.08_200.dist.csv'), index=False, header=False)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'pocillopora_18S_unifrac_0.08_200.meta.csv'), index=True, header=True, index_label='sample_id')
+
+        # POR BrayCurtis
+        dist_file_name = f'Porites_True_True_True_False_biallelic_braycurtis_dist_10000_pwr_False_0.2_80_3.dist.gz'
+        dist_df, meta_df = self._get_dist_meta_df(dist_path=os.path.join(self.output_dir_18s, dist_file_name), abundance_dict_file_name=dist_file_name.replace('.dist.gz', '_abundance_dict.p.bz'), genus='Pocillopora')
+        dist_df.to_csv(os.path.join(self.output_dir_18s, 'porites_18S_braycurtis_0.2_80.dist.csv'), index=False, header=False)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'porites_18S_braycurtis_0.2_80.meta.csv'), index=True, header=True, index_label='sample_id')
+
+        # POR Unifrac
+        dist_file_name = f'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_pwr_False_0.66_100_3.dist.gz'
+        dist_df, meta_df = self._get_dist_meta_df(dist_path=os.path.join(self.output_dir_18s, dist_file_name), abundance_dict_file_name=dist_file_name.replace('.dist.gz', '_abundance_dict.p.bz'), genus='Pocillopora')
+        dist_df.to_csv(os.path.join(self.output_dir_18s, 'porites_18S_unifrac_0.66_100.dist.csv'), index=False, header=False)
+        meta_df.to_csv(os.path.join(self.output_dir_18s, 'porites_18S_unifrac_0.66_100.meta.csv'), index=True, header=True, index_label='sample_id')
+
+        foo = 'bar'
+
+    def _get_dist_meta_df(self, dist_path, abundance_dict_file_name, genus):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        
+        dist_df = pd.read_csv(dist_path, index_col=0, header=None)
+
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in dist_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        dist_df.drop(index=drop_list, inplace=True)
+
+        # Here we need to make the meta while we still have the readset index as 
+        # qc info is stored with readset as key
+        normalised_abundance_dict = compress_pickle.load(os.path.join(self.cache_dir, abundance_dict_file_name))
+        meta_df = pd.DataFrame(index=normalised_abundance_dict.keys(), columns=['normalised_richness', 'raw_richness', 'raw_abund'])
+        for k, v in normalised_abundance_dict.items():
+            meta_df.at[k, 'normalised_richness'] = len(v.keys())
+            # Here we can look up the consolidation dict
+            sample_qc_dir = os.path.join(self.qc_dir, k)
+            consolidated_host_seqs_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'consolidated_host_seqs_abund_dict.p.bz'))
+            coral_annotation_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'coral_annotation_dict.p.bz'))
+            absolute_abund_dict = compress_pickle.load(os.path.join(sample_qc_dir, 'abs_all_seq_abundance_dict.p.bz'))
+            coral_keys = [k for k in absolute_abund_dict.keys() if k in coral_annotation_dict]
+            genus_keys = [k for k in coral_keys if coral_annotation_dict[k] == genus]
+            raw_abund = sum([absolute_abund_dict[k] for k in genus_keys])
+            
+            meta_df.at[k, 'raw_richness'] = len(consolidated_host_seqs_abund_dict.keys())
+            meta_df.at[k, 'raw_abund'] = raw_abund
+        
+        foo = 'bar'
+
+        meta_df = meta_df.reindex(dist_df.index)
+        assert(list(meta_df.index) == list(dist_df.index))
+        
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in dist_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        dist_df.index = sample_id_list
+        meta_df.index = sample_id_list
+
+        # Now add the island and site info to the meta_df
+        meta_df['ISLAND'] = self.sample_provenance_df.loc[meta_df.index, 'ISLAND#']
+        meta_df['SITE'] = self.sample_provenance_df.loc[meta_df.index, 'SITE#']
+
+        return dist_df, meta_df
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
