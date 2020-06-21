@@ -82,7 +82,8 @@ class Cluster18S(EighteenSBase):
         # make the df
         return pd.DataFrame(data=dat, columns=index, index=index).astype(int)
     
-    def visalise_snp_df(self):
+    def visalise_snp_new_clusters(self):
+        # TODO we are here.
         # first let's just get the pcoA plotted up
         self.fig, self.axar = plt.subplots(2,2, figsize=(8,8))
         
@@ -98,23 +99,44 @@ class Cluster18S(EighteenSBase):
         poc_sil = {}
         # Hold the kmeans results in a dict and pickle out this dict so that we can use it
         # in comparing between the 18S and SNP categorisation agreements
-        for i in range(1,10):
-            kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(poc_np)
-            poc_inertia.append(kmeans.inertia_)
-            poc_sil[i + 1] = silhouette_score(self.poc_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
-            self.poc_snp_kmeans_dict[i + 1] = kmeans
-        
-        compress_pickle.dump(self.poc_snp_kmeans_dict, self.poc_snp_kmeans_dict_pickle_path)
+        if os.path.exists(self.poc_snp_kmeans_dict_pickle_path):
+            self.poc_snp_kmeans_dict = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)
+            k_range = sorted(self.poc_snp_kmeans_dict.keys())
+            # print('Calculating kmeans')
+            for i in k_range:
+                print(f'k={i}')
+                kmeans = self.poc_snp_kmeans_dict[i]
+                poc_inertia.append(kmeans.inertia_)
+                poc_sil[i] = silhouette_score(self.poc_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+        else:
+            k_range = range(2, 101)
+            for i in k_range:
+                print(f'Computing k={i}')
+                kmeans = KMeans(n_clusters=i, n_init=100, algorithm='full').fit(poc_np)
+                poc_inertia.append(kmeans.inertia_)
+                poc_sil[i] = silhouette_score(self.poc_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+                self.poc_snp_kmeans_dict[i] = kmeans
+                try:
+                    compress_pickle.dump(self.poc_snp_kmeans_dict, self.poc_snp_kmeans_dict_pickle_path)
+                except:
+                    # remove the last k that made it fail and write out again then break
+                    k_to_del = sorted(self.poc_snp_kmeans_dict.keys(), reverse=True)[0]
+                    del self.poc_snp_kmeans_dict[k_to_del]
+                    poc_inertia = poc_inertia[:-1]
+                    del poc_sil[k_to_del]
+                    compress_pickle.dump(self.poc_snp_kmeans_dict, self.poc_snp_kmeans_dict_pickle_path)
+                    break
 
-        self.axar[0,0].plot([_ + 1 for _ in range(1,10)], poc_inertia, 'k-')
-        self.axar[0,0].set_xticks([_ + 1 for _ in range(1,10)])
+        k_range = sorted(self.poc_snp_kmeans_dict.keys())
+        self.axar[0,0].plot([_ for _ in k_range], poc_inertia, 'k-')
+        self.axar[0,0].set_xticks([_ for _ in k_range])
         self.axar[0,0].set_title('Pocillopora')
         self.axar[0,0].set_xlabel('k')
         self.axar[0,0].set_ylabel('inertia')
-        
+        self.axar[0,0].grid(linewidth=0.5, color='lightgrey')
         
         ax2 = self.axar[0,0].twinx()
-        ax2.plot([_ + 1 for _ in range(1,10)], [poc_sil[_ + 1]  for _ in range(1,10)], 'r-')
+        ax2.plot([_ for _ in k_range], [poc_sil[_]  for _ in k_range], 'r-')
         ax2.set_ylabel('silhouette score')
         self.axar[0,0].spines['right'].set_color('red')
         ax2.spines['right'].set_color('red')
@@ -125,22 +147,42 @@ class Cluster18S(EighteenSBase):
         por_np = self.por_snp_pcoa_df.to_numpy()
         por_inertia = []
         por_sil = {}
-        for i in range(1,10):
-            kmeans = KMeans(n_clusters=i + 1, n_init=100, algorithm='full').fit(por_np)
-            por_inertia.append(kmeans.inertia_)
-            por_sil[i + 1] = silhouette_score(self.por_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
-            self.por_snp_kmeans_dict[i + 1] = kmeans
+        if os.path.exists(self.por_snp_kmeans_dict_pickle_path +'boob'):
+            self.por_snp_kmeans_dict = compress_pickle(self.por_snp_kmeans_dict_pickle_path)
+            k_range = sorted(self.por_snp_kmeans_dict.keys())
+            for i in k_range:
+                kmeans = self.por_snp_kmeans_dict[i]
+                por_inertia.append(kmeans.inertia_)
+                por_sil[i] = silhouette_score(self.por_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+        else:
+            k_range = range(2, 101)
+            for i in k_range:
+                print(f'Computing k={i}')
+                kmeans = KMeans(n_clusters=i, n_init=100, algorithm='full').fit(por_np)
+                por_inertia.append(kmeans.inertia_)
+                por_sil[i] = silhouette_score(self.por_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+                self.por_snp_kmeans_dict[i] = kmeans
 
-        compress_pickle.dump(self.por_snp_kmeans_dict, self.por_snp_kmeans_dict_pickle_path)
+                try:
+                    compress_pickle.dump(self.por_snp_kmeans_dict, self.por_snp_kmeans_dict_pickle_path)
+                except:
+                    # remove the last k that made it fail and write out again then break
+                    k_to_del = sorted(self.por_snp_kmeans_dict.keys(), reverse=True)[0]
+                    del self.por_snp_kmeans_dict[k_to_del]
+                    por_inertia = por_inertia[:-1]
+                    del por_sil[k_to_del]
+                    compress_pickle.dump(self.por_snp_kmeans_dict, self.por_snp_kmeans_dict_pickle_path)
+                    break
 
-        self.axar[0,1].plot([_ + 1 for _ in range(1, 10)], por_inertia, 'k-')
-        self.axar[0,1].set_xticks([_ + 1 for _ in range(1, 10)])
+        k_range = sorted(self.por_snp_kmeans_dict.keys())
+        self.axar[0,1].plot([_ for _ in k_range], por_inertia, 'k-')
+        self.axar[0,1].set_xticks([_ for _ in k_range])
         self.axar[0,1].set_title('Porites')
         self.axar[0,1].set_xlabel('k')
         self.axar[0,1].set_ylabel('inertia')
 
         ax2 = self.axar[0,1].twinx()
-        ax2.plot([_ + 1 for _ in range(1, 10)], [por_sil[_ + 1] for _ in range(1, 10)], 'r-')
+        ax2.plot([_ for _ in k_range], [por_sil[_] for _ in k_range], 'r-')
         ax2.set_ylabel('silhouette score')
         self.axar[0,1].spines['right'].set_color('red')
         ax2.spines['right'].set_color('red')
@@ -603,6 +645,382 @@ class Cluster18S(EighteenSBase):
 
         return dist_df, meta_df
 
+    def _plot_up_kmeans_with_centroids(self, pcoa_df, kmeans, ax, labels=False):
+        """
+        A utility function for doing the kmeans plotting.
+        It will take in a pcoa_df and a kmeans object
+        and plot up the clusters on the ax including the centroids.
+        """
+        colours = []
+        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            x = pcoa_df.iloc[np.where(kmeans.labels_==i)[0],0]
+            y = pcoa_df.iloc[np.where(kmeans.labels_==i)[0],1]
+            point_labels = y.index
+            scat = ax.scatter(x, y, s=16)
+            if labels==True:
+                for j, lab in enumerate(point_labels):
+                    if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                        ax.annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+            colours.append(scat._original_facecolor[0])
+            
+        reset_xlim = ax.get_xlim()
+        reset_ylim = ax.get_ylim()
+        for i in range(kmeans.cluster_centers_.shape[0]): # for each k
+            # plot up the centroid and the points in the same colour
+            # Plot the centroid as vline hline intersect
+            #vline
+            centroid_x = kmeans.cluster_centers_[i][0]
+            centorid_y = kmeans.cluster_centers_[i][1]
+            
+            ax.plot([centroid_x, centroid_x],[ax.get_ylim()[0], ax.get_ylim()[1]], c=colours[i])
+            ax.plot([ax.get_xlim()[0], ax.get_xlim()[1]],[centorid_y, centorid_y], c=colours[i])
+        # lims need resetting as the plotting of the lines changes them.
+        ax.set_xlim(reset_xlim)
+        ax.set_ylim(reset_ylim)
+
+    def _test_kmeans_agreement(self, lab_ser_one, lab_ser_two):
+        """
+        Takes in a pairs of series where the index is sample name and the value is the classification.
+        Performs a test to see the maximum possible agreement between the classficiations
+        To do this it will work with the smallest set of labels, (either the '*_one' or '*_two')
+        It will take a list of the classifications and work in order of those classifications
+        For each classification, it will find the classification in the other dataset that
+        corresponds to the largest agreement. It will then move on to the next classification
+        untill it has found the best assignments for that list of classifications. Because order
+        will matter, we will then do this for every permuation of the small classifications.
+        """
+
+        if len(lab_ser_one.unique()) < len(lab_ser_two.unique()):
+            small_series = lab_ser_one
+            large_series = lab_ser_two
+        else:
+            small_series = lab_ser_two
+            large_series = lab_ser_one
+        
+        small_unique_classifications = small_series.unique()
+        large_unique_classifications = list(large_series.unique())
+        ordered_clasification_lists = list(itertools.permutations(small_unique_classifications, len(small_unique_classifications)))
+        # We can make some look up dicts to speed this up. One for each series
+        # Key will be the classification, value will be set of the sample_ids
+        small_look_up = {}
+        for classification in small_series.unique():
+            small_look_up[classification] = set(small_series[small_series == classification].index)
+
+        large_look_up = {}
+        for classification in large_series.unique():
+            large_look_up[classification] = set(large_series[large_series == classification].index)
+        
+        # For each of the permutations of the classifications
+        agreement_score_list = []
+        samples_in_common = len(set(small_series.index).intersection(set(large_series.index)))
+        print('Running agreement calculations')
+        tot_perm_lists = len(ordered_clasification_lists)
+        for i, ordered_clasification_list in enumerate(ordered_clasification_lists):
+            sys.stdout.write(f'\r{i}/{tot_perm_lists} permutations complete')
+            # For each calssification in order
+            matched_classifications = []
+            matched_score = 0
+            for classification in ordered_clasification_list:
+                # Search through the classifications of the other series to find the best agreement
+                # For the time being if serveral matches have the same agreeemnt score,
+                # we will go with the one found first.
+                max_classification = None
+                max_score = 0
+                for other_classification in [_ for _ in large_unique_classifications if _ not in matched_classifications]:
+                    intersection_score = len(small_look_up[classification].intersection(large_look_up[other_classification]))
+                    if intersection_score > max_score:
+                        max_classification = other_classification
+                        max_score = intersection_score
+                if max_classification is not None:
+                    # Then add the union_score to the matched_score
+                    matched_score += max_score
+                    matched_classifications.append(max_classification)
+                else:
+                    pass
+                # If there is no match we just don't put anything in the matched_clasifications
+            # The agreement score should be given as a proportion of the maximum possible score.
+            # The maximum possible score is of course the number of samples in common between the
+            # two datasets.
+            agreement_score_list.append(matched_score/samples_in_common)
+        print('\rAll permutations complete')
+        return max(agreement_score_list)
+
+    def check_original_three_agreement(self):
+        """
+        We have done a distance calculation with the string:
+        'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_rai_False_0.08_200_3_original_three'
+        Here we are only using islands I06, I10, I15. And we will compare these to the original
+        snmf classifications.
+        1 - plot up the 18S pcoa, then colour according to the old snmf classifications
+        2 - plot up the 18S pcoa, then colour aaccording to the new SNP classifications as k=3
+        3 - Plot up the 18S pcoa, then colour according to kmeans clustering and maybe one other algorithm.
+        TODO annotate the two samples
+        3b - TODO plot alongside it the shoulder and silhoutte plots.
+        5 - Plot up the new SNP distance with the old classificaitons on them.
+        4 - Plot up the new SNP distance and and plot up the kmeans elbow and sillhoutte.
+        TODO Plot up the agreement between the new SNP and the old snp and our three island at various ks.
+        # So for many values of k for the new SNP clustering, against values of k=3 and 4 for the old clustering
+        # and for whatever looks good for our 18S
+        """
+        fig, ax = plt.subplots(6,3, figsize=(12,24))
+        
+        #### 1 - Plot up the 18S 
+        path_to_classifications = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv'
+        c_df = pd.read_csv(path_to_classifications)
+        c_df.drop(columns='Colony', inplace=True)
+        c_df.rename(columns={'code pangea':'sample-id', 'snmf/PCA':'label'}, inplace=True)
+        c_df.set_index('sample-id', drop=True, inplace=True)
+        c_df['label'] = c_df['label'] -1
+        # annotate the two that look like they should be a fourth.
+        # We can find these out by looking at the coordinates
+        c_df['label_4'] = list(c_df['label'])
+        c_df.at['TARA_CO-0002135', 'label_4'] = 3
+        c_df.at['TARA_CO-0002065', 'label_4'] = 3
+        
+        pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, 'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_rai_False_0.08_200_3_original_three_pcoa.csv.gz'))
+        non_classified_samples = [_ for _ in pcoa_df.index if _ not in c_df.index]
+        classified_samples = [_ for _ in pcoa_df.index if _ in c_df.index]
+        ax[0,0].scatter(pcoa_df.loc[non_classified_samples, 'PC1'], pcoa_df.loc[non_classified_samples, 'PC2'], c='lightgrey')
+        for i in c_df['label'].unique():
+            x = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
+            y = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
+            lab = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1'].index
+            samples = ax[0,0].scatter(x, y)
+            for j, lab in enumerate(lab):
+                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                    ax[0,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+
+        ax[0,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement = {}')
+
+            
+        # 2
+        poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[3]
+        poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
+        
+        poc_snp_labels_series = poc_snp_labels_series.loc[[_ for _ in poc_snp_labels_series.index if _ in pcoa_df.index]]
+        ax[1,0].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC2'], c='lightgrey')
+        for i in c_df['label'].unique():
+            x = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC1']
+            y = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC2']
+            labels = y.index
+            samples = ax[1,0].scatter(x,y)
+            for j, lab in enumerate(labels):
+                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                    ax[1,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+        ax[1,0].set_title('location=18S colour=biallelic (new SNP) k=3')
+
+        # 2!NB This is where we can do proof of principle and do a much high k for the snp distmatrix
+        # and show that we can still get much better agreement.
+
+
+        # 3
+        # Run kmeans and show what the clustering looks like for the 18S data
+        # We should do this will all samples and with only the snp samples
+        inertia = []
+        silhouette_list = []
+        k_range = range(2, len(pcoa_df.index)-1, 1)
+        kmeans_dict_18s_cache_path = os.path.join(self.cache_dir_18s, '18s_kmeans_dict_original_three_islands.p.bz')
+        if os.path.exists(kmeans_dict_18s_cache_path):
+            kmeans_dict_18s = compress_pickle.load(kmeans_dict_18s_cache_path)
+            for k in k_range:
+                kmeans = kmeans_dict_18s[k]
+                s_score = silhouette_score(pcoa_df, kmeans.labels_, metric = 'euclidean')
+                silhouette_list.append(s_score)
+                inertia.append(kmeans.inertia_)
+        else:
+            kmeans_dict_18s = {}
+            print('Calculating Kmeans for 18s')
+            for k in k_range:
+                print(f'k={k}')
+                kmeans = KMeans(n_clusters=k, n_init=100, algorithm='full').fit(pcoa_df)
+                kmeans_dict_18s[k] = kmeans
+                s_score = silhouette_score(pcoa_df, kmeans.labels_, metric = 'euclidean')
+                silhouette_list.append(s_score)
+                inertia.append(kmeans.inertia_)
+            compress_pickle.dump(kmeans_dict_18s, kmeans_dict_18s_cache_path)
+
+
+        # Here plot up the inertia and silloute score
+        ax[2,1].plot(k_range, inertia)
+        ax2 = ax[2,1].twinx()
+        ax2.plot(k_range, silhouette_list, 'r-')
+        ax[2,1].set_xlabel('k')
+        ax[2,1].set_ylabel('inertia')
+        ax2.set_ylabel('silhouette score')
+        ax[2,1].spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+        ax[2,1].grid(linewidth=0.5, color='lightgrey')
+
+        # Here plot up the inertia and silloute score
+        # Now plot up for upto 10
+        
+        curr_ax = ax[2,2]
+        curr_ax.plot(k_range, inertia)
+        ax2 = curr_ax.twinx()
+        ax2.plot(k_range, silhouette_list, 'r-')
+        curr_ax.set_xlabel('k')
+        curr_ax.set_ylabel('inertia')
+        ax2.set_ylabel('silhouette score')
+        curr_ax.spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+        curr_ax.grid(linewidth=0.5, color='lightgrey')
+        curr_ax.set_xlim(0,10)
+
+        # plot k=4 as this looks like best candidate
+        self._plot_up_kmeans_with_centroids(pcoa_df=pcoa_df, kmeans=kmeans_dict_18s[4], ax=ax[2,0], labels=True)
+
+        # 4 Plot up the kmeans for the new snp
+        # TODO we are here.
+        poc_np = self.poc_snp_pcoa_df.to_numpy()
+        poc_inertia = []
+        poc_sil = {}
+        # Hold the kmeans results in a dict and pickle out this dict so that we can use it
+        # in comparing between the 18S and SNP categorisation agreements
+        if os.path.exists(self.poc_snp_kmeans_dict_pickle_path):
+            self.poc_snp_kmeans_dict = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)
+            k_range = sorted(self.poc_snp_kmeans_dict.keys())
+            # print('Calculating kmeans')
+            for i in k_range:
+                # print(f'k={k}')
+                kmeans = self.poc_snp_kmeans_dict[i]
+                poc_inertia.append(kmeans.inertia_)
+                poc_sil[i] = silhouette_score(self.poc_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+        else:
+            k_range = range(2, 101)
+            for i in k_range:
+                print(f'Computing k={i}')
+                kmeans = KMeans(n_clusters=i, n_init=100, algorithm='full').fit(poc_np)
+                poc_inertia.append(kmeans.inertia_)
+                poc_sil[i] = silhouette_score(self.poc_snp_pcoa_df, kmeans.labels_, metric = 'euclidean')
+                self.poc_snp_kmeans_dict[i] = kmeans
+                try:
+                    compress_pickle.dump(self.poc_snp_kmeans_dict, self.poc_snp_kmeans_dict_pickle_path)
+                except:
+                    # remove the last k that made it fail and write out again then break
+                    k_to_del = sorted(self.poc_snp_kmeans_dict.keys(), reverse=True)[0]
+                    del self.poc_snp_kmeans_dict[k_to_del]
+                    poc_inertia = poc_inertia[:-1]
+                    del poc_sil[k_to_del]
+                    compress_pickle.dump(self.poc_snp_kmeans_dict, self.poc_snp_kmeans_dict_pickle_path)
+                    break
+
+        k_range = sorted(self.poc_snp_kmeans_dict.keys())
+        curr_ax = ax[3,1]
+        curr_ax.plot([_ for _ in k_range], poc_inertia, 'k-')
+        curr_ax.set_xticks([_ for _ in k_range])
+        curr_ax.set_title('Pocillopora')
+        curr_ax.set_xlabel('k')
+        curr_ax.set_ylabel('inertia')
+        curr_ax.grid(linewidth=0.5, color='lightgrey')
+        
+        ax2 = curr_ax.twinx()
+        ax2.plot([_ for _ in k_range], [poc_sil[_]  for _ in k_range], 'r-')
+        ax2.set_ylabel('silhouette score')
+        curr_ax = ax[3,2].spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+
+        curr_ax = ax[3,2]
+        curr_ax.plot([_ for _ in k_range], poc_inertia, 'k-')
+        curr_ax.set_xticks([_ for _ in k_range])
+        curr_ax.set_title('Pocillopora')
+        curr_ax.set_xlabel('k')
+        curr_ax.set_ylabel('inertia')
+        curr_ax.grid(linewidth=0.5, color='lightgrey')
+        ax2 = curr_ax.twinx()
+        ax2.plot([_ for _ in k_range], [poc_sil[_]  for _ in k_range], 'r-')
+        ax2.set_ylabel('silhouette score')
+        curr_ax.spines['right'].set_color('red')
+        ax2.spines['right'].set_color('red')
+        ax2.yaxis.label.set_color('red')
+        ax2.tick_params(axis='y', colors='red')
+        curr_ax.set_xlim(0,25)
+
+        # Finally, plot up the new snp dists with clusters coloured at a given k.
+        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[17], labels=True, ax=ax[3,0])
+        
+        # Work out which the two samples are that are looking like they should be a fourth by looking at the coordinates
+        interest_df = self.poc_snp_pcoa_df[(self.poc_snp_pcoa_df['PC1'] < 0) & (self.poc_snp_pcoa_df['PC2'] < 200)]
+        interest_df = interest_df.loc[[_ for _ in interest_df.index if _ in c_df.index]]
+        print('The c_df points that are probably a fourth category are:')
+        for _ in interest_df.index:
+            print(f'\t{_}')
+        
+        # 5 plot up the new kmeans distances but with the old snmf classifications.
+        # This shows us where the disagreement is happening and that there is a problem
+        # projecting big onto small. But not vice versa.
+        # The proof is to plot up the bad agreement on the second plot that shows
+        # the bad agreement between old and new.
+        # But then to show good agreement between a higher number of k on the new snp
+        # but with 4 or 5 on the old.
+        ax[4,0].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC2'], c='lightgrey')
+        for i in c_df['label'].unique():
+            x = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
+            y = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
+            ax[4,0].scatter(x, y)
+        
+
+        # Calculate the agreement here
+        # We want to calculate the agreement for (for the 18s/snmf):
+        # 3-->3
+        # 3-->4
+        # 4-->3
+        # 4-->4
+        # cat_mapping_dicts = [{k:v for k, v in zip(np.unique(kmeans.labels_), _)} for _ in itertools.permutations(np.unique(kmeans.labels_), len(np.unique(kmeans.labels_)))]
+        # This is where we're going to have to thinkk about the logic. cat_mapping_dicts works when you're doing the comparisons
+        # between the same number of categories (although we need to make this more efficient).
+        # But when you're doing comparisons with different numbers of categories then things get pretty tricky.
+        # We could iter our way through the smaller category list and see which of the cat it finds highest agreement with
+        # and then remove this from the list and continue to the next etc. and find the highest agreement this way.
+        # To be thorough about this I guess we could do the small list in the order of all permuations.
+        # Perhaps we can see how time intensive this is. It is probably a good idea to work out how we can generalise this
+        # so that we can pull it out into a method. I guess, we'll just want a label_df. i.e. a mapping of sample-id
+        # to predicted category. So to map the three to the three then we ould pass in two 3 kmeans, and to 
+        # map the 3 to the 4 we would pass in the 3 or 4 respective to which one we wanted the 4 four.
+        
+        # First do the agreement between the snmf and 18s original three islands.
+        
+        three_three = self._test_kmeans_agreement(
+            pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
+            c_df['label'])
+        three_four = self._test_kmeans_agreement(
+            pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
+            c_df['label_4'])
+        four_three = self._test_kmeans_agreement(
+            pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
+            c_df['label'])
+        four_four = self._test_kmeans_agreement(
+            pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
+            c_df['label_4'])
+        print('\n\nAgreement scores for snmf --> 18S original three')
+        print(f'k=3 --> k=3: {three_three}')
+        print(f'k=3 --> k=4: {three_four}')
+        print(f'k=4 --> k=3: {four_three}')
+        print(f'k=3 --> k=3: {four_four}')
+        
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.fig_output_dir_18s, 'snmf_agreement.png'), dpi=600)
+        # foo = 'bar'
+
+    # TODO what if we drill down way further into the classifications of the distances, and see if one of those groups
+    # Correlates to one of the 18S groupings.
+    # TODO PUT THE 18S annotations, onto the snp new! 
+    # NB We can explain this disagreement. You can see the the new clustering to k=3 actually acts to collapse and break up
+    # the old ones. Acutally a much better way to look at this, that makes perfect sense, is that the classifications will
+    # be maintained when we have a much larger k for the new snp. We want to see if there is a k where all of the samples are
+    # still found in the same grouping for the old samples. Also the old should maybe have been 4 not 3 groups. The
+    # same extension could also be made for the snp vs 18S in that the true classifications for the 18s should be waaay higher
+    # than for the SNP, especially as we were using more islands. We were forcing the agreements to be done using
+    # the same number of groups but this is not cool.
+
+
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
         self.parent = parent
@@ -912,11 +1330,12 @@ class OneClusterCol:
 
 if __name__ == "__main__":
     c = Cluster18S()
-    # c.visalise_snp_df()
+    # c.visalise_snp_new_clusters()
     # c.category_scores()
     # c.check_old_clustering_agreement()
     # c.clustering_overview()
-    c.produce_r_input()
+    # c.produce_r_input()
+    c.check_original_three_agreement()
 
 # TODO
 # Run permanovas of the dist matrices with meta data for site, island, 
