@@ -29,6 +29,8 @@ class EighteenSBase:
         self.cache_dir = os.path.join(self.root_dir, 'cache')
         self.cache_dir_18s = os.path.join(self.eighteens_dir, 'cache')
         os.makedirs(self.cache_dir, exist_ok=True)
+        self.temp_dir_18s = os.path.join(self.eighteens_dir, 'temp')
+        os.makedirs(self.temp_dir_18s, exist_ok=True)
         # This is the file that should be used if possible to get meta
         # data for samples
         self.sample_provenance_path = os.path.join(self.input_dir, "sample_provenance_20200201.csv")

@@ -23,6 +23,9 @@ import compress_pickle
 import itertools
 import sys
 import random
+import json
+import hashlib
+from functools import partial
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -679,10 +682,6 @@ class Cluster18S(EighteenSBase):
         ax.set_xlim(reset_xlim)
         ax.set_ylim(reset_ylim)
 
-    def _test_kmeans_agreement(self, lab_ser_one, lab_ser_two):
-        
-        return 
-
     def check_original_three_agreement(self):
         """
         We have done a distance calculation with the string:
@@ -701,57 +700,10 @@ class Cluster18S(EighteenSBase):
         # and for whatever looks good for our 18S
         """
         fig, ax = plt.subplots(6,3, figsize=(12,24))
-        
-        #### 1 - Plot up the 18S 
-        path_to_classifications = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv'
-        c_df = pd.read_csv(path_to_classifications)
-        c_df.drop(columns='Colony', inplace=True)
-        c_df.rename(columns={'code pangea':'sample-id', 'snmf/PCA':'label'}, inplace=True)
-        c_df.set_index('sample-id', drop=True, inplace=True)
-        c_df['label'] = c_df['label'] -1
-        # annotate the two that look like they should be a fourth.
-        # We can find these out by looking at the coordinates
-        c_df['label_4'] = list(c_df['label'])
-        c_df.at['TARA_CO-0002135', 'label_4'] = 3
-        c_df.at['TARA_CO-0002065', 'label_4'] = 3
-        
         pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, 'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_rai_False_0.08_200_3_original_three_pcoa.csv.gz'))
-        non_classified_samples = [_ for _ in pcoa_df.index if _ not in c_df.index]
-        classified_samples = [_ for _ in pcoa_df.index if _ in c_df.index]
-        ax[0,0].scatter(pcoa_df.loc[non_classified_samples, 'PC1'], pcoa_df.loc[non_classified_samples, 'PC2'], c='lightgrey')
-        for i in c_df['label'].unique():
-            x = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
-            y = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
-            lab = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1'].index
-            samples = ax[0,0].scatter(x, y)
-            for j, lab in enumerate(lab):
-                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
-                    ax[0,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
-
-        ax[0,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement = {}')
-
-            
-        # 2
-        poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[3]
-        poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
-        
-        poc_snp_labels_series = poc_snp_labels_series.loc[[_ for _ in poc_snp_labels_series.index if _ in pcoa_df.index]]
-        ax[1,0].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC2'], c='lightgrey')
-        for i in c_df['label'].unique():
-            x = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC1']
-            y = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC2']
-            labels = y.index
-            samples = ax[1,0].scatter(x,y)
-            for j, lab in enumerate(labels):
-                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
-                    ax[1,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
-        ax[1,0].set_title('location=18S colour=biallelic (new SNP) k=3')
-
-        # 2!NB This is where we can do proof of principle and do a much high k for the snp distmatrix
-        # and show that we can still get much better agreement.
-
-
-        # 3
+        # Reordering
+        # First plot up the 18S and show its classificaitons
+        # 1
         # Run kmeans and show what the clustering looks like for the 18S data
         # We should do this will all samples and with only the snp samples
         inertia = []
@@ -779,22 +731,23 @@ class Cluster18S(EighteenSBase):
 
 
         # Here plot up the inertia and silloute score
-        ax[2,1].plot(k_range, inertia)
-        ax2 = ax[2,1].twinx()
+        curr_ax = ax[0,0]
+        curr_ax.plot(k_range, inertia)
+        ax2 = curr_ax.twinx()
         ax2.plot(k_range, silhouette_list, 'r-')
-        ax[2,1].set_xlabel('k')
-        ax[2,1].set_ylabel('inertia')
+        curr_ax.set_xlabel('k')
+        curr_ax.set_ylabel('inertia')
         ax2.set_ylabel('silhouette score')
-        ax[2,1].spines['right'].set_color('red')
+        curr_ax.spines['right'].set_color('red')
         ax2.spines['right'].set_color('red')
         ax2.yaxis.label.set_color('red')
         ax2.tick_params(axis='y', colors='red')
-        ax[2,1].grid(linewidth=0.5, color='lightgrey')
+        curr_ax.grid(linewidth=0.5, color='lightgrey')
 
         # Here plot up the inertia and silloute score
         # Now plot up for upto 10
         
-        curr_ax = ax[2,2]
+        curr_ax = ax[0,1]
         curr_ax.plot(k_range, inertia)
         ax2 = curr_ax.twinx()
         ax2.plot(k_range, silhouette_list, 'r-')
@@ -809,10 +762,10 @@ class Cluster18S(EighteenSBase):
         curr_ax.set_xlim(0,10)
 
         # plot k=4 as this looks like best candidate
-        self._plot_up_kmeans_with_centroids(pcoa_df=pcoa_df, kmeans=kmeans_dict_18s[4], ax=ax[2,0], labels=True)
-
+        self._plot_up_kmeans_with_centroids(pcoa_df=pcoa_df, kmeans=kmeans_dict_18s[4], ax=ax[0,2], labels=True)
+        
+        
         # 4 Plot up the kmeans for the new snp
-        # TODO we are here.
         poc_np = self.poc_snp_pcoa_df.to_numpy()
         poc_inertia = []
         poc_sil = {}
@@ -847,7 +800,7 @@ class Cluster18S(EighteenSBase):
                     break
 
         k_range = sorted(self.poc_snp_kmeans_dict.keys())
-        curr_ax = ax[3,1]
+        curr_ax = ax[1,0]
         curr_ax.plot([_ for _ in k_range], poc_inertia, 'k-')
         curr_ax.set_xticks([_ for _ in k_range])
         curr_ax.set_title('Pocillopora')
@@ -863,7 +816,7 @@ class Cluster18S(EighteenSBase):
         ax2.yaxis.label.set_color('red')
         ax2.tick_params(axis='y', colors='red')
 
-        curr_ax = ax[3,2]
+        curr_ax = ax[1,1]
         curr_ax.plot([_ for _ in k_range], poc_inertia, 'k-')
         curr_ax.set_xticks([_ for _ in k_range])
         curr_ax.set_title('Pocillopora')
@@ -880,8 +833,81 @@ class Cluster18S(EighteenSBase):
         curr_ax.set_xlim(0,25)
 
         # Finally, plot up the new snp dists with clusters coloured at a given k.
-        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[17], labels=True, ax=ax[3,0])
+        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[4], labels=True, ax=ax[1,2])
         
+        # Now put the k=3 snmf classificaiton, the k=3 and the k=4 classification onto the 18S
+        
+        
+        
+        
+        
+        #### 2- Put the snmf classifications onto this at k=3. 
+        path_to_classifications = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv'
+        c_df = pd.read_csv(path_to_classifications)
+        c_df.drop(columns='Colony', inplace=True)
+        c_df.rename(columns={'code pangea':'sample-id', 'snmf/PCA':'label'}, inplace=True)
+        c_df.set_index('sample-id', drop=True, inplace=True)
+        c_df['label'] = c_df['label'] -1
+        # annotate the two that look like they should be a fourth.
+        # We can find these out by looking at the coordinates
+        c_df['label_4'] = list(c_df['label'])
+        c_df.at['TARA_CO-0002135', 'label_4'] = 3
+        c_df.at['TARA_CO-0002065', 'label_4'] = 3
+        
+        
+        non_classified_samples = [_ for _ in pcoa_df.index if _ not in c_df.index]
+        classified_samples = [_ for _ in pcoa_df.index if _ in c_df.index]
+        ax[2,0].scatter(pcoa_df.loc[non_classified_samples, 'PC1'], pcoa_df.loc[non_classified_samples, 'PC2'], c='lightgrey')
+        for i in c_df['label'].unique():
+            x = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
+            y = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
+            lab = pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1'].index
+            samples = ax[2,0].scatter(x, y)
+            for j, lab in enumerate(lab):
+                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                    ax[2,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+
+        ax[2,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement with k=3 and k=3 = 22/27 = 0.81')
+
+
+
+            
+        # 2
+        poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[3]
+        poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
+        
+        poc_snp_labels_series = poc_snp_labels_series.loc[[_ for _ in poc_snp_labels_series.index if _ in pcoa_df.index]]
+        ax[2,1].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC2'], c='lightgrey')
+        for i in range(poc_biallelic_kmeans.cluster_centers_.shape[0]):
+            x = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC1']
+            y = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC2']
+            labels = y.index
+            samples = ax[2,1].scatter(x,y)
+            for j, lab in enumerate(labels):
+                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                    ax[2,1].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+        ax[2,1].set_title(f'location=18S colour=biallelic (new SNP) k=3\nAgreement with k=3 and k=3 = 15/27 = 0.56')
+
+        # 2 as a very simple proof of principle we can plot up 18S three islands with the
+        # k=4 agreement.
+        # 2
+        poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[4]
+        poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
+        
+        poc_snp_labels_series = poc_snp_labels_series.loc[[_ for _ in poc_snp_labels_series.index if _ in pcoa_df.index]]
+        ax[2,2].scatter(pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC1'], pcoa_df.loc[[_ for _ in pcoa_df.index if _ not in poc_snp_labels_series], 'PC2'], c='lightgrey')
+        for i in range(poc_biallelic_kmeans.cluster_centers_.shape[0]):
+            x = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC1']
+            y = pcoa_df.loc[poc_snp_labels_series[poc_snp_labels_series == i].index, 'PC2']
+            labels = y.index
+            samples = ax[2,2].scatter(x,y)
+            for j, lab in enumerate(labels):
+                if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
+                    ax[2,2].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
+        ax[2,2].set_title('location=18S colour=biallelic (new SNP) k=4\nAgreement with k=3 (18S) and k=4 (SNP) = 20/27 = 0.74')
+
+        
+
         # Work out which the two samples are that are looking like they should be a fourth by looking at the coordinates
         interest_df = self.poc_snp_pcoa_df[(self.poc_snp_pcoa_df['PC1'] < 0) & (self.poc_snp_pcoa_df['PC2'] < 200)]
         interest_df = interest_df.loc[[_ for _ in interest_df.index if _ in c_df.index]]
@@ -890,21 +916,30 @@ class Cluster18S(EighteenSBase):
             print(f'\t{_}')
         
         # 5 plot up the new kmeans distances but with the old snmf classifications.
+        # First plot up the k=3 for the biallelic. (k=4 is already plotted above)
+        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[3], labels=True, ax=ax[3,0])
+        ax[3,0].set_title('Clustering of the biallelic SNP distance data at k=3\n(see above for k=4)')
         # This shows us where the disagreement is happening and that there is a problem
         # projecting big onto small. But not vice versa.
         # The proof is to plot up the bad agreement on the second plot that shows
         # the bad agreement between old and new.
         # But then to show good agreement between a higher number of k on the new snp
         # but with 4 or 5 on the old.
-        ax[4,0].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC2'], c='lightgrey')
+        ax[3,1].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC2'], c='lightgrey')
         for i in c_df['label'].unique():
             x = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
             y = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
-            ax[4,0].scatter(x, y)
+            ax[3,1].scatter(x, y)
+        ax[3,1].set_title('location=SNP biallelic colour=snmf k=3\nAgreement with k=3 (biallelic) and k=3 (snmf) = 18/27 = 0.67')
 
-        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[3], labels=True, ax=ax[4,1])
+        ax[3,2].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC2'], c='lightgrey')
+        for i in c_df['label_4'].unique():
+            x = self.poc_snp_pcoa_df.loc[c_df[c_df['label_4'] == i].index, 'PC1']
+            y = self.poc_snp_pcoa_df.loc[c_df[c_df['label_4'] == i].index, 'PC2']
+            ax[3,2].scatter(x, y)
+        ax[3,2].set_title('location=SNP biallelic colour=snmf k=4\nAgreement with k=4 (biallelic) and k=4 (snmf) = 27/27 = 1.00')
+
         
-
         # Calculate the agreement here
         # We want to calculate the agreement for (for the 18s/snmf):
         # 3-->3
@@ -925,19 +960,19 @@ class Cluster18S(EighteenSBase):
         
         # First do the agreement between the snmf and 18s original three islands.
         
-        three_three = AgreementCalculator(lab_ser_one=pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), lab_ser_two=c_df['label']).calculate_agreement()
+        three_three = AgreementCalculator(lab_ser_one=pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), lab_ser_two=c_df['label'], parent=self).calculate_agreement()
         # self._test_kmeans_agreement(
         #     pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
         #     c_df['label'])
         three_four = AgreementCalculator(
             pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label_4']).calculate_agreement()
+            c_df['label_4'], parent=self).calculate_agreement()
         four_three = AgreementCalculator(
             pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label']).calculate_agreement()
+            c_df['label'], parent=self).calculate_agreement()
         four_four = AgreementCalculator(
             pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label_4']).calculate_agreement()
+            c_df['label_4'], parent=self).calculate_agreement()
         print('\n\nAgreement scores for snmf --> 18S original three')
         print(f'k=3 --> k=3: {three_three}')
         print(f'k=3 --> k=4: {three_four}')
@@ -951,21 +986,29 @@ class Cluster18S(EighteenSBase):
         snmf_agreement = np.empty((2,28))
         for s_i, snmf_index in enumerate(['label', 'label_4']):
             for k_i, k in enumerate(range(2,30)):
-                snmf_agreement[s_i,k_i] = AgreementCalculator(c_df[snmf_index], pd.Series(self.poc_snp_kmeans_dict[k].labels_, index=self.poc_snp_df.index, name='label')).calculate_agreement()
+                snmf_agreement[s_i,k_i] = AgreementCalculator(c_df[snmf_index], pd.Series(self.poc_snp_kmeans_dict[k].labels_, index=self.poc_snp_df.index, name='label'), parent=self).calculate_agreement()
         
         # Agreement of 18S with biallelic
         print('\n\nAgreement scores for 18S SNP --> biallelic SNP ')
-        e_agreement = np.empty((28,28))
-        for e_i, e_k in enumerate(range(2,30)):
+        e_agreement = np.empty((4,28))
+        # TODO I think it is taking some time to make the series so create look up tables for these
+        print('Creating look up dicts of label series for 18S. This may take some time...')
+        e_series_lookup = {e_k: pd.Series(kmeans_dict_18s[e_k].labels_, index=pcoa_df.index, name='label') for e_k in range(2,30)}
+        print('Creating look up dicts of label series for biallelic SNP. This may take some time...')
+        b_series_lookup = {b_k: pd.Series(self.poc_snp_kmeans_dict[b_k].labels_, index=self.poc_snp_df.index, name='label') for b_k in range(2,30)}
+
+        for e_i, e_k in enumerate(range(2,6)):
             for b_i, b_k in enumerate(range(2,30)):
                 snmf_agreement[s_i,k_i] = AgreementCalculator(
-                    pd.Series(kmeans_dict_18s[e_k].labels_, index=pcoa_df.index, name='label'),
-                    pd.Series(self.poc_snp_kmeans_dict[b_k].labels_, index=self.poc_snp_df.index, name='label')).calculate_agreement()
-        
+                    e_series_lookup[e_k],
+                    b_series_lookup[b_k], parent=self).calculate_agreement()
         
         plt.tight_layout()
         plt.savefig(os.path.join(self.fig_output_dir_18s, 'snmf_agreement.png'), dpi=600)
         # foo = 'bar'
+
+    #TODO we are here.
+    # Plot up three heat maps to visualise the k agreements for the three blocks above.
 
     # TODO what if we drill down way further into the classifications of the distances, and see if one of those groups
     # Correlates to one of the 18S groupings.
@@ -977,6 +1020,8 @@ class Cluster18S(EighteenSBase):
     # same extension could also be made for the snp vs 18S in that the true classifications for the 18s should be waaay higher
     # than for the SNP, especially as we were using more islands. We were forcing the agreements to be done using
     # the same number of groups but this is not cool.
+
+    
 
 class AgreementCalculator:
     """
@@ -994,7 +1039,8 @@ class AgreementCalculator:
         result is very small. So let's implement a rule whereby we test 10 of the permutations randomly
         and then we test another 100 and if the best match doesn't change then we don't test any further.
     """
-    def __init__(self, lab_ser_one, lab_ser_two):
+    def __init__(self, lab_ser_one, lab_ser_two, parent):
+        self.parent = parent
         if len(lab_ser_one.unique()) < len(lab_ser_two.unique()):
             self.small_series = lab_ser_one
             self.large_series = lab_ser_two
@@ -1002,10 +1048,27 @@ class AgreementCalculator:
             self.small_series = lab_ser_two
             self.large_series = lab_ser_one
         
-        self.small_unique_classifications = self.small_series.unique()
+        self.small_unique_classifications = [int(_) for _ in self.small_series.unique()]
         self.large_unique_classifications = list(self.large_series.unique())
-        self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
-        random.shuffle(self.ordered_clasification_lists)
+        # Calculation of the permutation lists takes considerable time.
+        # We could work with the generator but ideally we would like to do the shuffle.
+        # rather we will cache out and see if that speeds up.
+        if len(self.small_unique_classifications) > 5:
+            list_hash = self._md5sum_from_python_object(self.small_unique_classifications)
+            perm_list_cache_path = os.path.join(self.parent.cache_dir_18s, f'{list_hash}_perm_list.p.bz')
+            if os.path.exists(perm_list_cache_path):
+                self.ordered_clasification_lists = compress_pickle.load(perm_list_cache_path)
+            else:
+                print('Creating permutation list from scratch. This may take some time...')
+                self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
+                random.shuffle(self.ordered_clasification_lists)
+                compress_pickle.dump(self.ordered_clasification_lists, perm_list_cache_path)
+                print('Complete.')
+        else:
+            # Don't bother with the cache
+            self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
+            random.shuffle(self.ordered_clasification_lists)
+        
         # We can make some look up dicts to speed this up. One for each series
         # Key will be the classification, value will be set of the sample_ids
         self.small_look_up = {}
@@ -1031,14 +1094,20 @@ class AgreementCalculator:
             current_max = self.max_absolute_agreement
             # This means that we will continue to run in 100 slices until
             # we stop finding higher max agreements
+            count = 0
             while True:
                 self._agreement_slice(100)
                 # Exit out if we didn't find a bigger score
+                count += 1
                 if current_max == self.max_absolute_agreement:
                     break
+                else:
+                    current_max = self.max_absolute_agreement
                 # Exit out if we have done all of the permutations
                 if self.done_slice_score > self.tot_perm_lists:
                     break
+                if count == 4:
+                    foo = 'bar'
         else:
             self._agreement_slice()
         print('\rAll permutations complete')
@@ -1080,6 +1149,28 @@ class AgreementCalculator:
             if matched_score > self.max_absolute_agreement:
                 self.max_absolute_agreement = matched_score
             self.agreement_score_list.append(matched_score/self.samples_in_common)
+
+    def _md5sum_from_python_object(self, p_obj):
+        """ 
+        A wrapper function around the self._md5sum function, that will take in a python object,
+        sort it, write it out to temp, md5sum the written out file, delete the file,
+        and return the md5sum hash.
+        """
+        sorted_p_obj = sorted(p_obj)
+        temp_out_path = os.path.join(self.parent.temp_dir_18s, 'p_obj.out')
+        with open(temp_out_path, 'w') as f:
+            json.dump(sorted_p_obj, f)
+        md5sum_hash = self._md5sum(temp_out_path)
+        os.remove(temp_out_path)
+        return md5sum_hash
+    
+    @staticmethod
+    def _md5sum(filename):
+        with open(filename, mode='rb') as f:
+            d = hashlib.md5()
+            for buf in iter(partial(f.read, 128), b''):
+                d.update(buf)
+        return d.hexdigest()
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
