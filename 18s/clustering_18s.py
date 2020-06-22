@@ -680,71 +680,8 @@ class Cluster18S(EighteenSBase):
         ax.set_ylim(reset_ylim)
 
     def _test_kmeans_agreement(self, lab_ser_one, lab_ser_two):
-        """
-        Takes in a pairs of series where the index is sample name and the value is the classification.
-        Performs a test to see the maximum possible agreement between the classficiations
-        To do this it will work with the smallest set of labels, (either the '*_one' or '*_two')
-        It will take a list of the classifications and work in order of those classifications
-        For each classification, it will find the classification in the other dataset that
-        corresponds to the largest agreement. It will then move on to the next classification
-        untill it has found the best assignments for that list of classifications. Because order
-        will matter, we will then do this for every permuation of the small classifications.
-        """
-
-        if len(lab_ser_one.unique()) < len(lab_ser_two.unique()):
-            small_series = lab_ser_one
-            large_series = lab_ser_two
-        else:
-            small_series = lab_ser_two
-            large_series = lab_ser_one
         
-        small_unique_classifications = small_series.unique()
-        large_unique_classifications = list(large_series.unique())
-        ordered_clasification_lists = list(itertools.permutations(small_unique_classifications, len(small_unique_classifications)))
-        # We can make some look up dicts to speed this up. One for each series
-        # Key will be the classification, value will be set of the sample_ids
-        small_look_up = {}
-        for classification in small_series.unique():
-            small_look_up[classification] = set(small_series[small_series == classification].index)
-
-        large_look_up = {}
-        for classification in large_series.unique():
-            large_look_up[classification] = set(large_series[large_series == classification].index)
-        
-        # For each of the permutations of the classifications
-        agreement_score_list = []
-        samples_in_common = len(set(small_series.index).intersection(set(large_series.index)))
-        print('Running agreement calculations')
-        tot_perm_lists = len(ordered_clasification_lists)
-        for i, ordered_clasification_list in enumerate(ordered_clasification_lists):
-            sys.stdout.write(f'\r{i}/{tot_perm_lists} permutations complete')
-            # For each calssification in order
-            matched_classifications = []
-            matched_score = 0
-            for classification in ordered_clasification_list:
-                # Search through the classifications of the other series to find the best agreement
-                # For the time being if serveral matches have the same agreeemnt score,
-                # we will go with the one found first.
-                max_classification = None
-                max_score = 0
-                for other_classification in [_ for _ in large_unique_classifications if _ not in matched_classifications]:
-                    intersection_score = len(small_look_up[classification].intersection(large_look_up[other_classification]))
-                    if intersection_score > max_score:
-                        max_classification = other_classification
-                        max_score = intersection_score
-                if max_classification is not None:
-                    # Then add the union_score to the matched_score
-                    matched_score += max_score
-                    matched_classifications.append(max_classification)
-                else:
-                    pass
-                # If there is no match we just don't put anything in the matched_clasifications
-            # The agreement score should be given as a proportion of the maximum possible score.
-            # The maximum possible score is of course the number of samples in common between the
-            # two datasets.
-            agreement_score_list.append(matched_score/samples_in_common)
-        print('\rAll permutations complete')
-        return max(agreement_score_list)
+        return 
 
     def check_original_three_agreement(self):
         """
@@ -964,6 +901,8 @@ class Cluster18S(EighteenSBase):
             x = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
             y = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
             ax[4,0].scatter(x, y)
+
+        self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[3], labels=True, ax=ax[4,1])
         
 
         # Calculate the agreement here
@@ -986,23 +925,42 @@ class Cluster18S(EighteenSBase):
         
         # First do the agreement between the snmf and 18s original three islands.
         
-        three_three = self._test_kmeans_agreement(
+        three_three = AgreementCalculator(lab_ser_one=pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), lab_ser_two=c_df['label']).calculate_agreement()
+        # self._test_kmeans_agreement(
+        #     pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
+        #     c_df['label'])
+        three_four = AgreementCalculator(
             pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label'])
-        three_four = self._test_kmeans_agreement(
-            pd.Series(kmeans_dict_18s[3].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label_4'])
-        four_three = self._test_kmeans_agreement(
+            c_df['label_4']).calculate_agreement()
+        four_three = AgreementCalculator(
             pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label'])
-        four_four = self._test_kmeans_agreement(
+            c_df['label']).calculate_agreement()
+        four_four = AgreementCalculator(
             pd.Series(kmeans_dict_18s[4].labels_, index=pcoa_df.index, name='label'), 
-            c_df['label_4'])
+            c_df['label_4']).calculate_agreement()
         print('\n\nAgreement scores for snmf --> 18S original three')
         print(f'k=3 --> k=3: {three_three}')
         print(f'k=3 --> k=4: {three_four}')
         print(f'k=4 --> k=3: {four_three}')
         print(f'k=3 --> k=3: {four_four}')
+
+        # Now we want to try doing the comparisons of the 18S and the snmf to the new snp
+        print('\n\nAgreement scores for snmf SNP --> biallelic SNP ')
+        # TODO here do two sets of nested for loops to do agreement comparisons
+        # Agreement of snmf with biallelic
+        snmf_agreement = np.empty((2,28))
+        for s_i, snmf_index in enumerate(['label', 'label_4']):
+            for k_i, k in enumerate(range(2,30)):
+                snmf_agreement[s_i,k_i] = AgreementCalculator(c_df[snmf_index], pd.Series(self.poc_snp_kmeans_dict[k].labels_, index=self.poc_snp_df.index, name='label')).calculate_agreement()
+        
+        # Agreement of 18S with biallelic
+        print('\n\nAgreement scores for 18S SNP --> biallelic SNP ')
+        e_agreement = np.empty((28,28))
+        for e_i, e_k in enumerate(range(2,30)):
+            for b_i, b_k in enumerate(range(2,30)):
+                snmf_agreement[s_i,k_i] = AgreementCalculator(
+                    pd.Series(kmeans_dict_18s[e_k].labels_, index=pcoa_df.index, name='label'),
+                    pd.Series(self.poc_snp_kmeans_dict[b_k].labels_, index=self.poc_snp_df.index, name='label')).calculate_agreement()
         
         
         plt.tight_layout()
@@ -1020,6 +978,108 @@ class Cluster18S(EighteenSBase):
     # than for the SNP, especially as we were using more islands. We were forcing the agreements to be done using
     # the same number of groups but this is not cool.
 
+class AgreementCalculator:
+    """
+        Takes in a pairs of series where the index is sample name and the value is the classification.
+        Performs a test to see the maximum possible agreement between the classficiations
+        To do this it will work with the smallest set of labels, (either the '*_one' or '*_two')
+        It will take a list of the classifications and work in order of those classifications
+        For each classification, it will find the classification in the other dataset that
+        corresponds to the largest agreement. It will then move on to the next classification
+        untill it has found the best assignments for that list of classifications. Because order
+        will matter, we will then do this for every permuation of the small classifications.
+
+        Doing this for every permutation become inhibitive when we get to higher k values for the
+        smaller series. For example k=8 is 40K permutations to test and the likelihood of finding a better
+        result is very small. So let's implement a rule whereby we test 10 of the permutations randomly
+        and then we test another 100 and if the best match doesn't change then we don't test any further.
+    """
+    def __init__(self, lab_ser_one, lab_ser_two):
+        if len(lab_ser_one.unique()) < len(lab_ser_two.unique()):
+            self.small_series = lab_ser_one
+            self.large_series = lab_ser_two
+        else:
+            self.small_series = lab_ser_two
+            self.large_series = lab_ser_one
+        
+        self.small_unique_classifications = self.small_series.unique()
+        self.large_unique_classifications = list(self.large_series.unique())
+        self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
+        random.shuffle(self.ordered_clasification_lists)
+        # We can make some look up dicts to speed this up. One for each series
+        # Key will be the classification, value will be set of the sample_ids
+        self.small_look_up = {}
+        for classification in self.small_series.unique():
+            self.small_look_up[classification] = set(self.small_series[self.small_series == classification].index)
+
+        self.large_look_up = {}
+        for classification in self.large_series.unique():
+            self.large_look_up[classification] = set(self.large_series[self.large_series == classification].index)
+
+        self.max_absolute_agreement = 0
+        self.agreement_score_list = []
+        self.samples_in_common = len(set(self.small_series.index).intersection(set(self.large_series.index)))
+
+        self.done_slice_score = 0
+
+    def calculate_agreement(self):
+        print('Running agreement calculations')
+        self.tot_perm_lists = len(self.ordered_clasification_lists)
+        if len(self.ordered_clasification_lists) > 200:
+            # Do for 10, then 100. if the score doesn't change 
+            self._agreement_slice(10)
+            current_max = self.max_absolute_agreement
+            # This means that we will continue to run in 100 slices until
+            # we stop finding higher max agreements
+            while True:
+                self._agreement_slice(100)
+                # Exit out if we didn't find a bigger score
+                if current_max == self.max_absolute_agreement:
+                    break
+                # Exit out if we have done all of the permutations
+                if self.done_slice_score > self.tot_perm_lists:
+                    break
+        else:
+            self._agreement_slice()
+        print('\rAll permutations complete')
+        print(f'Max agreement k={len(self.small_unique_classifications)} and k={len(self.large_unique_classifications)}: {self.max_absolute_agreement}/{self.samples_in_common} = {max(self.agreement_score_list):.2f}')
+        return max(self.agreement_score_list)
+
+    def _agreement_slice(self, slice_size=None):
+        if slice_size is not None:
+            slice_list = self.ordered_clasification_lists[self.done_slice_score:self.done_slice_score + slice_size]
+            self.done_slice_score += slice_size
+        else:
+            slice_list = self.ordered_clasification_lists
+        for i, ordered_clasification_list in enumerate(slice_list):
+            sys.stdout.write(f'\r{i}/{self.tot_perm_lists} permutations complete')
+            # For each calssification in order
+            matched_classifications = []
+            matched_score = 0
+            for classification in ordered_clasification_list:
+                # Search through the classifications of the other series to find the best agreement
+                # For the time being if serveral matches have the same agreeemnt score,
+                # we will go with the one found first.
+                max_classification = None
+                max_score = 0
+                for other_classification in [_ for _ in self.large_unique_classifications if _ not in matched_classifications]:
+                    intersection_score = len(self.small_look_up[classification].intersection(self.large_look_up[other_classification]))
+                    if intersection_score > max_score:
+                        max_classification = other_classification
+                        max_score = intersection_score
+                if max_classification is not None:
+                    # Then add the union_score to the matched_score
+                    matched_score += max_score
+                    matched_classifications.append(max_classification)
+                else:
+                    pass
+                # If there is no match we just don't put anything in the matched_clasifications
+            # The agreement score should be given as a proportion of the maximum possible score.
+            # The maximum possible score is of course the number of samples in common between the
+            # two datasets.
+            if matched_score > self.max_absolute_agreement:
+                self.max_absolute_agreement = matched_score
+            self.agreement_score_list.append(matched_score/self.samples_in_common)
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
