@@ -688,22 +688,28 @@ class Cluster18S(EighteenSBase):
         'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_rai_False_0.08_200_3_original_three'
         Here we are only using islands I06, I10, I15. And we will compare these to the original
         snmf classifications.
-        1 - plot up the 18S pcoa, then colour according to the old snmf classifications
-        2 - plot up the 18S pcoa, then colour aaccording to the new SNP classifications as k=3
-        3 - Plot up the 18S pcoa, then colour according to kmeans clustering and maybe one other algorithm.
-        TODO annotate the two samples
-        3b - TODO plot alongside it the shoulder and silhoutte plots.
-        5 - Plot up the new SNP distance with the old classificaitons on them.
-        4 - Plot up the new SNP distance and and plot up the kmeans elbow and sillhoutte.
-        TODO Plot up the agreement between the new SNP and the old snp and our three island at various ks.
-        # So for many values of k for the new SNP clustering, against values of k=3 and 4 for the old clustering
-        # and for whatever looks good for our 18S
+        The idea of this figure was really to get our head around what could be going wrong and to do
+        some sanity checking.
+        1 - plot up the kmeans clustering of the 18S
+        2 - plot up the kmeans clustering of the 'biallelic'
+        3 - calculate and visualise the agreements between the 18S ordination/classification and the
+        SNP-based classifications (both 'bialliclic' and 'old' snp.)
+        4 - Check on the agreement between the 'biallelic' and 'old' (snmf) classifications
+        5 - We also started to visualise the k means comparisons but it is not worth our time to finish this.
+        We never fully finished this figure as we leant what we needed to from it
+        and part way through making it we got a full set of classifications from Didier for both species
+        using snmf and SVD methods.
+        As part of making this figure we have come up with a relatively efficient algorithm for testing the agreement
+        between cluster assignments and we will certainly be using this moving forwards.
+        For now, we need to move onto optimising the 3 island and the 10+1 island towards the clustering.
+        It could be that we should move away from the distance based optimisation.
         """
-        fig, ax = plt.subplots(6,3, figsize=(12,24))
+        fig, ax = plt.subplots(5,3, figsize=(12,24))
+        title_font_size = 'x-small'
         pcoa_df = self._get_pcoa_df(pcoa_path=os.path.join(self.output_dir_18s, 'Pocillopora_True_True_True_False_biallelic_unifrac_dist_1000_rai_False_0.08_200_3_original_three_pcoa.csv.gz'))
         # Reordering
         # First plot up the 18S and show its classificaitons
-        # 1
+        # Reorder - 1
         # Run kmeans and show what the clustering looks like for the 18S data
         # We should do this will all samples and with only the snp samples
         inertia = []
@@ -765,7 +771,7 @@ class Cluster18S(EighteenSBase):
         self._plot_up_kmeans_with_centroids(pcoa_df=pcoa_df, kmeans=kmeans_dict_18s[4], ax=ax[0,2], labels=True)
         
         
-        # 4 Plot up the kmeans for the new snp
+        # Reorder-2 Plot up the kmeans for the new snp
         poc_np = self.poc_snp_pcoa_df.to_numpy()
         poc_inertia = []
         poc_sil = {}
@@ -819,7 +825,7 @@ class Cluster18S(EighteenSBase):
         curr_ax = ax[1,1]
         curr_ax.plot([_ for _ in k_range], poc_inertia, 'k-')
         curr_ax.set_xticks([_ for _ in k_range])
-        curr_ax.set_title('Pocillopora')
+        curr_ax.set_title("Kmeans clustering of the SNP 'biallelic' distance matrix")
         curr_ax.set_xlabel('k')
         curr_ax.set_ylabel('inertia')
         curr_ax.grid(linewidth=0.5, color='lightgrey')
@@ -835,13 +841,8 @@ class Cluster18S(EighteenSBase):
         # Finally, plot up the new snp dists with clusters coloured at a given k.
         self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[4], labels=True, ax=ax[1,2])
         
-        # Now put the k=3 snmf classificaiton, the k=3 and the k=4 classification onto the 18S
-        
-        
-        
-        
-        
-        #### 2- Put the snmf classifications onto this at k=3. 
+        # Now put the k=3 snmf classificaiton, the k=3 and the k=4 classification (new SNP) onto the 18S
+        #### Reorder-3 - Put the snmf classifications onto this at k=3. 
         path_to_classifications = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/snp_dist_matrices/pocillopora_snp_clusters.csv'
         c_df = pd.read_csv(path_to_classifications)
         c_df.drop(columns='Colony', inplace=True)
@@ -867,12 +868,12 @@ class Cluster18S(EighteenSBase):
                 if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
                     ax[2,0].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
 
-        ax[2,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement with k=3 and k=3 = 22/27 = 0.81')
+        ax[2,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement with k=3 and k=3 = 22/27 = 0.81', fontsize=title_font_size)
 
 
 
             
-        # 2
+        # new SNP onto 18s at k==3
         poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[3]
         poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
         
@@ -886,11 +887,10 @@ class Cluster18S(EighteenSBase):
             for j, lab in enumerate(labels):
                 if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
                     ax[2,1].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
-        ax[2,1].set_title(f'location=18S colour=biallelic (new SNP) k=3\nAgreement with k=3 and k=3 = 15/27 = 0.56')
+        ax[2,1].set_title(f'location=18S colour=biallelic (new SNP) k=3\nAgreement with k=3 and k=3 = 15/27 = 0.56', fontsize=title_font_size)
 
-        # 2 as a very simple proof of principle we can plot up 18S three islands with the
-        # k=4 agreement.
-        # 2
+        # as a very simple proof of principle we can plot up 18S three islands with the
+        # k=4 agreement (new SNP)
         poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[4]
         poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
         
@@ -904,10 +904,9 @@ class Cluster18S(EighteenSBase):
             for j, lab in enumerate(labels):
                 if lab.replace('TARA_', '') in ['CO-0001668', 'CO-0002291']:
                     ax[2,2].annotate(lab.replace('TARA_', ''), (x[j], y[j]))
-        ax[2,2].set_title('location=18S colour=biallelic (new SNP) k=4\nAgreement with k=3 (18S) and k=4 (SNP) = 20/27 = 0.74')
+        ax[2,2].set_title('location=18S colour=biallelic (new SNP) k=4\nAgreement with k=3 (18S) and k=4 (SNP) = 20/27 = 0.74', fontsize=title_font_size)
 
         
-
         # Work out which the two samples are that are looking like they should be a fourth by looking at the coordinates
         interest_df = self.poc_snp_pcoa_df[(self.poc_snp_pcoa_df['PC1'] < 0) & (self.poc_snp_pcoa_df['PC2'] < 200)]
         interest_df = interest_df.loc[[_ for _ in interest_df.index if _ in c_df.index]]
@@ -915,10 +914,12 @@ class Cluster18S(EighteenSBase):
         for _ in interest_df.index:
             print(f'\t{_}')
         
-        # 5 plot up the new kmeans distances but with the old snmf classifications.
+        #TODO we are here.
+        # Reorder-4 plot up the new kmeans distances but with the old snmf classifications.
         # First plot up the k=3 for the biallelic. (k=4 is already plotted above)
         self._plot_up_kmeans_with_centroids(pcoa_df=self.poc_snp_pcoa_df, kmeans=self.poc_snp_kmeans_dict[3], labels=True, ax=ax[3,0])
-        ax[3,0].set_title('Clustering of the biallelic SNP distance data at k=3\n(see above for k=4)')
+        ax[3,0].set_title('Clustering of the biallelic SNP distance data at k=3\n(see above for k=4)', fontsize=title_font_size)
+        
         # This shows us where the disagreement is happening and that there is a problem
         # projecting big onto small. But not vice versa.
         # The proof is to plot up the bad agreement on the second plot that shows
@@ -930,14 +931,14 @@ class Cluster18S(EighteenSBase):
             x = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC1']
             y = self.poc_snp_pcoa_df.loc[c_df[c_df['label'] == i].index, 'PC2']
             ax[3,1].scatter(x, y)
-        ax[3,1].set_title('location=SNP biallelic colour=snmf k=3\nAgreement with k=3 (biallelic) and k=3 (snmf) = 18/27 = 0.67')
+        ax[3,1].set_title('location=SNP biallelic colour=snmf k=3\nAgreement with k=3 (biallelic) and k=3 (snmf) = 18/27 = 0.67', fontsize=title_font_size)
 
         ax[3,2].scatter(self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC1'], self.poc_snp_pcoa_df.loc[[_ for _ in self.poc_snp_pcoa_df.index if _ not in c_df.index], 'PC2'], c='lightgrey')
         for i in c_df['label_4'].unique():
             x = self.poc_snp_pcoa_df.loc[c_df[c_df['label_4'] == i].index, 'PC1']
             y = self.poc_snp_pcoa_df.loc[c_df[c_df['label_4'] == i].index, 'PC2']
             ax[3,2].scatter(x, y)
-        ax[3,2].set_title('location=SNP biallelic colour=snmf k=4\nAgreement with k=4 (biallelic) and k=4 (snmf) = 27/27 = 1.00')
+        ax[3,2].set_title('location=SNP biallelic colour=snmf k=4\nAgreement with k=4 (biallelic) and k=4 (snmf) = 27/27 = 1.00', fontsize=title_font_size)
 
         
         # Calculate the agreement here
@@ -978,6 +979,11 @@ class Cluster18S(EighteenSBase):
         print(f'k=3 --> k=4: {three_four}')
         print(f'k=4 --> k=3: {four_three}')
         print(f'k=3 --> k=3: {four_four}')
+        snmf_18s_agreement = np.empty((2,2))
+        snmf_18s_agreement[0,0] = three_three
+        snmf_18s_agreement[0,1] = three_four
+        snmf_18s_agreement[1,0] = four_three
+        snmf_18s_agreement[1,1] = four_four
 
         # Now we want to try doing the comparisons of the 18S and the snmf to the new snp
         print('\n\nAgreement scores for snmf SNP --> biallelic SNP ')
@@ -1003,25 +1009,21 @@ class Cluster18S(EighteenSBase):
                     e_series_lookup[e_k],
                     b_series_lookup[b_k], parent=self).calculate_agreement()
         
+        #TODO we are here.
+        # Plot up three heat maps to visualise the k agreements for the three blocks above.
+        im = ax[4,0].imshow(snmf_18s_agreement)
+        cbar = ax[4,0].figure.colorbar(im, ax=ax[4,0])
+        cbar.ax.set_ylabel('agreement', rotation=-90, va="bottom")
+        ax[4,0].set_xticks(np.arange(2))
+        ax[4,0].set_yticks(np.arange(2))
+        ax[4,0].set_xticklabels([3,4])
+        ax[4,0].set_yticklabels([3,4])
+
+        ax[4,1].imshow(snmf_agreement)
+        ax[4,2].imshow(e_agreement)
+
         plt.tight_layout()
         plt.savefig(os.path.join(self.fig_output_dir_18s, 'snmf_agreement.png'), dpi=600)
-        # foo = 'bar'
-
-    #TODO we are here.
-    # Plot up three heat maps to visualise the k agreements for the three blocks above.
-
-    # TODO what if we drill down way further into the classifications of the distances, and see if one of those groups
-    # Correlates to one of the 18S groupings.
-    # TODO PUT THE 18S annotations, onto the snp new! 
-    # NB We can explain this disagreement. You can see the the new clustering to k=3 actually acts to collapse and break up
-    # the old ones. Acutally a much better way to look at this, that makes perfect sense, is that the classifications will
-    # be maintained when we have a much larger k for the new snp. We want to see if there is a k where all of the samples are
-    # still found in the same grouping for the old samples. Also the old should maybe have been 4 not 3 groups. The
-    # same extension could also be made for the snp vs 18S in that the true classifications for the 18s should be waaay higher
-    # than for the SNP, especially as we were using more islands. We were forcing the agreements to be done using
-    # the same number of groups but this is not cool.
-
-    
 
 class AgreementCalculator:
     """
