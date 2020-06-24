@@ -52,7 +52,8 @@ class EighteenSDistance(EighteenSBase):
     def __init__(
         self, host_genus, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis',
         remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
-        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, most_abund_seq_cutoff=0, exclude_no_use_samples=True):
+        only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, 
+        most_abund_seq_cutoff=0, exclude_no_use_samples=True, island_list=None):
         
         self.dist_method_18S = dist_method_18S
         self.remove_maj_seq = remove_majority_sequence
@@ -65,6 +66,7 @@ class EighteenSDistance(EighteenSBase):
         self.normalisation_method = normalisation_method
         self.approach = approach
         self.genus = host_genus
+        self.island_list = island_list
         # if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
         #     print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
         #     print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
@@ -100,6 +102,8 @@ class EighteenSDistance(EighteenSBase):
         f'{self.approach}_{self.normalisation_abundance}_{self.normalisation_method}_' \
         f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
+        if self.island_list is not None:
+            self.unique_string += f'_{self.island_list}'
         self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
         
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
@@ -259,6 +263,13 @@ class EighteenSDistance(EighteenSBase):
         
         if self.exclude_no_use_samples:
             df = df[df['use'] == True]
+
+        # Then by island list
+        if self.island_list is not None:
+            if self.island_list == 'original_three':
+                df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
+            else:
+                raise NotImplementedError
         # Finally, we only want the list of the readsets, so get the indices from the df
         
         return list(df.index)
@@ -1384,12 +1395,31 @@ if __name__ == "__main__":
 
         print(f'All dist analyses complete. {bad_tree} bad tree samples.')
 
-    do_multi_proc_launch()
+    # do_multi_proc_launch()
     
-    # dist = EighteenSDistance(
-    #     host_genus='Pocillopora', remove_majority_sequence=True, 
-    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-    #     snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
-    #     normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=0.01,
-    #     most_abund_seq_cutoff=3, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10
-    #     ).make_and_plot_dist_and_pcoa()
+    # Island list names that can be used
+    # 'original_three' = [6, 10, 15]
+    # 'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
+
+    dist = EighteenSDistance(
+        host_genus='Pocillopora', remove_majority_sequence=True, 
+        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+        snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+        normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
+        most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
+        ).make_and_plot_dist_and_pcoa()
+
+    # TODO code up an Islands list input so that we limit to only certain islands. This way we
+    # can limit ourselves to the original three islands and then later to the islands that the
+    # we have SNP from. We can then also leave out the far discrete group if it correlates to a given island.
+    # Lots to do.
+    # Also we can use the snp_distance_type option to choose the original snmf classifications. This will mean skipping
+    # a mantel test.
+
+    # TODO, moving forwards, work up an optimisation similar to what we had for the distance Pearsons but for kmeans.
+    # Do this for the three island set, and for the 10+1 island set. Work with the classifications that Dider has
+    # now sent us.
+    # One thing that is great is that we should be able to work with exactly the same code that produces the distance matrix
+    # and then we just need to plug on the cluster calculation. In fact, we don't need to redo the bray curtis
+    # as the matrix will not change at all. So we only need to do the two island restriction modes (3 and 10+1) for
+    # unifrac.
