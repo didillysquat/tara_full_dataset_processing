@@ -268,6 +268,8 @@ class EighteenSDistance(EighteenSBase):
         if self.island_list is not None:
             if self.island_list == 'original_three':
                 df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
+            elif self.island_list == 'ten_plus_one':
+                df = df[df['ISLAND#'].isin(['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15'])]
             else:
                 raise NotImplementedError
         # Finally, we only want the list of the readsets, so get the indices from the df
@@ -1257,7 +1259,7 @@ if __name__ == "__main__":
 
     def execute_dist(in_q, out_q):
         for dist_args in iter(in_q.get, 'STOP'):
-            host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample = dist_args
+            host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list = dist_args
             try:
                 EighteenSDistance(
                     host_genus=host_genus, remove_majority_sequence=True, 
@@ -1265,7 +1267,7 @@ if __name__ == "__main__":
                     most_abund_seq_cutoff=most_abund_seq_cutoff, mafft_num_proc=10, 
                     dist_method_18S=dist_method_18S, only_snp_samples=only_snp_samples, 
                     normalisation_abundance=normalisation_abundance, normalisation_method=normalisation_method,
-                    min_num_distinct_seqs_per_sample=min_num_distinct_seqs_per_sample
+                    min_num_distinct_seqs_per_sample=min_num_distinct_seqs_per_sample, island_list=island_list
                     ).make_and_plot_dist_and_pcoa()
             except BadTreeError:
                 print('BadTreeError. Skipping.')
@@ -1281,93 +1283,177 @@ if __name__ == "__main__":
         tot = 0
         test_list = []
         for dist_method_18S in ['unifrac', 'braycurtis']:
-            for host_genus in ['Porites', 'Pocillopora']:
-                # for only_snp_samples in [True, False]:
-                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                    most_abund_seq_cutoff = 0
-                    normalisation_abundance = None
-                    normalisation_method = 'pwr'
-                    min_num_distinct_seqs_per_sample = 3
-                    only_snp_samples = False
-                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                    tot += 1
-                if host_genus == 'Porites':
-                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
-                        samples_at_least_threshold = 0
+            if dist_method_18S == 'braycurtis':
+                island_list = None
+                for host_genus in ['Porites', 'Pocillopora']:
+                    # for only_snp_samples in [True, False]:
+                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                        most_abund_seq_cutoff = 0
                         normalisation_abundance = None
                         normalisation_method = 'pwr'
                         min_num_distinct_seqs_per_sample = 3
                         only_snp_samples = False
-                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
                         tot += 1
-                elif host_genus == 'Pocillopora':
-                    for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
-                        samples_at_least_threshold = 0
-                        normalisation_abundance = None
-                        normalisation_method = 'pwr'
-                        min_num_distinct_seqs_per_sample = 3
-                        only_snp_samples = False
-                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                        tot += 1
-                for normalisation_method in ['pwr', 'rai']:
-                    if dist_method_18S == 'braycurtis':
-                        # We will test the normalisation abundance using optimised 
-                        # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
-                        # For both species, the same the same value for both distance methods can be used.
-                        if host_genus == 'Pocillopora':
-                            samples_at_least_threshold = 0.08
-                            most_abund_seq_cutoff = 150
-                        else:
-                            samples_at_least_threshold = 0.02
-                            most_abund_seq_cutoff = 75
-                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
-                            # samples_at_least_threshold = 0
-                            # most_abund_seq_cutoff = 0
-                            only_snp_samples = False
-                            min_num_distinct_seqs_per_sample = 3
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                            tot += 1
-                    elif dist_method_18S == 'unifrac':
-                        if host_genus == 'Pocillopora':
-                            samples_at_least_threshold = 0.08
-                            most_abund_seq_cutoff = 150
-                        else:
-                            samples_at_least_threshold = 0.02
-                            most_abund_seq_cutoff = 75
-                        for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
-                            # samples_at_least_threshold = 0
-                            # most_abund_seq_cutoff = 0
-                            only_snp_samples = False
-                            min_num_distinct_seqs_per_sample = 3
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                            tot += 1
-                # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
-                for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                    # most_abund_seq_cutoff = 0
-                    normalisation_abundance = None
-                    normalisation_method = 'pwr'
-                    min_num_distinct_seqs_per_sample = 3
-                    only_snp_samples = False
                     if host_genus == 'Porites':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
+                            samples_at_least_threshold = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            only_snp_samples = False
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
                             tot += 1
-                            to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample)
-                            test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
                     elif host_genus == 'Pocillopora':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
+                            samples_at_least_threshold = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            only_snp_samples = False
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
                             tot += 1
-                            test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-            for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
-                samples_at_least_threshold = 0
-                most_abund_seq_cutoff = 0
-                only_snp_samples = False
-                normalisation_abundance = None
-                normalisation_method = 'pwr'
-                host_genus = 'Pocillopora'
-                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples,normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample))
-                tot += 1
+                    for normalisation_method in ['pwr', 'rai']:
+                        if dist_method_18S == 'braycurtis':
+                            # We will test the normalisation abundance using optimised 
+                            # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
+                            # For both species, the same the same value for both distance methods can be used.
+                            if host_genus == 'Pocillopora':
+                                samples_at_least_threshold = 0.08
+                                most_abund_seq_cutoff = 150
+                            else:
+                                samples_at_least_threshold = 0.02
+                                most_abund_seq_cutoff = 75
+                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
+                                # samples_at_least_threshold = 0
+                                # most_abund_seq_cutoff = 0
+                                only_snp_samples = False
+                                min_num_distinct_seqs_per_sample = 3
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                        elif dist_method_18S == 'unifrac':
+                            if host_genus == 'Pocillopora':
+                                samples_at_least_threshold = 0.08
+                                most_abund_seq_cutoff = 150
+                            else:
+                                samples_at_least_threshold = 0.02
+                                most_abund_seq_cutoff = 75
+                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
+                                # samples_at_least_threshold = 0
+                                # most_abund_seq_cutoff = 0
+                                only_snp_samples = False
+                                min_num_distinct_seqs_per_sample = 3
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                    # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
+                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                        # most_abund_seq_cutoff = 0
+                        normalisation_abundance = None
+                        normalisation_method = 'pwr'
+                        min_num_distinct_seqs_per_sample = 3
+                        only_snp_samples = False
+                        if host_genus == 'Porites':
+                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                                to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list)
+                                test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                        elif host_genus == 'Pocillopora':
+                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                                test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
+                    samples_at_least_threshold = 0
+                    most_abund_seq_cutoff = 0
+                    only_snp_samples = False
+                    normalisation_abundance = None
+                    normalisation_method = 'pwr'
+                    host_genus = 'Pocillopora'
+                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                    tot += 1
+            else: # 'unifrac'
+                for island_list in [None, 'original_three', 'ten_plus_one']:
+                    for host_genus in ['Porites', 'Pocillopora']:
+                        # for only_snp_samples in [True, False]:
+                        for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                            most_abund_seq_cutoff = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            only_snp_samples = False
+                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                            tot += 1
+                        if host_genus == 'Porites':
+                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
+                                samples_at_least_threshold = 0
+                                normalisation_abundance = None
+                                normalisation_method = 'pwr'
+                                min_num_distinct_seqs_per_sample = 3
+                                only_snp_samples = False
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                        elif host_genus == 'Pocillopora':
+                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
+                                samples_at_least_threshold = 0
+                                normalisation_abundance = None
+                                normalisation_method = 'pwr'
+                                min_num_distinct_seqs_per_sample = 3
+                                only_snp_samples = False
+                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                tot += 1
+                        for normalisation_method in ['pwr', 'rai']:
+                            if dist_method_18S == 'braycurtis':
+                                # We will test the normalisation abundance using optimised 
+                                # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
+                                # For both species, the same the same value for both distance methods can be used.
+                                if host_genus == 'Pocillopora':
+                                    samples_at_least_threshold = 0.08
+                                    most_abund_seq_cutoff = 150
+                                else:
+                                    samples_at_least_threshold = 0.02
+                                    most_abund_seq_cutoff = 75
+                                for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
+                                    # samples_at_least_threshold = 0
+                                    # most_abund_seq_cutoff = 0
+                                    only_snp_samples = False
+                                    min_num_distinct_seqs_per_sample = 3
+                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                    tot += 1
+                            elif dist_method_18S == 'unifrac':
+                                if host_genus == 'Pocillopora':
+                                    samples_at_least_threshold = 0.08
+                                    most_abund_seq_cutoff = 150
+                                else:
+                                    samples_at_least_threshold = 0.02
+                                    most_abund_seq_cutoff = 75
+                                for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
+                                    # samples_at_least_threshold = 0
+                                    # most_abund_seq_cutoff = 0
+                                    only_snp_samples = False
+                                    min_num_distinct_seqs_per_sample = 3
+                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                    tot += 1
+                        # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
+                        for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                            # most_abund_seq_cutoff = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'pwr'
+                            min_num_distinct_seqs_per_sample = 3
+                            only_snp_samples = False
+                            if host_genus == 'Porites':
+                                for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                    tot += 1
+                                    to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list)
+                                    test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                            elif host_genus == 'Pocillopora':
+                                for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                    tot += 1
+                                    test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                
+        
         # Here we have the in_q loaded
         for n in range(num_proc):
             in_q.put('STOP')
