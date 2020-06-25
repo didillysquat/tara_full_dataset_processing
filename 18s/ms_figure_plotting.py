@@ -15,8 +15,6 @@ PCoA plots:
 3 - PCOA using with the majority seuqences and secondary samples removed. This should likely be
 plotted using the parameters inferred from the line plots.
 
-
-
 Line plots:
 1 - three row plot
 Three rows to this plot that correspond to the three 'approaches' of the paper.
@@ -528,12 +526,14 @@ class ThreeRow:
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
         return contour
 
-    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False, num_proc=100):
+    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False, num_proc=2):
         """
         This is a modification for _plot_contour to work with classification agreement rather than Pearsons mantel agreement
         """
         # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
         # and then the agreement on the z.
+        print('Starting plot contour classification')
+        print(f'{distance_method}, {genus}, {island_list}')
         x_samples_at_least_threshold = []
         y_most_abund_seq_cutoff = []
         z_coef = []
@@ -562,13 +562,16 @@ class ThreeRow:
                             # Then we already have the results computed and we can simply read them in and plot them up
                             # We have not completed this yet
                             with open(results_path, 'r') as f:
-                                max_agreement = float(f.readline().split(',')[0])
+                                line = f.readline().split(',')
+                                max_agreement = float(line[0])
+                                max_k = int(line[1])
                             # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
                             # samples_at_least_threshold due to the normalistaion testing.
                             # If we leave this 75 in it creates a vertical white stripe at 75.
                             x_samples_at_least_threshold.append(samples_at_least_threshold)
                             y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
                             z_coef.append(max_agreement)
+                            print(f'max_agreement={max_agreement:.2f} for misco of {samples_at_least_threshold:.2f} and masco of {most_abund_seq_cutoff} k = {max_k}')
                         else:
                             # Then we need to compute the classificaiton agreement
                             # We can make a call here to a class of clustering.
@@ -580,6 +583,7 @@ class ThreeRow:
                                 self.parent.output_dir_18s, self.parent.fastq_info_df_path, self.parent.temp_dir_18s))
                             in_q_len += 1
                 elif distance_method == 'braycurtis':
+                    raise NotImplementedError
                     if dist_file.endswith(f'_3.dist.gz'):
                         # Then this is a set of points for plotting
                         # Then this is a distance matrix that we want to check the classification agreement for
@@ -597,13 +601,16 @@ class ThreeRow:
                             # Then we already have the results computed and we can simply read them in and plot them up
                             # We have not completed this yet
                             with open(results_path, 'r') as f:
-                                max_agreement = float(f.readline().split(',')[0])
+                                line = f.readline().split(',')
+                                max_agreement = float(line[0])
+                                max_k = int(line[1])
                             # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
                             # samples_at_least_threshold due to the normalistaion testing.
                             # If we leave this 75 in it creates a vertical white stripe at 75.
                             x_samples_at_least_threshold.append(samples_at_least_threshold)
                             y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
                             z_coef.append(max_agreement)
+                            print(f'max_agreement={max_agreement:.2f} for misco of {samples_at_least_threshold:.2f} and masco of {most_abund_seq_cutoff} k = {max_k}')
                         else:
                             # Then we need to compute the classificaiton agreement
                             # We can make a call here to a class of clustering.
@@ -620,33 +627,35 @@ class ThreeRow:
         # Here we have the x, y and z populated with the results that have already been calculated and we have
         # an MP in_q populated with tuples that represent results that still need to be processed.
         # We need to MP process them here.
-        for n in range(num_proc):
-            in_q.put('STOP')
-        
-        all_processes = []
-        for p in range(num_proc):
-            p = Process(target=self.execute_classification_agreement, args=(in_q, out_q))
-            all_processes.append(p)
-            p.start()
+        if in_q_len > 0:
+            for n in range(num_proc):
+                in_q.put('STOP')
+            
+            all_processes = []
+            for p in range(num_proc):
+                p = Process(target=self.execute_classification_agreement, args=(in_q, out_q))
+                all_processes.append(p)
+                p.start()
 
-        # Now process the out_q in the main thread
-        done_count = 0
-        prog_count = 0
-        while done_count < num_proc:
-            item = out_q.get()
-            if item == 'ALL_DONE':
-                done_count += 1
-            else:
-                prog_count += 1
-                print(f'{prog_count}/{in_q_len} dist analyses complete')
-                max_agreement, misco, masco = item
-                x_samples_at_least_threshold.append(misco)
-                y_most_abund_seq_cutoff.append(masco)
-                z_coef.append(max_agreement)
+            # Now process the out_q in the main thread
+            done_count = 0
+            prog_count = 0
+            while prog_count < in_q_len:
+                item = out_q.get()
+                if item == 'ALL_DONE':
+                    done_count += 1
+                else:
+                    prog_count += 1
+                    print(f'{prog_count}/{in_q_len} dist analyses complete')
+                    max_agreement, misco, masco = item
+                    x_samples_at_least_threshold.append(misco)
+                    y_most_abund_seq_cutoff.append(masco)
+                    z_coef.append(max_agreement)
 
-        for p in all_processes:
-            p.join()
-
+            for p in all_processes:
+                p.join()
+        else:
+            print('in_q is empty')
         df = pd.DataFrame(columns=sorted([int(_) for _ in set(y_most_abund_seq_cutoff)]), index=sorted(list(set(x_samples_at_least_threshold))))
         
         for x,y,z in zip(x_samples_at_least_threshold, y_most_abund_seq_cutoff, z_coef):
@@ -656,6 +665,7 @@ class ThreeRow:
         # were only computed up to 100 so crop to this
         df = df.iloc[:,:df.columns.get_loc(300) + 1]
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
+        print('Plot contour classification complete \n\n\n')
         return contour
 
     @staticmethod
@@ -666,19 +676,26 @@ class ThreeRow:
             cache_dir_18s, input_dir_18s, output_dir_18s, 
             fastq_info_df_path, temp_dir_18s) = class_args
             
-            max_agreement = ComputeClassificationAgreement(
+            cca = ComputeClassificationAgreement(
                 distance_method=distance_method, distance_matrix_path=distance_matrix_path, 
                 island_list=island_list, genus=genus,
                 output_dir=output_dir, cache_dir_18s=cache_dir_18s, input_dir_18s=input_dir_18s,
-                output_dir_18s=output_dir_18s, fastq_info_df_path=fastq_info_df_path, temp_dir_18s=temp_dir_18s).compute_classficiation_agreement()
+                output_dir_18s=output_dir_18s, fastq_info_df_path=fastq_info_df_path, temp_dir_18s=temp_dir_18s)
+            max_agreement, max_k = cca.compute_classficiation_agreement()
 
             # Once the max_agreement calculation is complete we will want to put a tuple into the out_q
             # that represents the max_agreement, the misco and the masco scores, so that these can be added
             # in the main thread to the plotting coordinates list
             out_q.put((max_agreement, samples_at_least_threshold, most_abund_seq_cutoff))
-            print(f'max_agreement={max_agreement:.2f} for misco of {samples_at_least_threshold} and masco of {most_abund_seq_cutoff}')
+            print(f'max_agreement={max_agreement:.2f} for misco of {samples_at_least_threshold:.2f} and masco of {most_abund_seq_cutoff} k = {max_k}')
         out_q.put('ALL_DONE')
         
+if __name__ == "__main__":
+    # MSPlots().plot_three_row()
+    MSPlots().plot_three_row(classifications=True)
 
-# MSPlots().plot_three_row()
-MSPlots().plot_three_row(classifications=True)
+# TODO it appears as though the ten_plus_one agreements are not working well at all.
+# however, we still seem to have good agreement for the three islands.
+# I think a next smart thing to try will be to try some other subsets of three islands
+# and see how they come up. Also I guess we should try clustering with just the SNP samples.
+# We will really need to take a careful look.

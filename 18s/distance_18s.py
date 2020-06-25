@@ -1016,7 +1016,6 @@ class DistancePlotter:
         print(f'saving secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg')
         plt.savefig(os.path.join(self.parent.figure_dir, f'secondary_seq_{secondary_seq_string}_{self.parent.samples_at_least_threshold}_{self.color_by}_pcoa{with_unifrac_string}.svg'))
 
-
 class IndiDistancePlotter:
     """Class for plotting an individual axis"""
     def __init__(self, eightsdistparent, fig, ax, genus, dist_method, path_to_csv, color_dict):
@@ -1437,13 +1436,13 @@ if __name__ == "__main__":
     # 'original_three' = [6, 10, 15]
     # 'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
 
-    dist = EighteenSDistance(
-        host_genus='Pocillopora', remove_majority_sequence=True, 
-        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-        snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
-        normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
-        most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
-        ).make_and_plot_dist_and_pcoa()
+    # dist = EighteenSDistance(
+    #     host_genus='Pocillopora', remove_majority_sequence=True, 
+    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+    #     snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+    #     normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
+    #     most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
+    #     ).make_and_plot_dist_and_pcoa()
 
     # TODO code up an Islands list input so that we limit to only certain islands. This way we
     # can limit ourselves to the original three islands and then later to the islands that the

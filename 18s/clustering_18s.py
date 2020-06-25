@@ -15,6 +15,11 @@ import pandas as pd
 import matplotlib as mpl
 mpl.use('agg')
 import matplotlib.pyplot as plt
+# https://stackoverflow.com/a/33616192/5516420 This gets rid of the deprecation warnings from sklearn
+def warn(*args, **kwargs):
+    pass
+import warnings
+warnings.warn = warn
 from sklearn.cluster import KMeans
 import subprocess
 from subprocess import CalledProcessError
@@ -1191,10 +1196,7 @@ class ComputeClassificationAgreement:
     """
     Class for computing the classificaiton agreement between 18S and the SNP classifications
     """
-    def __init__(
-        self, distance_method, distance_matrix_path, 
-        island_list, genus, output_dir, cache_dir_18s, 
-        input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s):
+    def __init__(self, distance_method, distance_matrix_path, island_list, genus, output_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s):
         self.output_dir = output_dir
         self.cache_dir_18s = cache_dir_18s
         self.input_dir_18s = input_dir_18s
@@ -1326,7 +1328,7 @@ class ComputeClassificationAgreement:
             # Compute kmeans from scratch and pickle out
             
             for k in k_range:
-                kmeans = KMeans(n_clusters=k, n_init=100, algorithm='full').fit(self.pcoa_df)
+                kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full', n_jobs=1).fit(self.pcoa_df)
                 self.kmeans_dict[k] = kmeans
             compress_pickle.dump(self.kmeans_dict, self.kmeans_dict_pickle_path)
         
@@ -1348,7 +1350,7 @@ class ComputeClassificationAgreement:
             f.write(f'{max_agreement:.2f},{max_k},kmeans')
 
         # Here we are done.
-        return max_agreement
+        return max_agreement, max_k
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
@@ -1653,10 +1655,6 @@ class OneClusterCol:
             self.sil[i] = silhouette_score(self.pcoa_df, kmeans.labels_, metric = 'euclidean')
         
 
-    
-
-
-
 if __name__ == "__main__":
     c = Cluster18S()
     # c.visalise_snp_new_clusters()
@@ -1671,20 +1669,20 @@ if __name__ == "__main__":
     # This will do the clustering classification results for the 
     # parameter optimisation
 
-# TODO
-# Run permanovas of the dist matrices with meta data for site, island, 
-# sequencing depth pre normalisation, richness post-normalisation.
-# Do this for both the 18S and the SNP
-# We will presumably need a distance matrix to pass in and then a meta info df.
+    # TODO
+    # Run permanovas of the dist matrices with meta data for site, island, 
+    # sequencing depth pre normalisation, richness post-normalisation.
+    # Do this for both the 18S and the SNP
+    # We will presumably need a distance matrix to pass in and then a meta info df.
 
-# TODO check clustering of between old poc and new poc.
-# DONE
+    # TODO check clustering of between old poc and new poc.
+    # DONE
 
-# TODO, plot up ordination figures one for poc and one for por
-# comparing between the 18S structure and the SNP structure.
-# 2 ordinations for the SNP (at low and high k)
-# and 4 for the 18S, one for each dist method also at high and low k.
-# We can use the in detail cluster figs for the 18S to choose which can be representative.
-# DONE
+    # TODO, plot up ordination figures one for poc and one for por
+    # comparing between the 18S structure and the SNP structure.
+    # 2 ordinations for the SNP (at low and high k)
+    # and 4 for the 18S, one for each dist method also at high and low k.
+    # We can use the in detail cluster figs for the 18S to choose which can be representative.
+    # DONE
 
-# TODO autocorrelation between different 18S distance methods. for k=3 
+    # TODO autocorrelation between different 18S distance methods. for k=3 
