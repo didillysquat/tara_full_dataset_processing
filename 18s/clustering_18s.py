@@ -1042,10 +1042,10 @@ class AgreementCalculator:
         result is very small. So let's implement a rule whereby we test 10 of the permutations randomly
         and then we test another 100 and if the best match doesn't change then we don't test any further.
     """
-    def __init__(self, lab_ser_one, lab_ser_two, parent=None, cache_dir_18s=None, temp_dir_18s=None):
+    def __init__(self, lab_ser_one, lab_ser_two, parent=None, cache_dir_18s=None, temp_dir_18s=None, silence=False):
         # We allow the input of either the parent object or the individual cache_dir_18s, temp_dir_18s
         if parent is None:
-            assert((cache_dir is not None) and (temp_dir_18s))
+            assert((cache_dir_18s is not None) and (temp_dir_18s is not None))
             self.cache_dir_18s = cache_dir_18s
             self.temp_dir_18s = temp_dir_18s
         else:
@@ -1057,7 +1057,7 @@ class AgreementCalculator:
         else:
             self.small_series = lab_ser_two
             self.large_series = lab_ser_one
-        
+        self.silence = silence
         self.small_unique_classifications = [_ for _ in self.small_series.unique()]
         self.large_unique_classifications = list(self.large_series.unique())
         # Calculation of the permutation lists takes considerable time.
@@ -1065,15 +1065,17 @@ class AgreementCalculator:
         # rather we will cache out and see if that speeds up.
         if len(self.small_unique_classifications) > 5:
             list_hash = self._md5sum_from_python_object(self.small_unique_classifications)
-            perm_list_cache_path = os.path.join(self.parent.cache_dir_18s, f'{list_hash}_perm_list.p.bz')
+            perm_list_cache_path = os.path.join(self.cache_dir_18s, f'{list_hash}_perm_list.p.bz')
             if os.path.exists(perm_list_cache_path):
                 self.ordered_clasification_lists = compress_pickle.load(perm_list_cache_path)
             else:
-                print('Creating permutation list from scratch. This may take some time...')
+                if not self.silence:
+                    print('Creating permutation list from scratch. This may take some time...')
                 self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
                 random.shuffle(self.ordered_clasification_lists)
                 compress_pickle.dump(self.ordered_clasification_lists, perm_list_cache_path)
-                print('Complete.')
+                if not self.silence:
+                    print('Complete.')
         else:
             # Don't bother with the cache
             self.ordered_clasification_lists = list(itertools.permutations(self.small_unique_classifications, len(self.small_unique_classifications)))
@@ -1096,7 +1098,8 @@ class AgreementCalculator:
         self.done_slice_score = 0
 
     def calculate_agreement(self):
-        print('Running agreement calculations')
+        if not self.silence:
+            print('Running agreement calculations')
         self.tot_perm_lists = len(self.ordered_clasification_lists)
         if len(self.ordered_clasification_lists) > 200:
             # Do for 10, then 100. if the score doesn't change 
@@ -1120,8 +1123,9 @@ class AgreementCalculator:
                     foo = 'bar'
         else:
             self._agreement_slice()
-        print('\rAll permutations complete')
-        print(f'Max agreement k={len(self.small_unique_classifications)} and k={len(self.large_unique_classifications)}: {self.max_absolute_agreement}/{self.samples_in_common} = {max(self.agreement_score_list):.2f}')
+        if not self.silence:
+            print('\rAll permutations complete')
+            print(f'Max agreement k={len(self.small_unique_classifications)} and k={len(self.large_unique_classifications)}: {self.max_absolute_agreement}/{self.samples_in_common} = {max(self.agreement_score_list):.2f}')
         return max(self.agreement_score_list)
 
     def _agreement_slice(self, slice_size=None):
@@ -1131,7 +1135,8 @@ class AgreementCalculator:
         else:
             slice_list = self.ordered_clasification_lists
         for i, ordered_clasification_list in enumerate(slice_list):
-            sys.stdout.write(f'\r{i}/{self.tot_perm_lists} permutations complete')
+            if not self.silence:
+                sys.stdout.write(f'\r{i}/{self.tot_perm_lists} permutations complete')
             # For each calssification in order
             matched_classifications = []
             matched_score = 0
@@ -1167,7 +1172,7 @@ class AgreementCalculator:
         and return the md5sum hash.
         """
         sorted_p_obj = sorted(p_obj)
-        temp_out_path = os.path.join(self.parent.temp_dir_18s, 'p_obj.out')
+        temp_out_path = os.path.join(self.temp_dir_18s, 'p_obj.out')
         with open(temp_out_path, 'w') as f:
             json.dump(sorted_p_obj, f)
         md5sum_hash = self._md5sum(temp_out_path)
@@ -1194,9 +1199,10 @@ class ComputeClassificationAgreement:
         self.cache_dir_18s = cache_dir_18s
         self.input_dir_18s = input_dir_18s
         self.output_dir_18s = output_dir_18s
-        self.fastq_info_df = self._make_fastq_info_df(fastq_info_df_path)
-        self.parent = parent
+        self.fastq_info_df = self._make_fastq_info_df(fastq_info_df_path=fastq_info_df_path)
+        self.temp_dir_18s = temp_dir_18s
         self.genus = genus
+        self.snp_class_df = self._load_snp_classification_df()
         self.distance_method = distance_method
         self.distance_matrix_path = distance_matrix_path
         self.island_list = island_list
@@ -1241,8 +1247,19 @@ class ComputeClassificationAgreement:
         
         # The snp classifications are now associated to the base_18s.py class.
     
+    def _load_snp_classification_df(self):
+        if self.genus == 'Pocillopora':
+            # First check to see if the cached version exists
+            snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
+        elif self.genus == 'Porites':
+            snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
+        if os.path.exists(snp_cache_dir):
+            return compress_pickle.load(snp_cache_dir)
+        else:
+            raise RuntimeError('SNP classification df not found')
+
     @staticmethod
-    def _make_fastq_info_df(self, fastq_info_df_path):
+    def _make_fastq_info_df(fastq_info_df_path):
         df = pd.read_csv(fastq_info_df_path)
         return df.set_index(keys='readset', drop=False)
 
@@ -1317,7 +1334,7 @@ class ComputeClassificationAgreement:
         max_agreement = 0
         max_k = None
         for k in k_range:
-            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['SVDQ'], parent=self.parent).calculate_agreement()
+            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
             if agreement > max_agreement:
                 max_agreement = agreement
                 max_k = k

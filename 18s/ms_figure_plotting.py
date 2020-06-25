@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Script for plotting up the PCoAs of the distance plots and plotting up the line
 graphs that show how the mantel tests change in reaction to the line graphs.
@@ -239,7 +240,7 @@ class ThreeRow:
             self.contour_ax[1,1].plot([0,300], [i,i], 'r-', linewidth=0.5)
 
         plt.tight_layout()
-        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_contour_fig.png'), dpi=1200)
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_contour_fig_classification.png'), dpi=1200)
         
         print('DONE')
         self.foo = 'bar'
@@ -527,7 +528,7 @@ class ThreeRow:
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
         return contour
 
-    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False, num_proc=10):
+    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False, num_proc=100):
         """
         This is a modification for _plot_contour to work with classification agreement rather than Pearsons mantel agreement
         """
@@ -539,6 +540,7 @@ class ThreeRow:
         z_p_val = []
         in_q = Queue()
         out_q = Queue()
+        in_q_len = 0
         for dist_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('.dist.gz')]:
             if dist_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_'):
                 # inbetween these two conditions are the misco and the masco scores
@@ -576,7 +578,7 @@ class ThreeRow:
                                 samples_at_least_threshold, most_abund_seq_cutoff, 
                                 self.parent.output_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
                                 self.parent.output_dir_18s, self.parent.fastq_info_df_path, self.parent.temp_dir_18s))
-                                   
+                            in_q_len += 1
                 elif distance_method == 'braycurtis':
                     if dist_file.endswith(f'_3.dist.gz'):
                         # Then this is a set of points for plotting
@@ -611,6 +613,7 @@ class ThreeRow:
                                 samples_at_least_threshold, most_abund_seq_cutoff, 
                                 self.parent.output_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
                                 self.parent.output_dir_18s, self.parent.fastq_info_df_path, self.parent.temp_dir_18s))
+                            in_q_len += 1
                 else:
                     raise NotImplementedError          
 
@@ -635,7 +638,7 @@ class ThreeRow:
                 done_count += 1
             else:
                 prog_count += 1
-                print(f'{prog_count}/{tot} dist analyses complete')
+                print(f'{prog_count}/{in_q_len} dist analyses complete')
                 max_agreement, misco, masco = item
                 x_samples_at_least_threshold.append(misco)
                 y_most_abund_seq_cutoff.append(masco)
@@ -673,6 +676,7 @@ class ThreeRow:
             # that represents the max_agreement, the misco and the masco scores, so that these can be added
             # in the main thread to the plotting coordinates list
             out_q.put((max_agreement, samples_at_least_threshold, most_abund_seq_cutoff))
+            print(f'max_agreement={max_agreement:.2f} for misco of {samples_at_least_threshold} and masco of {most_abund_seq_cutoff}')
         out_q.put('ALL_DONE')
         
 

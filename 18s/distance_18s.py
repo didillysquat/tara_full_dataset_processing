@@ -169,32 +169,6 @@ class EighteenSDistance(EighteenSBase):
         # make the df
         return pd.DataFrame(data=dat, columns=index, index=index).astype(int), index
 
-    def _convert_index_to_sample_ids(self, index):
-        # We want to convert these indices to samplie-id
-        island_re = re.compile('I\d+')
-        site_re = re.compile('S\d+')
-        co_re = re.compile('C\d+')
-        # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
-        # (e.g. TARA_CO-1016606)
-        sample_name_dict = {}
-        for ind in index:
-            island = island_re.search(ind).group()
-            site = site_re.search(ind).group()
-            colony = co_re.search(ind).group()
-            sample_id = self.sample_provenance_df[
-                (self.sample_provenance_df['ISLAND#'] == island) & 
-                (self.sample_provenance_df['SITE#'] == site) & 
-                (self.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony) & 
-                (self.sample_provenance_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')].index.values.tolist()
-            if len(sample_id) != 1:
-                raise RunTimeError('More than one matching sample-id')
-            else:
-                sample_id = sample_id[0]
-            sample_name_dict[ind] = sample_id
-        
-        # Convert the index to sample-id
-        return [sample_name_dict[ind] for ind in index]
-
     def _get_meta_info_df(self):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
 

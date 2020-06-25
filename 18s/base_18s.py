@@ -8,6 +8,8 @@ import compress_pickle
 import pandas as pd
 from collections import defaultdict
 import subprocess
+import re
+
 class EighteenSBase:
     def __init__(self):
         self.root_dir = '/home/humebc/projects/tara/tara_full_dataset_processing'
@@ -52,25 +54,50 @@ class EighteenSBase:
         if genus == 'Pocillopora':
             # First check to see if the cached version exists
             snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
-        elif self.genus == 'Porites':
+        elif genus == 'Porites':
             snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
         
         if os.path.exists(snp_cache_dir):
-            return = compress_pickle.load(snp_cache_dir)
+            return compress_pickle.load(snp_cache_dir)
         else:
             # Need to create it from scratch
-            if self.genus == 'Pocillopora':
+            if genus == 'Pocillopora':
                 raw_snp_class_path = os.path.join(self.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
-            elif self.genus == 'Porites':
+            elif genus == 'Porites':
                 raw_snp_class_path = os.path.join(self.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
         
             snp_class_df = pd.read_csv(raw_snp_class_path, index_col=0)
-            snp_class_df.index = self._convert_index_to_sample_ids(self.snp_class_df.index)
+            snp_class_df.index = self._convert_index_to_sample_ids(snp_class_df.index)
             snp_class_df.dropna(inplace=True)
             snp_class_df.columns = ['label']
-            compress_pickle.dump(self.snp_class_df, snp_cache_dir)
+            compress_pickle.dump(snp_class_df, snp_cache_dir)
             return snp_class_df
             
+    def _convert_index_to_sample_ids(self, index):
+        # We want to convert these indices to samplie-id
+        island_re = re.compile('I\d+')
+        site_re = re.compile('S\d+')
+        co_re = re.compile('C\d+')
+        # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
+        # (e.g. TARA_CO-1016606)
+        sample_name_dict = {}
+        for ind in index:
+            island = island_re.search(ind).group()
+            site = site_re.search(ind).group()
+            colony = co_re.search(ind).group()
+            sample_id = self.sample_provenance_df[
+                (self.sample_provenance_df['ISLAND#'] == island) & 
+                (self.sample_provenance_df['SITE#'] == site) & 
+                (self.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony) & 
+                (self.sample_provenance_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')].index.values.tolist()
+            if len(sample_id) != 1:
+                raise RunTimeError('More than one matching sample-id')
+            else:
+                sample_id = sample_id[0]
+            sample_name_dict[ind] = sample_id
+        
+        # Convert the index to sample-id
+        return [sample_name_dict[ind] for ind in index]
 
     @staticmethod
     def decompress_read_compress(path_to_read_in):
