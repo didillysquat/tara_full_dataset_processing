@@ -44,6 +44,34 @@ class EighteenSBase:
         self.coral_readsets = [readset for readset, ser in self.fastq_info_df.iterrows() if self.sample_provenance_df.at[ser['sample-id'] ,'SAMPLE ENVIRONMENT, short'] == 'C-CORAL']
         self.genera = ['Pocillopora', 'Millepora', 'Porites']
 
+        # read in the classifications for the SNP
+        self.poc_snp_classifications = self._get_snp_classifications(genus='Pocillopora')
+        self.por_snp_classifications = self._get_snp_classifications(genus='Porites')
+        
+    def _get_snp_classifications(self, genus):
+        if genus == 'Pocillopora':
+            # First check to see if the cached version exists
+            snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
+        elif self.genus == 'Porites':
+            snp_cache_dir = os.path.join(self.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
+        
+        if os.path.exists(snp_cache_dir):
+            return = compress_pickle.load(snp_cache_dir)
+        else:
+            # Need to create it from scratch
+            if self.genus == 'Pocillopora':
+                raw_snp_class_path = os.path.join(self.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
+            elif self.genus == 'Porites':
+                raw_snp_class_path = os.path.join(self.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
+        
+            snp_class_df = pd.read_csv(raw_snp_class_path, index_col=0)
+            snp_class_df.index = self._convert_index_to_sample_ids(self.snp_class_df.index)
+            snp_class_df.dropna(inplace=True)
+            snp_class_df.columns = ['label']
+            compress_pickle.dump(self.snp_class_df, snp_cache_dir)
+            return snp_class_df
+            
+
     @staticmethod
     def decompress_read_compress(path_to_read_in):
         """Because we now have all of the seq_qc files compressed we will make this utility

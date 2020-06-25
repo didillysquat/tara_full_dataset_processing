@@ -1042,8 +1042,15 @@ class AgreementCalculator:
         result is very small. So let's implement a rule whereby we test 10 of the permutations randomly
         and then we test another 100 and if the best match doesn't change then we don't test any further.
     """
-    def __init__(self, lab_ser_one, lab_ser_two, parent):
-        self.parent = parent
+    def __init__(self, lab_ser_one, lab_ser_two, parent=None, cache_dir_18s=None, temp_dir_18s=None):
+        # We allow the input of either the parent object or the individual cache_dir_18s, temp_dir_18s
+        if parent is None:
+            assert((cache_dir is not None) and (temp_dir_18s))
+            self.cache_dir_18s = cache_dir_18s
+            self.temp_dir_18s = temp_dir_18s
+        else:
+            self.cache_dir_18s = parent.cache_dir_18s
+            self.temp_dir_18s = parent.temp_dir_18s
         if len(lab_ser_one.unique()) < len(lab_ser_two.unique()):
             self.small_series = lab_ser_one
             self.large_series = lab_ser_two
@@ -1179,14 +1186,22 @@ class ComputeClassificationAgreement:
     """
     Class for computing the classificaiton agreement between 18S and the SNP classifications
     """
-    def __init__(self, distance_method, distance_matrix_path, island_list, genus, parent):
+    def __init__(
+        self, distance_method, distance_matrix_path, 
+        island_list, genus, output_dir, cache_dir_18s, 
+        input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s):
+        self.output_dir = output_dir
+        self.cache_dir_18s = cache_dir_18s
+        self.input_dir_18s = input_dir_18s
+        self.output_dir_18s = output_dir_18s
+        self.fastq_info_df = self._make_fastq_info_df(fastq_info_df_path)
         self.parent = parent
         self.genus = genus
         self.distance_method = distance_method
         self.distance_matrix_path = distance_matrix_path
         self.island_list = island_list
         # Use the meta_info_table produced by output_tables.py
-        self.meta_info_table_path = os.path.join(self.parent.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
+        self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
         self.meta_info_df = self._get_meta_info_df()
         # If braycurtis, then we need to remove the additional samples from the matrix
         # and then compute a pcoa.
@@ -1210,56 +1225,33 @@ class ComputeClassificationAgreement:
             
             # Finally the results path should
             self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{island_list}_classification_result.txt')
-            self.kmeans_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_kmeans_dict.p.bz'))
-            self.agreement_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_agreement_dict.p.bz'))
+            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_agreement_dict.p.bz'))
 
         elif self.distance_method == 'unifrac':
             self.pcoa_df = self._get_pcoa_df(pcoa_path=self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz'))
             self.results_path = self.distance_matrix_path.replace('.dist.gz', '_classification_result.txt')
-            self.kmeans_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_kmeans_dict.p.bz'))
-            self.agreement_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_agreement_dict.p.bz'))
+            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_agreement_dict.p.bz'))
 
         else:
             raise NotImplementedError
         self.kmeans_dict = {}
         self.agreement_dict = {}
         
-        # read in the classifications for the SNP
-        if self.genus == 'Pocillopora':
-            # First check to see if the cached version exists
-            snp_cache_dir = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
-        elif self.genus == 'Porites':
-            snp_cache_dir = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
-        
-        if os.path.exists(snp_cache_dir):
-            self.snp_class_df = compress_pickle.load(snp_cache_dir)
-        else:
-            # Need to create it from scratch
-            if self.genus == 'Pocillopora':
-                raw_snp_class_path = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
-            elif self.genus == 'Porites':
-                raw_snp_class_path = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
-        
-            self.snp_class_df = pd.read_csv(raw_snp_class_path, index_col=0)
-            self.snp_class_df.index = self._convert_index_to_sample_ids(self.snp_class_df.index)
-            self.snp_class_df.dropna(inplace=True)
-            compress_pickle.dump(self.snp_class_df, snp_cache_dir)
-            # TODO see if we need to remove some of the samples, i.e. those that don't have a classification
+        # The snp classifications are now associated to the base_18s.py class.
     
+    @staticmethod
+    def _make_fastq_info_df(self, fastq_info_df_path):
+        df = pd.read_csv(fastq_info_df_path)
+        return df.set_index(keys='readset', drop=False)
+
     def _get_meta_info_df(self):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
 
-    def _get_pcoa_df(self, pcoa_path=None):
+    def _get_pcoa_df(self, pcoa_path):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
-        if pcoa_path is None:
-            if self.dist_method == 'unifrac':
-                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
-            else:
-                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
-
-            pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
-        
         pcoa_df = pd.read_csv(pcoa_path)
         pcoa_df.set_index('sample', drop=True, inplace=True)
         # Get rid of the proportion explained
@@ -1276,38 +1268,11 @@ class ComputeClassificationAgreement:
         # Now we need to convert these to sample-id format.
         sample_id_list = []
         for ind in pcoa_df.index:
-            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
         
         pcoa_df.index = sample_id_list
-        
-        
         return pcoa_df
     
-    def _convert_index_to_sample_ids(self, index):
-        # We want to convert these indices to samplie-id
-        island_re = re.compile('I\d+')
-        site_re = re.compile('S\d+')
-        co_re = re.compile('C\d+')
-        # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
-        # (e.g. TARA_CO-1016606)
-        sample_name_dict = {}
-        for ind in index:
-            island = island_re.search(ind).group()
-            site = site_re.search(ind).group()
-            colony = co_re.search(ind).group()
-            sample_id = self.parent.sample_provenance_df[
-                (self.parent.sample_provenance_df['ISLAND#'] == island) & 
-                (self.parent.sample_provenance_df['SITE#'] == site) & 
-                (self.parent.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony) & 
-                (self.parent.sample_provenance_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')].index.values.tolist()
-            if len(sample_id) != 1:
-                raise RunTimeError('More than one matching sample-id')
-            else:
-                sample_id = sample_id[0]
-            sample_name_dict[ind] = sample_id
-        
-        # Convert the index to sample-id
-        return [sample_name_dict[ind] for ind in index]
 
     def compute_classficiation_agreement(self, k_range=range(2,20)):
         """
