@@ -85,7 +85,7 @@ class MSPlots(EighteenSBase):
             tr.plot_classifications()
 
 class ThreeRow:
-    def __init__(self, parent, classifications):
+    def __init__(self, parent):
         self.parent = parent
         self.genera = ['Pocillopora', 'Porites']
         # Let's start with the first plot quick and dirty and then we can add the others
@@ -94,7 +94,6 @@ class ThreeRow:
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=300)
         self.line_style_dict = {'rai':'-', 'pwr':'--', 'braycurtis':'-', 'unifrac':'--', True:'-', False:'--'}
         self.line_color_dict = {'Pocillopora':'black', 'Porites':'red'}
-        self.classifications = classifications
 
     def plot(self):
         """
@@ -546,7 +545,8 @@ class ThreeRow:
                         # Then this is a set of points for plotting
                         # Then this is a distance matrix that we want to check the classification agreement for
                         results_file  = dist_file.replace('.dist.gz', '_classification_result.txt')
-                        results_path = os.path.join(self.parent.output_dir_18s, result_file)
+                        results_path = os.path.join(self.parent.output_dir_18s, results_file)
+                        #TODO Implement multiprocessing here
                         if os.path.exists(results_path):
                             # Then we already have the results computed and we can simply read them in and plot them up
                             # We have not completed this yet
@@ -556,7 +556,11 @@ class ThreeRow:
                             # Then we need to compute the classificaiton agreement
                             # We can make a call here to a class of clustering.
                             max_agreement = ComputeClassificationAgreement(
-                                distance_method=distance_method, distance_matrix_path, island_list, genus, parent).compute_classficiation_agreement()
+                                distance_method=distance_method, 
+                                distance_matrix_path=os.path.join(self.parent.output_dir_18s, dist_file),
+                                island_list=island_list,
+                                genus=genus,
+                                parent=self.parent).compute_classficiation_agreement()
                         
                         samples_at_least_threshold = float(dist_file.split('_')[11])
                         most_abund_seq_cutoff = int(dist_file.split('_')[12])
@@ -573,7 +577,7 @@ class ThreeRow:
                         # Then this is a set of points for plotting
                         # Then this is a distance matrix that we want to check the classification agreement for
                         # For the bray curtis we'll need to now include the island_list into the string
-                        results_file  = dist_file.replace('.dist.gz', '{island_list}_classification_result.txt')
+                        results_file  = dist_file.replace('.dist.gz', '_{island_list}_classification_result.txt')
                         results_path = os.path.join(self.parent.output_dir_18s, result_file)
                         if os.path.exists(results_path):
                             # Then we already have the results computed and we can simply read them in and plot them up
@@ -584,7 +588,11 @@ class ThreeRow:
                             # Then we need to compute the classificaiton agreement
                             # We can make a call here to a class of clustering.
                             max_agreement = ComputeClassificationAgreement(
-                                distance_method=distance_method, distance_matrix_path, island_list, genus, parent).compute_classficiation_agreement()
+                                distance_method=distance_method, 
+                                distance_matrix_path=os.path.join(self.parent.output_dir_18s, dist_file),
+                                island_list=island_list,
+                                genus=genus,
+                                parent=self.parent).compute_classficiation_agreement()
                         
                         samples_at_least_threshold = float(dist_file.split('_')[11])
                         most_abund_seq_cutoff = int(dist_file.split('_')[12])
@@ -610,5 +618,5 @@ class ThreeRow:
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
         return contour
 
-MSPlots().plot_three_row()
-MSPlots().plot_three_row_classifications()
+# MSPlots().plot_three_row()
+MSPlots().plot_three_row(classifications=True)

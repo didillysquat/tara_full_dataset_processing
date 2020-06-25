@@ -26,6 +26,7 @@ import random
 import json
 import hashlib
 from functools import partial
+import ntpath
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1050,7 +1051,7 @@ class AgreementCalculator:
             self.small_series = lab_ser_two
             self.large_series = lab_ser_one
         
-        self.small_unique_classifications = [int(_) for _ in self.small_series.unique()]
+        self.small_unique_classifications = [_ for _ in self.small_series.unique()]
         self.large_unique_classifications = list(self.large_series.unique())
         # Calculation of the permutation lists takes considerable time.
         # We could work with the generator but ideally we would like to do the shuffle.
@@ -1183,6 +1184,10 @@ class ComputeClassificationAgreement:
         self.genus = genus
         self.distance_method = distance_method
         self.distance_matrix_path = distance_matrix_path
+        self.island_list = island_list
+        # Use the meta_info_table produced by output_tables.py
+        self.meta_info_table_path = os.path.join(self.parent.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
+        self.meta_info_df = self._get_meta_info_df()
         # If braycurtis, then we need to remove the additional samples from the matrix
         # and then compute a pcoa.
         # If unifrac then the pcoa should already have been calculated and we can read it in
@@ -1204,37 +1209,79 @@ class ComputeClassificationAgreement:
             self.pcoa_df.index = dist_df.index
             
             # Finally the results path should
-            self.results_path = 'foo'
+            self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{island_list}_classification_result.txt')
+            self.kmeans_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_agreement_dict.p.bz'))
+
         elif self.distance_method == 'unifrac':
-            self.pcoa_df = pd.read_csv(self.distance_matrix_path.replace('XXX', 'XXX'))
-            self.results_path = 'bar'
+            self.pcoa_df = self._get_pcoa_df(pcoa_path=self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz'))
+            self.results_path = self.distance_matrix_path.replace('.dist.gz', '_classification_result.txt')
+            self.kmeans_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.parent.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_agreement_dict.p.bz'))
+
         else:
             raise NotImplementedError
         self.kmeans_dict = {}
-        self.kmeans_dict_pickle_path = 'XXX'
         self.agreement_dict = {}
-        self.agreement_dict_pickle_path = 'XXX'
         
         # read in the classifications for the SNP
         if self.genus == 'Pocillopora':
             # First check to see if the cached version exists
-            snp_cache_dir = self.parent.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
-            raw_snp_class_path = 
+            snp_cache_dir = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
         elif self.genus == 'Porites':
-            snp_cache_dir = self.parent.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
+            snp_cache_dir = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
         
         if os.path.exists(snp_cache_dir):
             self.snp_class_df = compress_pickle.load(snp_cache_dir)
         else:
             # Need to create it from scratch
             if self.genus == 'Pocillopora':
-                raw_snp_class_path = self.parent.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
+                raw_snp_class_path = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
             elif self.genus == 'Porites':
-                raw_snp_class_path = self.parent.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
+                raw_snp_class_path = os.path.join(self.parent.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
         
-            self.snp_class_df = pd.read_csv(raw_snp_class_path, index=0)
+            self.snp_class_df = pd.read_csv(raw_snp_class_path, index_col=0)
             self.snp_class_df.index = self._convert_index_to_sample_ids(self.snp_class_df.index)
+            self.snp_class_df.dropna(inplace=True)
+            compress_pickle.dump(self.snp_class_df, snp_cache_dir)
             # TODO see if we need to remove some of the samples, i.e. those that don't have a classification
+    
+    def _get_meta_info_df(self):
+        return pd.read_csv(self.meta_info_table_path).set_index('readset')
+
+    def _get_pcoa_df(self, pcoa_path=None):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        if pcoa_path is None:
+            if self.dist_method == 'unifrac':
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_1000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+            else:
+                pcoa_file_name = f'{self.genus}_True_True_True_False_biallelic_{self.dist_method}_dist_10000_pwr_False_{self.misco}_{self.masco}_3_pcoa.csv.gz'
+
+            pcoa_path = os.path.join(self.parent.output_dir_18s, pcoa_file_name)
+        
+        pcoa_df = pd.read_csv(pcoa_path)
+        pcoa_df.set_index('sample', drop=True, inplace=True)
+        # Get rid of the proportion explained
+        pcoa_df = pcoa_df.iloc[:-1,:]
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in pcoa_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        pcoa_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in pcoa_df.index:
+            sample_id_list.append(self.parent.fastq_info_df.at[ind, 'sample-id'])
+        
+        pcoa_df.index = sample_id_list
+        
+        
+        return pcoa_df
     
     def _convert_index_to_sample_ids(self, index):
         # We want to convert these indices to samplie-id
@@ -1262,7 +1309,7 @@ class ComputeClassificationAgreement:
         # Convert the index to sample-id
         return [sample_name_dict[ind] for ind in index]
 
-    def compute_classficiation_agreement(self, k_range=range(2:20)):
+    def compute_classficiation_agreement(self, k_range=range(2,20)):
         """
         For each of the .dist matrixes we produced we want to compute several clustering mechansims
         on them and work out the best agreement with the classifications that Didier gave.
@@ -1290,9 +1337,9 @@ class ComputeClassificationAgreement:
         # quite a large k. let's start with k=20 to start with
         
         # Let's implement a cache for this so that this effort is not wasted
-        if os.path.exists(self.kmeans_pickle_path):
+        if os.path.exists(self.kmeans_dict_pickle_path):
             # Get cached kmeans dict
-            self.kmeans_dict = compress_pickle.load(self.kmeans_pickle_path)
+            self.kmeans_dict = compress_pickle.load(self.kmeans_dict_pickle_path)
         else:
             # Compute kmeans from scratch and pickle out
             
@@ -1305,13 +1352,13 @@ class ComputeClassificationAgreement:
         max_agreement = 0
         max_k = None
         for k in k_range:
-            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df).calculate_agreement()
+            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['SVDQ'], parent=self.parent).calculate_agreement()
             if agreement > max_agreement:
                 max_agreement = agreement
                 max_k = k
             self.agreement_dict[k] = agreement
         self.agreement_dict['max'] = max(self.agreement_dict.values())
-        commpress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
+        compress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
 
         # For the time being we will write out the max agreement the cluster method used to obtain it and the 
         # number of classifications
@@ -1641,7 +1688,6 @@ if __name__ == "__main__":
     # c.check_original_three_agreement()
     # This will do the clustering classification results for the 
     # parameter optimisation
-    c.compute_classficiation_agreement()
 
 # TODO
 # Run permanovas of the dist matrices with meta data for site, island, 
