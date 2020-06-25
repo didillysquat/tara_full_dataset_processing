@@ -1226,34 +1226,10 @@ if __name__ == "__main__":
 
     host_genus = the host genus to work with: Pocillopora | Porites
 
-    # TODO We now have the basic code for making the distances up and running. We now need to work out how we are
-    going to collect the results.
-    We should also consider how we are going to multi-thread this. I envisage that we will have a huge list of
-    permutations that we will want to run, and we should think to multithread parts or all of this process.
-    At the moment we are working in a very serial manner of faashion and we may need to start working in a batch way
-    to so that for example, we can do all of the alignments at once. Or perhaps, the easiest way forward will be to
-    multi thread at a very high level.
-    We also need to work out some sort of unique identifier so that we can work out what a set of results refer to.
-    The levels are:
-    
-    # Levels that are likely to be invariant
-    remove_majority_sequence = Bool
-    exclude_secondary_seq_samples = Bool
-    exclude_no_use_samples = Bool
-    use_replicates = Bool
-    
-    # Levels for explicit testing
-    snp_distance_type = categorical
-    dist_method_18S = categorical
-    only_snp_samples = Bool
-    normalisation_method = categorical # Can test for just one perhaps to see which to work with
-    normalisation_abundance = int # Again, can test for just one after initial run
-    samples_at_least_threshold = 0 >= float <=1
-    most_abund_seq_cutoff = int
-    min_num_distinct_seqs_per_sample = int # Can test for just one after intial run
-
-    We will create a string that uniquely identified the parameters that we are using to compute and test
-    We will build this from within for loops.
+    island_list = a string that filters the samples worked with to limit them to a set of islands. The two current options
+    are:
+        'original_three' = [6, 10, 15]
+        'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
   
     """
 
@@ -1509,3 +1485,11 @@ if __name__ == "__main__":
     # and then we just need to plug on the cluster calculation. In fact, we don't need to redo the bray curtis
     # as the matrix will not change at all. So we only need to do the two island restriction modes (3 and 10+1) for
     # unifrac.
+
+    # TODO dataset running for the limited island is complete. Mantel tests have been run for biallelic obviously.
+    # Now we will want to run classifications or each of the results and compare the agreement to the classifications
+    # us by Didier.
+    # Given that we already basically have the code in place to plot up the parameter optimisation, its probably best
+    # if we do the clustering classification in the clustering_18s.py script and print out a results file
+    # very similar to the mantel test file. Then, when we come to the plotting of the figure, we can simply
+    # switch between plotting mantel test results and cluster classificaiton results.

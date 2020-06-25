@@ -44,12 +44,13 @@ mpl.use('agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from clustering_18s import ComputeClassificationAgreement
 
 class MSPlots(EighteenSBase):
     def __init__(self):
         super().__init__()
 
-    def plot_three_row(self):
+    def plot_three_row(self, classifications=False):
         """
         The three row plot.
         TODO. We are quite advanced with this figure now. In the end it looks like we may split this
@@ -78,10 +79,13 @@ class MSPlots(EighteenSBase):
         """
         
         tr = ThreeRow(parent=self)
-        tr.plot()
+        if not classifications:
+            tr.plot()
+        else:
+            tr.plot_classifications()
 
 class ThreeRow:
-    def __init__(self, parent):
+    def __init__(self, parent, classifications):
         self.parent = parent
         self.genera = ['Pocillopora', 'Porites']
         # Let's start with the first plot quick and dirty and then we can add the others
@@ -90,6 +94,7 @@ class ThreeRow:
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_fig.png'), dpi=300)
         self.line_style_dict = {'rai':'-', 'pwr':'--', 'braycurtis':'-', 'unifrac':'--', True:'-', False:'--'}
         self.line_color_dict = {'Pocillopora':'black', 'Porites':'red'}
+        self.classifications = classifications
 
     def plot(self):
         """
@@ -125,6 +130,80 @@ class ThreeRow:
         
         self.contour_fig, self.contour_ax = plt.subplots(2,2, figsize=(8,8))
         self._plot_fourth_row()
+        self.contour_ax[0,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[1,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[0,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[1,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
+        self.contour_ax[0,0].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[1,0].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[0,1].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        self.contour_ax[1,1].set_xlabel('most abundant sequence cutoff', fontsize='x-small')
+        # 00
+        # hlines
+        self.contour_ax[0,0].plot([0,300], [0.08,0.08], 'r-', linewidth=0.5)
+        # vlines
+        y_max = self.contour_ax[0,0].get_ylim()[1]
+        for i in range(100,300,50):
+            self.contour_ax[0,0].plot([i,i], [0,y_max], 'r-', linewidth=0.5)
+
+        #01
+        self.contour_ax[0,1].plot([0,300], [0.08,0.08], 'r-', linewidth=0.5)
+        y_max = self.contour_ax[0,1].get_ylim()[1]
+        for i in range(100,225,25):
+            self.contour_ax[0,1].plot([i,i], [0,y_max], 'r-', linewidth=0.5)
+
+        #10
+        self.contour_ax[1,0].plot([0,300], [.02,.02], 'r-', linewidth=0.5)
+        self.contour_ax[1,0].plot([0,300], [.66,.66], 'r-', linewidth=0.5)
+        y_max = self.contour_ax[1,0].get_ylim()[1]
+        for i in range(25,150,25):
+            self.contour_ax[1,0].plot([i,i], [0,y_max], 'r-', linewidth=0.5)
+
+        #11
+        self.contour_ax[1,1].plot([75,75], [0,self.contour_ax[1,1].get_ylim()[1]], 'r-', linewidth=0.5)
+        for i in np.arange(0,0.6,0.1):
+            self.contour_ax[1,1].plot([0,300], [i,i], 'r-', linewidth=0.5)
+
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_contour_fig.png'), dpi=1200)
+        
+        print('DONE')
+        self.foo = 'bar'
+
+    def plot_classifications(self):
+        """
+        For the record, the results string format:
+        self.unique_string = f'{self.genus}_{self.remove_maj_seq}_{self.exclude_secondary_seq_samples}_' \
+        f'{self.exclude_no_use_samples}_{self.use_replicates}_' \
+        f'{snp_distance_type}_{self.dist_method_18S}_' \
+        f'{self.approach}_{self.normalisation_abundance}_{self.normalisation_method}_' \
+        f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
+        f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
+        self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
+        """
+        # self.norm_fig, self.norm_ax = plt.subplots(1,2, figsize=(8,4))
+        # self.norm_ax[0].set_ylabel("Pearson's correlation coefficient")
+        # self.norm_ax[1].set_ylabel("Pearson's correlation coefficient")
+        # self._plot_first_row()
+        # plt.tight_layout()
+        # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_norm_fig.png'), dpi=1200)
+
+        # self.cutoff_fig, self.cutoff_ax = plt.subplots(2,2, figsize=(8,8))
+        # self._plot_second_row()
+        # self._plot_third_row()
+        # self.cutoff_ax[0,0].set_ylabel("Pearson's correlation coefficient")
+        # self.cutoff_ax[1,0].set_ylabel("Pearson's correlation coefficient")
+        # self.cutoff_ax[0,1].set_ylabel('p-value')
+        # self.cutoff_ax[1,1].set_ylabel('p-value')
+        # self.cutoff_ax[0,0].set_xlabel('minimum in sample cutoff')
+        # self.cutoff_ax[1,0].set_xlabel('most abundant sequence cutoff')
+        # self.cutoff_ax[0,1].set_xlabel('minimum in sample cutoff')
+        # self.cutoff_ax[1,1].set_xlabel('most abundant sequence cutoff')
+        # self.cutoff_ax[0,1].legend(loc='upper left', fontsize='x-small')
+        # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_cutoff_fig.png'), dpi=1200)
+        
+        self.contour_fig, self.contour_ax = plt.subplots(2,2, figsize=(8,8))
+        self._plot_fourth_row_classification()
         self.contour_ax[0,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
         self.contour_ax[1,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
         self.contour_ax[0,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
@@ -255,6 +334,25 @@ class ThreeRow:
                 self.contour_ax[g_i,m_i].set_title(f'{g}_{m}', fontsize='x-small')
                 cbar = self.contour_fig.colorbar(contour, ax=self.contour_ax[g_i,m_i])
                 cbar.ax.set_ylabel("Pearson's correlation coefficient")
+
+    def _plot_fourth_row_classification(self):
+        """
+        A variation on the _plot_fourth_row. This will look at classification agreement rather than mantel based Pearson's
+        """
+        for g_i, g in enumerate(self.genera):
+            for m_i, m in enumerate(['unifrac', 'braycurtis']):
+                for i_i, i in enumerate(['original_three', 'ten_plus_one']):
+                    if m == 'unifrac':
+                        norm_abund = 1000
+                    else:
+                        norm_abund = 10000
+                    # If unifrac need to incorporate the island_list string diretly when looking for the distance matrix.
+                    # If bray curtis then we will work with a single base distance matrix and remove samples accordding to which
+                    # island list we will be working with.
+                    contour = self._plot_countour_classification(ax=self.contour_ax[g_i,m_i], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False, island_list=i)
+                    self.contour_ax[g_i,m_i].set_title(f'{g}_{m}', fontsize='x-small')
+                    cbar = self.contour_fig.colorbar(contour, ax=self.contour_ax[g_i,m_i])
+                    cbar.ax.set_ylabel("Pearson's correlation coefficient")
        
     def _plot_line_first_row(self, ax, genus, linestyle, color, label, normalisation_method='rai', distance_method='braycurtis', snp_only=False):
         
@@ -400,7 +498,7 @@ class ThreeRow:
         z_p_val = []
         for result_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('_mantel_result.txt')]:
             if result_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_'):
-                # inbetween these to conditions is the nomalisation_abundance
+                # inbetween these to conditions are the misco and the masco scores
                 if result_file.endswith(f'_3_mantel_result.txt'):
                     # Then this is a set of points for plotting
                     
@@ -429,6 +527,88 @@ class ThreeRow:
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
         return contour
 
-    
-    
+    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False):
+        """
+        This is a modification for _plot_contour to work with classification agreement rather than Pearsons mantel agreement
+        """
+        # Plot a contour plot where we have samples_at_least_threshold on the x and most_abund_seq_cutoff on the y
+        # and then the agreement on the z.
+        x_samples_at_least_threshold = []
+        y_most_abund_seq_cutoff = []
+        z_coef = []
+        z_p_val = []
+        for dist_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('.dist.gz')]:
+            if dist_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_'):
+                # inbetween these two conditions are the misco and the masco scores
+                if distance_method == 'unifrac':
+                    # Then we need to search for the island_list in the dist name
+                    if dist_file.endswith(f'_3_{island_list}.dist.gz'):
+                        # Then this is a set of points for plotting
+                        # Then this is a distance matrix that we want to check the classification agreement for
+                        results_file  = dist_file.replace('.dist.gz', '_classification_result.txt')
+                        results_path = os.path.join(self.parent.output_dir_18s, result_file)
+                        if os.path.exists(results_path):
+                            # Then we already have the results computed and we can simply read them in and plot them up
+                            # We have not completed this yet
+                            with open(results_path, 'r') as f:
+                                max_agreement = float(f.readline().split(',')[0])
+                        else:
+                            # Then we need to compute the classificaiton agreement
+                            # We can make a call here to a class of clustering.
+                            max_agreement = ComputeClassificationAgreement(
+                                distance_method=distance_method, distance_matrix_path, island_list, genus, parent).compute_classficiation_agreement()
+                        
+                        samples_at_least_threshold = float(dist_file.split('_')[11])
+                        most_abund_seq_cutoff = int(dist_file.split('_')[12])
+                        # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
+                        # samples_at_least_threshold due to the normalistaion testing.
+                        # If we leave this 75 in it creates a vertical white stripe at 75.
+                        if most_abund_seq_cutoff == 75:
+                            continue
+                        x_samples_at_least_threshold.append(samples_at_least_threshold)
+                        y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
+                        z_coef.append(max_agreement)
+                elif distance_method == 'braycurtis':
+                    if dist_file.endswith(f'_3.dist.gz'):
+                        # Then this is a set of points for plotting
+                        # Then this is a distance matrix that we want to check the classification agreement for
+                        # For the bray curtis we'll need to now include the island_list into the string
+                        results_file  = dist_file.replace('.dist.gz', '{island_list}_classification_result.txt')
+                        results_path = os.path.join(self.parent.output_dir_18s, result_file)
+                        if os.path.exists(results_path):
+                            # Then we already have the results computed and we can simply read them in and plot them up
+                            # We have not completed this yet
+                            with open(results_path, 'r') as f:
+                                max_agreement = float(f.readline().split(',')[0])
+                        else:
+                            # Then we need to compute the classificaiton agreement
+                            # We can make a call here to a class of clustering.
+                            max_agreement = ComputeClassificationAgreement(
+                                distance_method=distance_method, distance_matrix_path, island_list, genus, parent).compute_classficiation_agreement()
+                        
+                        samples_at_least_threshold = float(dist_file.split('_')[11])
+                        most_abund_seq_cutoff = int(dist_file.split('_')[12])
+                        # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
+                        # samples_at_least_threshold due to the normalistaion testing.
+                        # If we leave this 75 in it creates a vertical white stripe at 75.
+                        if most_abund_seq_cutoff == 75:
+                            continue
+                        x_samples_at_least_threshold.append(samples_at_least_threshold)
+                        y_most_abund_seq_cutoff.append(most_abund_seq_cutoff)
+                        z_coef.append(max_agreement)
+                else:
+                    raise NotImplementedError          
+                    
+        df = pd.DataFrame(columns=sorted([int(_) for _ in set(y_most_abund_seq_cutoff)]), index=sorted(list(set(x_samples_at_least_threshold))))
+        
+        for x,y,z in zip(x_samples_at_least_threshold, y_most_abund_seq_cutoff, z_coef):
+            df.at[x,y] = z
+        
+        # the samples_at_least_threshold has most_abund_seq_cutoff up to 580, but the combinations
+        # were only computed up to 100 so crop to this
+        df = df.iloc[:,:df.columns.get_loc(300) + 1]
+        contour = ax.contourf(list(df), list(df.index), df.to_numpy())
+        return contour
+
 MSPlots().plot_three_row()
+MSPlots().plot_three_row_classifications()

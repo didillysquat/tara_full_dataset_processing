@@ -1174,6 +1174,153 @@ class AgreementCalculator:
                 d.update(buf)
         return d.hexdigest()
 
+class ComputeClassificationAgreement:
+    """
+    Class for computing the classificaiton agreement between 18S and the SNP classifications
+    """
+    def __init__(self, distance_method, distance_matrix_path, island_list, genus, parent):
+        self.parent = parent
+        self.genus = genus
+        self.distance_method = distance_method
+        self.distance_matrix_path = distance_matrix_path
+        # If braycurtis, then we need to remove the additional samples from the matrix
+        # and then compute a pcoa.
+        # If unifrac then the pcoa should already have been calculated and we can read it in
+        if self.distance_method == 'braycurtis':
+            # Then we need to strip out the samples that do not belong to the islands
+            # specified in the island_list
+            dist_df = pd.read_csv(self.distance_matrix_path, index=0, columns=None)
+            drop_list = []
+            if self.island_list == 'original_three':
+                island_list = ['I06', 'I10', 'I15']
+            elif self.island_list == 'ten_plus_one':
+                island_list = ['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15']
+            samples_from_islands = self.meta_info_df[self.meta_info_df['ISLAND#'].isin(island_list)].index
+            to_drop = [_ for _ in dist_df.index if _ not in samples_from_islands]
+            dist_df.drop(index=to_drop, columns=to_drop, inplace=True)
+            # Now we have the dist_df in shape and we should calculate the pcoa
+            self.pcoa_df = pcoa(dist_df)
+            self.pcoa_df = self.pcoa_df.samples
+            self.pcoa_df.index = dist_df.index
+            
+            # Finally the results path should
+            self.results_path = 'foo'
+        elif self.distance_method == 'unifrac':
+            self.pcoa_df = pd.read_csv(self.distance_matrix_path.replace('XXX', 'XXX'))
+            self.results_path = 'bar'
+        else:
+            raise NotImplementedError
+        self.kmeans_dict = {}
+        self.kmeans_dict_pickle_path = 'XXX'
+        self.agreement_dict = {}
+        self.agreement_dict_pickle_path = 'XXX'
+        
+        # read in the classifications for the SNP
+        if self.genus == 'Pocillopora':
+            # First check to see if the cached version exists
+            snp_cache_dir = self.parent.input_dir_18s, 'snp_classifications', f'poc_snp_class_df.p.bz')
+            raw_snp_class_path = 
+        elif self.genus == 'Porites':
+            snp_cache_dir = self.parent.input_dir_18s, 'snp_classifications', f'por_snp_class_df.p.bz')
+        
+        if os.path.exists(snp_cache_dir):
+            self.snp_class_df = compress_pickle.load(snp_cache_dir)
+        else:
+            # Need to create it from scratch
+            if self.genus == 'Pocillopora':
+                raw_snp_class_path = self.parent.input_dir_18s, 'snp_classifications', f'POC_SNP_classifications.csv')
+            elif self.genus == 'Porites':
+                raw_snp_class_path = self.parent.input_dir_18s, 'snp_classifications', f'POR_SNP_classifications.csv')
+        
+            self.snp_class_df = pd.read_csv(raw_snp_class_path, index=0)
+            self.snp_class_df.index = self._convert_index_to_sample_ids(self.snp_class_df.index)
+            # TODO see if we need to remove some of the samples, i.e. those that don't have a classification
+    
+    def _convert_index_to_sample_ids(self, index):
+        # We want to convert these indices to samplie-id
+        island_re = re.compile('I\d+')
+        site_re = re.compile('S\d+')
+        co_re = re.compile('C\d+')
+        # A dict that converts from the current sample name (e.g. I01S01C011POR) to the proper sample-id
+        # (e.g. TARA_CO-1016606)
+        sample_name_dict = {}
+        for ind in index:
+            island = island_re.search(ind).group()
+            site = site_re.search(ind).group()
+            colony = co_re.search(ind).group()
+            sample_id = self.parent.sample_provenance_df[
+                (self.parent.sample_provenance_df['ISLAND#'] == island) & 
+                (self.parent.sample_provenance_df['SITE#'] == site) & 
+                (self.parent.sample_provenance_df['COLONY# (C000) FISH# (F000) MACROALGAE# (MA00)'] == colony) & 
+                (self.parent.sample_provenance_df['SAMPLE PROTOCOL LABEL, level 2'] == 'CS4L')].index.values.tolist()
+            if len(sample_id) != 1:
+                raise RunTimeError('More than one matching sample-id')
+            else:
+                sample_id = sample_id[0]
+            sample_name_dict[ind] = sample_id
+        
+        # Convert the index to sample-id
+        return [sample_name_dict[ind] for ind in index]
+
+    def compute_classficiation_agreement(self, k_range=range(2:20)):
+        """
+        For each of the .dist matrixes we produced we want to compute several clustering mechansims
+        on them and work out the best agreement with the classifications that Didier gave.
+        It will likely be good to work with a number of different clustering algorithms
+        and we will likely want to multiprocess this given how many comparisons we will have to do.
+
+        For the time being let's just work with a single clustering mechansims and then we can easily implement
+        multiple at a later stage.
+
+        We want to calculate agreements for the 'original_three' and the 'ten_plus_one'.
+        For the Braycurtis this is as simple as working with a starting distance matrix and removing
+        the corresponding samples then clustering.
+        For the Unifrac we have to use the precise starting distance matrix that has the island_list
+        in the name of the distance matrix.
+
+        We need to work out the framework within which to do these comparisons.
+        Perhaps we can do them based on each of the tests we want to run
+        """
+        
+        # We should work with a k that is not less than the clusters assigned according to the SNP
+        # but we should allow for the k to be higher for the 18S as there may be additional lineages
+        # sampled that were not sampled for the SNP. Given that the complexity of calculating
+        # the agreement between two classification levels is goverened by the smaller of the levels
+        # and that the smaller level will generally be the k of the SNP data, then we can work with
+        # quite a large k. let's start with k=20 to start with
+        
+        # Let's implement a cache for this so that this effort is not wasted
+        if os.path.exists(self.kmeans_pickle_path):
+            # Get cached kmeans dict
+            self.kmeans_dict = compress_pickle.load(self.kmeans_pickle_path)
+        else:
+            # Compute kmeans from scratch and pickle out
+            
+            for k in k_range:
+                kmeans = KMeans(n_clusters=k, n_init=100, algorithm='full').fit(self.pcoa_df)
+                self.kmeans_dict[k] = kmeans
+            compress_pickle.dump(self.kmeans_dict, self.kmeans_dict_pickle_path)
+        
+        # Here we have the kmeans calculated and we can now compute agreement to the snp classifications
+        max_agreement = 0
+        max_k = None
+        for k in k_range:
+            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df).calculate_agreement()
+            if agreement > max_agreement:
+                max_agreement = agreement
+                max_k = k
+            self.agreement_dict[k] = agreement
+        self.agreement_dict['max'] = max(self.agreement_dict.values())
+        commpress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
+
+        # For the time being we will write out the max agreement the cluster method used to obtain it and the 
+        # number of classifications
+        with open(self.results_path, 'w') as f:
+            f.write(f'{max_agreement:.2f},{max_k},kmeans')
+
+        # Here we are done.
+        return max_agreement
+
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
         self.parent = parent
@@ -1488,7 +1635,13 @@ if __name__ == "__main__":
     # c.check_old_clustering_agreement()
     # c.clustering_overview()
     # c.produce_r_input()
-    c.check_original_three_agreement()
+    # This produces the only partially complete snmf_agreement.png plot
+    # that we used as a sanity check to see that we could still get good
+    # classification agreement at a smaller number of islands.
+    # c.check_original_three_agreement()
+    # This will do the clustering classification results for the 
+    # parameter optimisation
+    c.compute_classficiation_agreement()
 
 # TODO
 # Run permanovas of the dist matrices with meta data for site, island, 
