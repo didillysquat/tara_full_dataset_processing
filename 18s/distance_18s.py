@@ -88,12 +88,10 @@ class EighteenSDistance(EighteenSBase):
         if normalisation_abundance is not None:
             self.normalisation_abundance = normalisation_abundance
         else:
-            if self.dist_method_18S in ['braycurtis', 'jaccard'] :
+            if self.dist_method_18S in ['braycurtis', 'jaccard', 'PCA'] :
                 self.normalisation_abundance = 10000
-                self.abundance_dict = None
             elif self.dist_method_18S == 'unifrac':
                 self.normalisation_abundance = 1000
-                self.abundance_df = None
             else:
                 raise RuntimeError(f'dist_method_18S must be either braycurtis, jaccard or unifrac. {self.dist_method_18S} given.')
         # The unique string and hash of that string that will be used for writing items out
@@ -140,6 +138,8 @@ class EighteenSDistance(EighteenSBase):
         self.pcoa_out_path = os.path.join(
             self.output_dir_18s,
             f'{self.unique_string}_pcoa.csv.gz')
+        if self.dist_method_18S == 'PCA':
+            self.pcoa_out_path = self.pcoa_out_path.replace('pcoa', 'pca')
         self.pcoa_df = None
         
         # Variables concerned with unifrac
@@ -389,15 +389,17 @@ class EighteenSDistance(EighteenSBase):
                 self._do_unifrac_analysis()
             elif self.dist_method_18S in ['braycurtis', 'jaccard']:
                 self._do_bray_curtis_jaccard_analysis()
+            elif self.dist_method_18S == 'PCA':
+                self._do_pca()
             else:
                 raise NotImplementedError
-            # TODO run to here and if jaccard works convert the braycurtis to the jaccard format.
             # At this point we should be able to grab the distmatrix object
             # and compare it to the snp-based dist matrices and produce the persons correlation
             # value and the permutation results.
             # These will need to be written out somewhere using
             # the unique string as the name
-            self._compare_to_snp()
+            if self.dist_method_18S != 'PCA':
+                self._compare_to_snp()
             shutil.rmtree(self.temp_dir)
 
     def _compare_to_snp(self):
@@ -458,6 +460,22 @@ class EighteenSDistance(EighteenSBase):
             f.write(f'{cor_coef}\t{p_val}')
         
         # Now we are done.
+
+    def _do_pca(self):
+        """
+        Doing the PCA will obviously not produce a distance matrix but rather conduct dimensionality
+        reduction. As such we will not do matrix correlation as this output will only be used
+        for clutering agreement analysis.
+        We will output the PCA to a converted version of the pcoa path.
+        """
+        if self._check_if_pcoa_already_computed():
+            return
+        self.abundance_df = self._create_abundance_obj()
+        pca_obj = PCA().fit_transform(self.abundance_df)
+        pca_obj_fit = PCA().fit(self.abundance_df)
+        self.pcoa_df = pd.DataFrame(pca_obj, index=self.abundance_df.index, columns = [f'PC{_}' for _ in range(1, len(self.abundance_df.index) + 1)])
+        self.pcoa_df = self.pcoa_df.append(pd.Series(pca_obj_fit.explained_variance_ratio_, index=list(self.pcoa_df), name='proportion_explained'))
+        self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
     # BrayCurtis Jaccard
     def _do_bray_curtis_jaccard_analysis(self):
@@ -1128,7 +1146,7 @@ if __name__ == "__main__":
         out_q = Queue()
         tot = 0
         test_list = []
-        for dist_method_18S in ['unifrac', 'braycurtis', 'jaccard']:
+        for dist_method_18S in ['unifrac', 'braycurtis', 'jaccard', 'PCA']:
             for host_genus in ['Porites', 'Pocillopora']:
                 for island_list in [None, 'original_three', 'ten_plus_one', 'first_three']:
                     # We only need to compute the various island lists if we are working with the unifrac
@@ -1186,7 +1204,7 @@ if __name__ == "__main__":
     dist = EighteenSDistance(
         host_genus='Pocillopora', remove_majority_sequence=True, 
         exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-        snp_distance_type='biallelic', dist_method_18S='jaccard', approach='dist',
+        snp_distance_type='biallelic', dist_method_18S='PCA', approach='dist',
         normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
         most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
         ).make_and_plot_dist_and_pcoa()
