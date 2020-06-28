@@ -1063,7 +1063,11 @@ class AgreementCalculator:
             self.small_series = lab_ser_two
             self.large_series = lab_ser_one
         self.silence = silence
-        self.small_unique_classifications = [_ for _ in self.small_series.unique()]
+        try:
+            # Need to attempt to convert to an int as int32 cannot be jsoned.
+            self.small_unique_classifications = [int(_) for _ in self.small_series.unique()]
+        except ValueError:
+            self.small_unique_classifications = [_ for _ in self.small_series.unique()]
         self.large_unique_classifications = list(self.large_series.unique())
         # Calculation of the permutation lists takes considerable time.
         # We could work with the generator but ideally we would like to do the shuffle.

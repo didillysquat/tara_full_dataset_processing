@@ -403,8 +403,15 @@ class EighteenSDistance(EighteenSBase):
             shutil.rmtree(self.temp_dir)
 
     def _compare_to_snp(self):
-        
-        df_18S = pd.read_csv(self.dist_out_path, index_col=0).astype(float)
+        # NB Unfortunately we now have two formats of dist file. One that has headers
+        # and one that does not.
+        # We will attempt to read in with no header and if we get a ValueError
+        # then we will read is with
+        try:
+            df_18S = pd.read_csv(self.dist_out_path, index_col=0, header=None).astype(float)
+            df_18S.columns = df_18S.index
+        except ValueError:
+            df_18S = pd.read_csv(self.dist_out_path, index_col=0).astype(float)
         # The SNP and the 18S matrices must contain the same indices and be in the same order.
         # Need to take into account that the indices for the 18S df are readset names.
         # Also need to take into account that replicates may have been used.
@@ -718,7 +725,7 @@ class EighteenSDistance(EighteenSBase):
 
     def _write_out_unifrac_dist_file(self):
         self.wu_df = self.wu.to_data_frame()
-        self.wu_df.to_csv(path_or_buf=f'{self.dist_out_path}.gz', index=True, header=False, compression='infer')
+        self.wu_df.to_csv(path_or_buf=f'{self.dist_out_path}', index=True, header=False, compression='infer')
         
     def _make_pcoa_df_unifrac(self):
         self.pcoa_df = self._do_pcoa_unifrac()
@@ -1156,13 +1163,13 @@ if __name__ == "__main__":
                         continue
                     
                     # Test combinations of the samples_at_least_threshold and most_abund_seq_cutoff
-                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
+                    for samples_at_least_threshold in list(np.arange(0, 0.1, 0.01)) + list(np.arange(0.1, 1, 0.1)):
                         # most_abund_seq_cutoff = 0
                         normalisation_abundance = None
                         normalisation_method = 'rai'
                         min_num_distinct_seqs_per_sample = 3
                         only_snp_samples = False
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 380, 50)):
                                 in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
                                 tot += 1
             # Testing of the min_num_distinct_seqs_per_sample can be tested during clustering
@@ -1194,20 +1201,20 @@ if __name__ == "__main__":
 
         print(f'All dist analyses complete. {bad_tree} bad tree samples.')
 
-    # do_multi_proc_launch()
+    do_multi_proc_launch()
     
     # Island list names that can be used
     # 'original_three' = [6, 10, 15]
     # 'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
     # 'first_three' = [1, 2, 3]
 
-    dist = EighteenSDistance(
-        host_genus='Pocillopora', remove_majority_sequence=True, 
-        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-        snp_distance_type='biallelic', dist_method_18S='PCA', approach='dist',
-        normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
-        most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
-        ).make_and_plot_dist_and_pcoa()
+    # dist = EighteenSDistance(
+    #     host_genus='Pocillopora', remove_majority_sequence=True, 
+    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+    #     snp_distance_type='biallelic', dist_method_18S='PCA', approach='dist',
+    #     normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
+    #     most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
+    #     ).make_and_plot_dist_and_pcoa()
 
     # TODO code up an Islands list input so that we limit to only certain islands. This way we
     # can limit ourselves to the original three islands and then later to the islands that the
