@@ -1217,7 +1217,8 @@ class ComputeClassificationAgreement:
         if self.distance_method == 'braycurtis':
             # Then we need to strip out the samples that do not belong to the islands
             # specified in the island_list
-            dist_df = pd.read_csv(self.distance_matrix_path, index=0, columns=None)
+            dist_df = pd.read_csv(self.distance_matrix_path, index_col=0, header=None)
+            dist_df.columns = dist_df.index
             drop_list = []
             if self.island_list == 'original_three':
                 island_list = ['I06', 'I10', 'I15']
@@ -1226,15 +1227,25 @@ class ComputeClassificationAgreement:
             samples_from_islands = self.meta_info_df[self.meta_info_df['ISLAND#'].isin(island_list)].index
             to_drop = [_ for _ in dist_df.index if _ not in samples_from_islands]
             dist_df.drop(index=to_drop, columns=to_drop, inplace=True)
+
             # Now we have the dist_df in shape and we should calculate the pcoa
-            self.pcoa_df = pcoa(dist_df)
-            self.pcoa_df = self.pcoa_df.samples
+            pcoa_result = pcoa(dist_df)
+            self.pcoa_df = pcoa_result.samples
             self.pcoa_df.index = dist_df.index
+            self.pcoa_df.index.name = 'sample'
+            # now add the variance explained as a final row to the renamed_dataframe
+            self.pcoa_df = self.pcoa_df.append(pcoa_result.proportion_explained.rename('proportion_explained'))
+            # At this point we should write out the pcoa_df and then use the 
+            # get_pcoa method to read it in with sample-id format names
+            # by writing this out we can use it again when we come to do the other clustering methods
+            pcoa_path = self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz')
+            self.pcoa_df.to_csv(pcoa_path)
+            self.pcoa_df = self._get_pcoa_df(pcoa_path=pcoa_path)
             
             # Finally the results path should
-            self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{island_list}_classification_result.txt')
-            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_kmeans_dict.p.bz'))
-            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_{island_list}_agreement_dict.p.bz'))
+            self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{self.island_list}_classification_result.txt')
+            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_agreement_dict.p.bz'))
 
         elif self.distance_method == 'unifrac':
             self.pcoa_df = self._get_pcoa_df(pcoa_path=self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz'))
