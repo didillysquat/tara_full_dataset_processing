@@ -7,9 +7,12 @@ import hashlib
 import sys
 from plumbum import local
 import subprocess
-from scipy.spatial.distance import braycurtis
+# TODO incorporate jaccard distances
+from scipy.spatial.distance import braycurtis, jaccard, pdist, squareform
 from skbio.stats.distance import mantel
 from skbio.stats.ordination import pcoa
+# TODO incorporate PCA as an option
+from sklearn.decomposition import PCA
 from skbio.tree import TreeNode
 from skbio.diversity import beta_diversity
 import numpy as np
@@ -85,14 +88,14 @@ class EighteenSDistance(EighteenSBase):
         if normalisation_abundance is not None:
             self.normalisation_abundance = normalisation_abundance
         else:
-            if self.dist_method_18S == 'braycurtis':
+            if self.dist_method_18S in ['braycurtis', 'jaccard'] :
                 self.normalisation_abundance = 10000
                 self.abundance_dict = None
             elif self.dist_method_18S == 'unifrac':
                 self.normalisation_abundance = 1000
                 self.abundance_df = None
             else:
-                raise RuntimeError(f'dist_method_18S must be either braycurtis or unifrac. {self.dist_method_18S} given.')
+                raise RuntimeError(f'dist_method_18S must be either braycurtis, jaccard or unifrac. {self.dist_method_18S} given.')
         # The unique string and hash of that string that will be used for writing items out
         # This way we will always have a unique name for streams (for multithreading later)
         # and we will be able to readback in results predictably.
@@ -133,7 +136,7 @@ class EighteenSDistance(EighteenSBase):
         os.makedirs(self.temp_dir, exist_ok=True)
         self.dist_out_path = os.path.join(
             self.output_dir_18s,
-            f'{self.unique_string}.dist')
+            f'{self.unique_string}.dist.gz')
         self.pcoa_out_path = os.path.join(
             self.output_dir_18s,
             f'{self.unique_string}_pcoa.csv.gz')
@@ -244,21 +247,20 @@ class EighteenSDistance(EighteenSBase):
                 df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
             elif self.island_list == 'ten_plus_one':
                 df = df[df['ISLAND#'].isin(['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15'])]
+            elif self.island_list == 'first_three':
+                df = df[df['ISLAND#'].isin(['I01', 'I02', 'I03'])]
             else:
                 raise NotImplementedError
-        # Finally, we only want the list of the readsets, so get the indices from the df
         
+        # Finally, we only want the list of the readsets, so get the indices from the df
         return list(df.index)
 
 
-    def _create_abundance_obj(self, obj_to_return):
+    def _create_abundance_obj(self):
         """For each sample in self.samples, load up the consolidated_host_seqs_abund_dict
         and create a dict that is sequence to normalised abundance. Then add this dictionary
         to a master dictionary where sample_name is key. Then finally create a df from this
         dict of dicts.
-        
-        If obj_to_return=='abund_dict', we will return the master dictionary
-        else obj_to_return=='abund_df', we will return a df made from the dict
 
         Because we may want to do some analyses to investigate what effect the various cutoffs
         and normalisation methods had on the abundances, we will pickle out the created dictionaries.
@@ -267,7 +269,7 @@ class EighteenSDistance(EighteenSBase):
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
             threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.samples_at_least_threshold}
         dict_to_create_df_from = {}
-        print(f'Creating {obj_to_return}')
+        print(f'Creating abundance_df')
         # NB there is one sample that only had one sequence in the consolidated_host_seqs_abund_dict
         # and this sample is causing errors. We will check for empty conolidated dict,
         # add the sample to a list and then remove it from the self.readset_list list
@@ -337,13 +339,11 @@ class EighteenSDistance(EighteenSBase):
 
         abundance_dict_path = os.path.join(os.path.join(self.cache_dir, f'{self.unique_string}_abundance_dict.p.bz'))
         compress_pickle.dump(dict_to_create_df_from, abundance_dict_path)
-        if obj_to_return == 'abund_dict':
-            return dict_to_create_df_from
-        else:
-            df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
-            df[pd.isna(df)] = 0
-            print('\ndf creation complete\n')
-            return df
+        
+        df = pd.DataFrame.from_dict(dict_to_create_df_from, orient='index')
+        df[pd.isna(df)] = 0
+        print('\ndf creation complete\n')
+        return df
 
     def _get_seq_to_sample_occurence_dict(self):
         """
@@ -387,8 +387,11 @@ class EighteenSDistance(EighteenSBase):
         else:
             if self.dist_method_18S == 'unifrac':
                 self._do_unifrac_analysis()
+            elif self.dist_method_18S in ['braycurtis', 'jaccard']:
+                self._do_bray_curtis_jaccard_analysis()
             else:
-                self._do_braycurtis_analysis()
+                raise NotImplementedError
+            # TODO run to here and if jaccard works convert the braycurtis to the jaccard format.
             # At this point we should be able to grab the distmatrix object
             # and compare it to the snp-based dist matrices and produce the persons correlation
             # value and the permutation results.
@@ -398,15 +401,8 @@ class EighteenSDistance(EighteenSBase):
             shutil.rmtree(self.temp_dir)
 
     def _compare_to_snp(self):
-        # The dist matrix is written out here
-        subprocess.run(['gzip', '-d', f'{self.dist_out_path}.gz'])
-        with open(self.dist_out_path, 'r') as f:
-            dat = [line.rstrip().split(',') for line in f]
-        index = [_[0] for _ in dat]
-        dat = [_[1:] for _ in dat]
-        subprocess.run(['gzip', self.dist_out_path])
         
-        df_18S = pd.DataFrame(dat, index=index, columns=index).astype(float)
+        df_18S = pd.read_csv(self.dist_out_path, index_col=0).astype(float)
         # The SNP and the 18S matrices must contain the same indices and be in the same order.
         # Need to take into account that the indices for the 18S df are readset names.
         # Also need to take into account that replicates may have been used.
@@ -463,9 +459,8 @@ class EighteenSDistance(EighteenSBase):
         
         # Now we are done.
 
-
-    # BRAYCURTIS METHODS
-    def _do_braycurtis_analysis(self):
+    # BrayCurtis Jaccard
+    def _do_bray_curtis_jaccard_analysis(self):
         if self._check_if_pcoa_already_computed():
             return
         # Key is readset, value is dict
@@ -473,126 +468,28 @@ class EighteenSDistance(EighteenSBase):
         # abundance of that sequence normalised to a given number of seuences that depend
         # on the distance calculation method. For braycurtis, this is currently set to 10000
         # or UniFrac this is currently set to 1000.
-        self.abundance_dict = self._create_abundance_obj(obj_to_return='abund_dict')
-        self.braycurtis_btwn_sample_distance_dictionary = self._compute_braycurtis_distance_dict()
-        self.braycurtis_btwn_sample_distance_file = self._make_and_write_braycurtis_distance_file()
-        self.pcoa_df = self._make_pcoa_df_braycurtis()
+        self.abundance_df = self._create_abundance_obj()
+        if self.dist_method_18S == 'braycurtis':
+            dist_condensed = pdist(self.abundance_df, metric='braycurtis')
+        elif self.dist_method_18S == 'jaccard':
+            dist_condensed = pdist(self.abundance_df, metric='jaccard')
+        dist_square = squareform(dist_condensed)
+        # Convert to df
+        dist_df = pd.DataFrame(dist_square, index=self.abundance_df.index, columns=self.abundance_df.index)
+        dist_df.to_csv(self.dist_out_path, index=True, header=True, compression='infer')
+        raw_pcoa = pcoa(dist_df)
+        self.pcoa_df = raw_pcoa.samples
+        self.pcoa_df.index = dist_df.index
+        self.pcoa_df.index.name = 'sample'
+        self.pcoa_df = self.pcoa_df.append(raw_pcoa.proportion_explained.rename('proportion_explained'))
         self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
-    def _make_pcoa_df_braycurtis(self):
-        # simultaneously grab the sample names in the order of the distance matrix and put the matrix into
-        # a twoD list and then convert to a numpy array
-        temp_two_D_list = []
-        sample_names_from_dist_matrix = []
-        for line in self.braycurtis_btwn_sample_distance_file:
-            temp_elements = line.split(',')
-            sample_names_from_dist_matrix.append(temp_elements[0])
-            temp_two_D_list.append([float(a) for a in temp_elements[1:]])
-        bc_dist_array = np.array(temp_two_D_list)
-        sys.stdout.write('\rcalculating PCoA coordinates')
-
-        pcoa_df = pcoa(bc_dist_array)
-
-        # rename the dataframe index as the sample names
-        pcoa_df.samples['sample'] = sample_names_from_dist_matrix
-        renamed_dataframe = pcoa_df.samples.set_index('sample')
-
-        # now add the variance explained as a final row to the renamed_dataframe
-        renamed_dataframe = renamed_dataframe.append(pcoa_df.proportion_explained.rename('proportion_explained'))
-
-        return renamed_dataframe
-
-    def _make_and_write_braycurtis_distance_file(self):
-        # Generate the distance out file from this dictionary
-        # from this dict we can produce the distance file that can be passed into the generate_PCoA_coords method
-        distance_out_file = []
-        print('Making braycurtis distance file')
-        for sample_outer in self.readset_list:
-            sys.stdout.write(f'\r{sample_outer}')
-            # The list that will hold the line of distance. This line starts with the name of the sample
-            temp_sample_dist_string = [sample_outer]
-            temp_dist_list = [
-                self.braycurtis_btwn_sample_distance_dictionary[frozenset([sample_outer, sample_inner])] if
-                sample_outer != sample_inner else
-                0 for sample_inner in self.readset_list
-            ]
-            temp_sample_dist_string.extend(temp_dist_list)
-
-            distance_out_file.append(
-                ','.join([str(distance_item) for distance_item in temp_sample_dist_string]))
-        print('\nwriting dist file')
-        with open(self.dist_out_path, 'w') as f:
-            for line in distance_out_file:
-                f.write(f'{line}\n')
-        print('Compressing')
-        subprocess.run(['gzip', self.dist_out_path])
-        print('complete')
-        return distance_out_file
-
-    def _compute_braycurtis_distance_dict(self):
-        # NB I did re-write this function using the abundance df that I made for the unifrac
-        # clculations. I have left this method in below this one. It was much slower though so we
-        # will stick with this. I have re-written this a bit to speed it up.
-        # Create a dictionary that will hold the distance between the two samples
-        distance_dict = {}
-        # For pairwise comparison of each of these sequences
-        print('\nComputing braycurtis distance dictionary\n')
-        tot = len([_ for _ in itertools.combinations(self.readset_list, 2)])
-        count = 0
-        for smp_one, smp_two in itertools.combinations(self.readset_list, 2):
-            count += 1
-            sys.stdout.write(f'\r{count} out of {tot}: {smp_one}_{smp_two}')
-
-            # Get a set of the sequences found in either one of the samples
-            smp_one_abund_dict = self.abundance_dict[smp_one]
-            smp_two_abund_dict = self.abundance_dict[smp_two]
-            list_of_seqs_of_pair = set(smp_one_abund_dict.keys())
-            list_of_seqs_of_pair.update(smp_two_abund_dict.keys())
-            list_of_seqs_of_pair =  list(list_of_seqs_of_pair)
-
-            # Create lists of abundances in order of the seq in list_of_seqs_of_pairs
-            sample_one_abundance_list = [
-                smp_one_abund_dict[seq_name] if seq_name in smp_one_abund_dict else
-                0 for seq_name in list_of_seqs_of_pair]
-            sample_two_abundance_list = \
-                [smp_two_abund_dict[seq_name] if seq_name in smp_two_abund_dict else
-                 0 for seq_name in list_of_seqs_of_pair]
-
-            # Do the Bray Curtis.
-            distance = braycurtis(sample_one_abundance_list, sample_two_abundance_list)
-
-            # Add the distance to the dictionary
-            distance_dict[frozenset([smp_one, smp_two])] = distance
-
-        print('\nComplete')
-        return distance_dict
-
-    def _compute_braycurtis_distance_dict_using_df(self):
-        # NB Although this code looks great. It is very slow. The second sub_df assignment
-        # takes a second or two to do. The above messy code using dicts is much faster.
-        # As such I will stick with that.
-        # Create a dictionary that will hold the distance between the two samples
-        spp_distance_dict = {}
-        # For pairwise comparison of each of these sequences
-        for smp_one, smp_two in itertools.combinations(self.readset_list, 2):
-            print('Calculating distance for {}_{}'.format(smp_one, smp_two))
-            # df containing only the sequences found in either smp_one or smp_two
-            sub_df = self.abundance_df.loc[[smp_one, smp_two]]
-            sub_df = sub_df.loc[:, (sub_df == 0).all(axis=0)]
-
-            # Do the Bray Curtis.
-            distance = braycurtis(sub_df.loc[smp_one].values.tolist(), sub_df.loc[smp_two].values.tolist())
-
-            # Add the distance to the dictionary
-            spp_distance_dict[frozenset([smp_one, smp_two])] = distance
-
-        return spp_distance_dict
 
     # UNIFRAC METHODS
     def _do_unifrac_analysis(self):
         if self._check_if_pcoa_already_computed():
             return
-        self.abundance_df = self._create_abundance_obj(obj_to_return='abund_df')
+        self.abundance_df = self._create_abundance_obj()
         self._create_tree()
         self._compute_weighted_unifrac()
         self._write_out_unifrac_dist_file()
@@ -1231,177 +1128,26 @@ if __name__ == "__main__":
         out_q = Queue()
         tot = 0
         test_list = []
-        for dist_method_18S in ['unifrac', 'braycurtis']:
-            if dist_method_18S == 'braycurtis':
-                island_list = None
-                for host_genus in ['Porites', 'Pocillopora']:
-                    # for only_snp_samples in [True, False]:
-                    for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                        most_abund_seq_cutoff = 0
-                        normalisation_abundance = None
-                        normalisation_method = 'pwr'
-                        min_num_distinct_seqs_per_sample = 3
-                        only_snp_samples = False
-                        in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                        tot += 1
-                    if host_genus == 'Porites':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
-                            samples_at_least_threshold = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
-                            min_num_distinct_seqs_per_sample = 3
-                            only_snp_samples = False
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                            tot += 1
-                    elif host_genus == 'Pocillopora':
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
-                            samples_at_least_threshold = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
-                            min_num_distinct_seqs_per_sample = 3
-                            only_snp_samples = False
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                            tot += 1
-                    for normalisation_method in ['pwr', 'rai']:
-                        if dist_method_18S == 'braycurtis':
-                            # We will test the normalisation abundance using optimised 
-                            # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
-                            # For both species, the same the same value for both distance methods can be used.
-                            if host_genus == 'Pocillopora':
-                                samples_at_least_threshold = 0.08
-                                most_abund_seq_cutoff = 150
-                            else:
-                                samples_at_least_threshold = 0.02
-                                most_abund_seq_cutoff = 75
-                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
-                                # samples_at_least_threshold = 0
-                                # most_abund_seq_cutoff = 0
-                                only_snp_samples = False
-                                min_num_distinct_seqs_per_sample = 3
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
-                        elif dist_method_18S == 'unifrac':
-                            if host_genus == 'Pocillopora':
-                                samples_at_least_threshold = 0.08
-                                most_abund_seq_cutoff = 150
-                            else:
-                                samples_at_least_threshold = 0.02
-                                most_abund_seq_cutoff = 75
-                            for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
-                                # samples_at_least_threshold = 0
-                                # most_abund_seq_cutoff = 0
-                                only_snp_samples = False
-                                min_num_distinct_seqs_per_sample = 3
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
-                    # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
+        for dist_method_18S in ['unifrac', 'braycurtis', 'jaccard']:
+            for host_genus in ['Porites', 'Pocillopora']:
+                for island_list in [None, 'original_three', 'ten_plus_one', 'first_three']:
+                    # We only need to compute the various island lists if we are working with the unifrac
+                    # distance, else we just use the same base distance for the other metrics (BC and Jacc)
+                    # and filter out the respective islands.
+                    if dist_method_18S != 'unifrac' and island_list is not None:
+                        continue
+                    
+                    # Test combinations of the samples_at_least_threshold and most_abund_seq_cutoff
                     for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
                         # most_abund_seq_cutoff = 0
                         normalisation_abundance = None
-                        normalisation_method = 'pwr'
+                        normalisation_method = 'rai'
                         min_num_distinct_seqs_per_sample = 3
                         only_snp_samples = False
-                        if host_genus == 'Porites':
-                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
+                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
                                 in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
                                 tot += 1
-                                to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list)
-                                test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                        elif host_genus == 'Pocillopora':
-                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
-                                test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                for min_num_distinct_seqs_per_sample in list(range(3,20,1)) + list(range(20,100,10)):
-                    samples_at_least_threshold = 0
-                    most_abund_seq_cutoff = 0
-                    only_snp_samples = False
-                    normalisation_abundance = None
-                    normalisation_method = 'pwr'
-                    host_genus = 'Pocillopora'
-                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                    tot += 1
-            else: # 'unifrac'
-                for island_list in [None, 'original_three', 'ten_plus_one']:
-                    for host_genus in ['Porites', 'Pocillopora']:
-                        # for only_snp_samples in [True, False]:
-                        for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                            most_abund_seq_cutoff = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
-                            min_num_distinct_seqs_per_sample = 3
-                            only_snp_samples = False
-                            in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                            tot += 1
-                        if host_genus == 'Porites':
-                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 450, 10)):
-                                samples_at_least_threshold = 0
-                                normalisation_abundance = None
-                                normalisation_method = 'pwr'
-                                min_num_distinct_seqs_per_sample = 3
-                                only_snp_samples = False
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
-                        elif host_genus == 'Pocillopora':
-                            for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 590, 10)):
-                                samples_at_least_threshold = 0
-                                normalisation_abundance = None
-                                normalisation_method = 'pwr'
-                                min_num_distinct_seqs_per_sample = 3
-                                only_snp_samples = False
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
-                        for normalisation_method in ['pwr', 'rai']:
-                            if dist_method_18S == 'braycurtis':
-                                # We will test the normalisation abundance using optimised 
-                                # parameters for samples_at_least_threshold and most_abund_seq_cutoff.
-                                # For both species, the same the same value for both distance methods can be used.
-                                if host_genus == 'Pocillopora':
-                                    samples_at_least_threshold = 0.08
-                                    most_abund_seq_cutoff = 150
-                                else:
-                                    samples_at_least_threshold = 0.02
-                                    most_abund_seq_cutoff = 75
-                                for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,10000,200)) + list(range(10000,50000,10000)):
-                                    # samples_at_least_threshold = 0
-                                    # most_abund_seq_cutoff = 0
-                                    only_snp_samples = False
-                                    min_num_distinct_seqs_per_sample = 3
-                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                    tot += 1
-                            elif dist_method_18S == 'unifrac':
-                                if host_genus == 'Pocillopora':
-                                    samples_at_least_threshold = 0.08
-                                    most_abund_seq_cutoff = 150
-                                else:
-                                    samples_at_least_threshold = 0.02
-                                    most_abund_seq_cutoff = 75
-                                for normalisation_abundance in list(range(100,1000,100)) + list(range(1000,11000,1000)):
-                                    # samples_at_least_threshold = 0
-                                    # most_abund_seq_cutoff = 0
-                                    only_snp_samples = False
-                                    min_num_distinct_seqs_per_sample = 3
-                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                    tot += 1
-                        # Here we will tag on combinations of the samples_at_least_threshold and most_abund_seq_cutoff
-                        for samples_at_least_threshold in np.arange(0, 0.95, 0.01):
-                            # most_abund_seq_cutoff = 0
-                            normalisation_abundance = None
-                            normalisation_method = 'pwr'
-                            min_num_distinct_seqs_per_sample = 3
-                            only_snp_samples = False
-                            if host_genus == 'Porites':
-                                for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
-                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                    tot += 1
-                                    to_append = (host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list)
-                                    test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                            elif host_genus == 'Pocillopora':
-                                for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 310, 10)):
-                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                    tot += 1
-                                    test_list.append((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                
+            # Testing of the min_num_distinct_seqs_per_sample can be tested during clustering
         
         # Here we have the in_q loaded
         for n in range(num_proc):
@@ -1435,14 +1181,15 @@ if __name__ == "__main__":
     # Island list names that can be used
     # 'original_three' = [6, 10, 15]
     # 'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
+    # 'first_three' = [1, 2, 3]
 
-    # dist = EighteenSDistance(
-    #     host_genus='Pocillopora', remove_majority_sequence=True, 
-    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-    #     snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
-    #     normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
-    #     most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
-    #     ).make_and_plot_dist_and_pcoa()
+    dist = EighteenSDistance(
+        host_genus='Pocillopora', remove_majority_sequence=True, 
+        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+        snp_distance_type='biallelic', dist_method_18S='jaccard', approach='dist',
+        normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
+        most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
+        ).make_and_plot_dist_and_pcoa()
 
     # TODO code up an Islands list input so that we limit to only certain islands. This way we
     # can limit ourselves to the original three islands and then later to the islands that the
