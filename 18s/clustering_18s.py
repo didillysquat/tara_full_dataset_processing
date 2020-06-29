@@ -1199,8 +1199,25 @@ class AgreementCalculator:
 class ComputeClassificationAgreement:
     """
     Class for computing the classificaiton agreement between 18S and the SNP classifications
+    Alongside all the other objects, the method takes in either a distance matrix or a pcoa path.
+    If the distance method is 'braycurtis' or 'jaccard' then the method expects a distance matrix
+    to be provided. In this case, the samples will be filtered according to the island list and a
+    pcoa will be computed and the classification agreement will be conducted from this.
+    If distance_method is 'unifrac' or 'PCA' then a pcoa_path is expected as the island_list-specific
+    pcoa/pca has already been computed. In this case we will simply readin the pcoa/pca from this 
+    path.
     """
-    def __init__(self, distance_method, distance_matrix_path, island_list, genus, output_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s):
+    def __init__(self, distance_method, island_list, genus, output_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s, distance_matrix_path=None, pcoa_path=None):
+        self.distance_method = distance_method
+        if self.distance_method in ['braycurtis', 'jaccard']:
+            assert(pcoa_path is None and distance_matrix_path is not None)
+            self.distance_matrix_path = distance_matrix_path
+            self.pcoa_path = self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz')
+        elif self.distance_method in ['unifrac', 'PCA']:
+            assert(pcoa_path is not None and distance_matrix_path is None)
+            self.pcoa_path = pcoa_path
+        else:
+            raise NotImplementedError
         self.output_dir = output_dir
         self.cache_dir_18s = cache_dir_18s
         self.input_dir_18s = input_dir_18s
@@ -1209,8 +1226,6 @@ class ComputeClassificationAgreement:
         self.temp_dir_18s = temp_dir_18s
         self.genus = genus
         self.snp_class_df = self._load_snp_classification_df()
-        self.distance_method = distance_method
-        self.distance_matrix_path = distance_matrix_path
         self.island_list = island_list
         # Use the meta_info_table produced by output_tables.py
         self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
@@ -1218,7 +1233,7 @@ class ComputeClassificationAgreement:
         # If braycurtis, then we need to remove the additional samples from the matrix
         # and then compute a pcoa.
         # If unifrac then the pcoa should already have been calculated and we can read it in
-        if self.distance_method == 'braycurtis':
+        if self.distance_method in ['braycurtis', 'jaccard']:
             # Then we need to strip out the samples that do not belong to the islands
             # specified in the island_list
             dist_df = pd.read_csv(self.distance_matrix_path, index_col=0, header=None)
@@ -1231,7 +1246,6 @@ class ComputeClassificationAgreement:
             samples_from_islands = self.meta_info_df[self.meta_info_df['ISLAND#'].isin(island_list)].index
             to_drop = [_ for _ in dist_df.index if _ not in samples_from_islands]
             dist_df.drop(index=to_drop, columns=to_drop, inplace=True)
-
             # Now we have the dist_df in shape and we should calculate the pcoa
             pcoa_result = pcoa(dist_df)
             self.pcoa_df = pcoa_result.samples
@@ -1242,20 +1256,20 @@ class ComputeClassificationAgreement:
             # At this point we should write out the pcoa_df and then use the 
             # get_pcoa method to read it in with sample-id format names
             # by writing this out we can use it again when we come to do the other clustering methods
-            pcoa_path = self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz')
-            self.pcoa_df.to_csv(pcoa_path)
-            self.pcoa_df = self._get_pcoa_df(pcoa_path=pcoa_path)
+            
+            self.pcoa_df.to_csv(self.pcoa_path)
+            self.pcoa_df = self._get_pcoa_df(pcoa_path=self.pcoa_path)
             
             # Finally the results path should
             self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{self.island_list}_classification_result.txt')
             self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_kmeans_dict.p.bz'))
             self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_agreement_dict.p.bz'))
 
-        elif self.distance_method == 'unifrac':
-            self.pcoa_df = self._get_pcoa_df(pcoa_path=self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz'))
-            self.results_path = self.distance_matrix_path.replace('.dist.gz', '_classification_result.txt')
-            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_kmeans_dict.p.bz'))
-            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', '_agreement_dict.p.bz'))
+        elif self.distance_method in ['unifrac', 'PCA']:
+            self.pcoa_df = self._get_pcoa_df(pcoa_path=self.pcoa_path)
+            self.results_path = self.pcoa_path.replace('_pcoa.csv.gz', '_classification_result.txt')
+            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_dict.p.bz'))
+            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_agreement_dict.p.bz'))
 
         else:
             raise NotImplementedError
