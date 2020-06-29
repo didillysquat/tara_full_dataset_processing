@@ -1176,25 +1176,10 @@ class AgreementCalculator:
 
     def _md5sum_from_python_object(self, p_obj):
         """ 
-        A wrapper function around the self._md5sum function, that will take in a python object,
-        sort it, write it out to temp, md5sum the written out file, delete the file,
-        and return the md5sum hash.
+        Get a hash code for a given python object
+        https://stackoverflow.com/questions/5417949/computing-an-md5-hash-of-a-data-structure
         """
-        sorted_p_obj = sorted(p_obj)
-        temp_out_path = os.path.join(self.temp_dir_18s, 'p_obj.out')
-        with open(temp_out_path, 'w') as f:
-            json.dump(sorted_p_obj, f)
-        md5sum_hash = self._md5sum(temp_out_path)
-        os.remove(temp_out_path)
-        return md5sum_hash
-    
-    @staticmethod
-    def _md5sum(filename):
-        with open(filename, mode='rb') as f:
-            d = hashlib.md5()
-            for buf in iter(partial(f.read, 128), b''):
-                d.update(buf)
-        return d.hexdigest()
+        return hashlib.md5(json.dumps(sorted(p_obj), sort_keys=True).encode('utf-8')).hexdigest()
 
 class ComputeClassificationAgreement:
     """
