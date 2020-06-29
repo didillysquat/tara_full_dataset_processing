@@ -676,7 +676,7 @@ class ThreeRow:
                                 in_q.put(
                                     (distance_method, distance_matrix_path, island_list, genus, 
                                     samples_at_least_threshold, most_abund_seq_cutoff, 
-                                    self.parent.output_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
+                                    self.parent.output_dir, self.parent.cache_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
                                     self.parent.output_dir_18s, self.parent.fastq_info_df_path, self.parent.temp_dir_18s))
                                 in_q_len += 1
         else:
@@ -745,20 +745,20 @@ class ThreeRow:
         for class_args in iter(in_q.get, 'STOP'):
             (distance_method, object_path, island_list, genus, 
             samples_at_least_threshold, most_abund_seq_cutoff, output_dir, 
-            cache_dir_18s, input_dir_18s, output_dir_18s, 
+            cache_dir, cache_dir_18s, input_dir_18s, output_dir_18s, 
             fastq_info_df_path, temp_dir_18s) = class_args
             
             if distance_method in ['braycurtis', 'jaccard']:
                 cca = ComputeClassificationAgreement(
                     distance_method=distance_method, distance_matrix_path=object_path, 
                     island_list=island_list, genus=genus,
-                    output_dir=output_dir, cache_dir_18s=cache_dir_18s, input_dir_18s=input_dir_18s,
+                    output_dir=output_dir, cache_dir=cache_dir, cache_dir_18s=cache_dir_18s, input_dir_18s=input_dir_18s,
                     output_dir_18s=output_dir_18s, fastq_info_df_path=fastq_info_df_path, temp_dir_18s=temp_dir_18s)
             elif distance_method in ['unifrac', 'PCA']:
                 cca = ComputeClassificationAgreement(
                     distance_method=distance_method, pcoa_path=object_path, 
                     island_list=island_list, genus=genus,
-                    output_dir=output_dir, cache_dir_18s=cache_dir_18s, input_dir_18s=input_dir_18s,
+                    output_dir=output_dir, cache_dir=cache_dir, cache_dir_18s=cache_dir_18s, input_dir_18s=input_dir_18s,
                     output_dir_18s=output_dir_18s, fastq_info_df_path=fastq_info_df_path, temp_dir_18s=temp_dir_18s)
             max_agreement, max_k = cca.compute_classficiation_agreement()
 

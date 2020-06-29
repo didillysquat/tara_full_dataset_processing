@@ -1193,17 +1193,21 @@ class ComputeClassificationAgreement:
     pcoa/pca has already been computed. In this case we will simply readin the pcoa/pca from this 
     path.
     """
-    def __init__(self, distance_method, island_list, genus, output_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s, distance_matrix_path=None, pcoa_path=None):
+    def __init__(self, distance_method, island_list, genus, output_dir, cache_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s, distance_matrix_path=None, pcoa_path=None):
         self.distance_method = distance_method
+        self.cache_dir = cache_dir
         if self.distance_method in ['braycurtis', 'jaccard']:
             assert(pcoa_path is None and distance_matrix_path is not None)
             self.distance_matrix_path = distance_matrix_path
             self.pcoa_path = self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz')
+            self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basedir(self.distance_matrix_path.replace('.dist.gz', '_abundance_dict.p.bz'))) 
         elif self.distance_method in ['unifrac', 'PCA']:
             assert(pcoa_path is not None and distance_matrix_path is None)
             self.pcoa_path = pcoa_path
+            self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basedir(self.pcoa_path.replace('_pcoa.csv.gz', '_abundance_dict.p.bz'))) 
         else:
             raise NotImplementedError
+        
         self.output_dir = output_dir
         self.cache_dir_18s = cache_dir_18s
         self.input_dir_18s = input_dir_18s
@@ -1223,6 +1227,10 @@ class ComputeClassificationAgreement:
             # Then we need to strip out the samples that do not belong to the islands
             # specified in the island_list
             dist_df = pd.read_csv(self.distance_matrix_path, index_col=0, header=None)
+            # Create the abundance df from the abundance dictionary so that we can compute 
+            # clusters based on the raw count data.
+            # Same as the distance matrix we will need to drop the samples that aren't found
+            self.abundance_df = pd.from_dict(compress_pickle.load(self.abundance_dict_path, orient='index'))
             dist_df.columns = dist_df.index
             drop_list = []
             if self.island_list == 'original_three':
@@ -1232,6 +1240,7 @@ class ComputeClassificationAgreement:
             samples_from_islands = self.meta_info_df[self.meta_info_df['ISLAND#'].isin(island_list)].index
             to_drop = [_ for _ in dist_df.index if _ not in samples_from_islands]
             dist_df.drop(index=to_drop, columns=to_drop, inplace=True)
+            self.abundance_df.drop(index=to_drop, inplace=True)
             # Now we have the dist_df in shape and we should calculate the pcoa
             pcoa_result = pcoa(dist_df)
             self.pcoa_df = pcoa_result.samples
@@ -1255,11 +1264,18 @@ class ComputeClassificationAgreement:
             self.pcoa_df = self._get_pcoa_df(pcoa_path=self.pcoa_path)
             self.results_path = self.pcoa_path.replace('_pcoa.csv.gz', '_classification_result.txt')
             self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_dict.p.bz'))
+            self.kmeans_raw_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_raw_dict.p.bz'))
             self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_agreement_dict.p.bz'))
-
+            # Also get the abundance dataframe
+            # In theory the samples should already have been removed that aren't in the island list
+            self.abundance_df = pd.from_dict(compress_pickle.load(self.abundance_dict_path, orient='index'))
+            assert(set(self.pcoa_df.index) == set(self.abundance_df.index))
         else:
             raise NotImplementedError
+        # Dict for holding the kmeans conducted on the pcoa
         self.kmeans_dict = {}
+        # Dict for holding the kmeans conducted on the raw sequence counts
+        self.kmeans_raw_dict = {}
         self.agreement_dict = {}
         
         # The snp classifications are now associated to the base_18s.py class.
@@ -1335,6 +1351,7 @@ class ComputeClassificationAgreement:
         # and that the smaller level will generally be the k of the SNP data, then we can work with
         # quite a large k. let's start with k=20 to start with
         
+        # KMEANS Clustering on PCoA
         # Let's implement a cache for this so that this effort is not wasted
         if os.path.exists(self.kmeans_dict_pickle_path):
             # Get cached kmeans dict
@@ -1347,33 +1364,59 @@ class ComputeClassificationAgreement:
                 self.kmeans_dict[k] = kmeans
             compress_pickle.dump(self.kmeans_dict, self.kmeans_dict_pickle_path)
         
+        # KMEANS Clustering on abundance df
+        if os.path.exists(self.kmeans_raw_dict_pickle_path):
+            # Get cached kmeans dict
+            self.kmeans_raw_dict = compress_pickle.load(self.kmeans_raw_dict_pickle_path)
+        else:
+            # Compute kmeans from scratch and pickle out
+            for k in k_range:
+                kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full', n_jobs=1).fit(self.abundance_df)
+                self.kmeans_raw_dict[k] = kmeans
+            compress_pickle.dump(self.kmeans_raw_dict, self.kmeans_raw_dict_pickle_path)
+
         # Here we have the kmeans calculated and we can now compute agreement to the snp classifications
         # Create a kmeans df, reindex to the snp_class_df
-        # # TODO uncomment to use Adjusted Rand Index
-        # # Then pass in the k columns
-        # kmeans_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_dict.items()})
-        # kmeans_df.index = self.pcoa_df.index
-        # # We only want to work with the samples that are found in both snp and 18S samples
-        # samples_in_common = list(set(kmeans_df.index).intersect(set(self.snp_class_df.index)))
-        # self.snp_class_df = self.snp_class_df.reindex(index=samples_in_common)
-        # kmeans_df = kmeans_df.reindex(index=samples_in_common)
+        # TODO uncomment to use Adjusted Rand Index
+        # Then pass in the k columns
+        kmeans_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_dict.items()})
+        kmeans_raw_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_raw_dict.items()})
+        
+        kmeans_df.index = self.pcoa_df.index
+        kmeans_raw_df.index = self.pcoa_df.index
+
+        # We only want to work with the samples that are found in both snp and 18S samples
+        samples_in_common = list(set(kmeans_df.index).intersect(set(self.snp_class_df.index)))
+        self.snp_class_df = self.snp_class_df.reindex(index=samples_in_common)
+        kmeans_df = kmeans_df.reindex(index=samples_in_common)
+        kmeans_raw_df = kmeans_raw_df.reindex(index=samples_in_common)
         
         max_agreement = 0
         max_k = None
+        max_method = None
         for k in k_range:
-            # agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_df[k])
-            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
+            agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_df[k])
+            # agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
             if agreement > max_agreement:
                 max_agreement = agreement
                 max_k = k
-            self.agreement_dict[k] = agreement
-        self.agreement_dict['max'] = max(self.agreement_dict.values())
-        compress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
+                max_method = 'kmeans_pcoa'
+            # self.agreement_dict[k] = agreement
+        # self.agreement_dict['max'] = max(self.agreement_dict.values())
+        # compress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
+
+        for k in k_range:
+            agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_raw_df[k])
+            # agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
+            if agreement > max_agreement:
+                max_agreement = agreement
+                max_k = k
+                max_method = 'kmeans_raw'
 
         # For the time being we will write out the max agreement the cluster method used to obtain it and the 
         # number of classifications
         with open(self.results_path, 'w') as f:
-            f.write(f'{max_agreement:.2f},{max_k},kmeans')
+            f.write(f'{max_agreement:.2f},{max_k},{max_method}}')
 
         # Here we are done.
         return max_agreement, max_k
