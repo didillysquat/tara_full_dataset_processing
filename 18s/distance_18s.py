@@ -480,7 +480,8 @@ class EighteenSDistance(EighteenSBase):
         self.abundance_df = self._create_abundance_obj()
         pca_obj = PCA().fit_transform(self.abundance_df)
         pca_obj_fit = PCA().fit(self.abundance_df)
-        self.pcoa_df = pd.DataFrame(pca_obj, index=self.abundance_df.index, columns = [f'PC{_}' for _ in range(1, len(self.abundance_df.index) + 1)])
+        # NB the number of components of the PCA is defined by the minimum of the dimensions or the sample numbers
+        self.pcoa_df = pd.DataFrame(pca_obj, index=self.abundance_df.index, columns = [f'PC{_}' for _ in range(1, min(self.abundance_df.shape) + 1)])
         self.pcoa_df = self.pcoa_df.append(pd.Series(pca_obj_fit.explained_variance_ratio_, index=list(self.pcoa_df), name='proportion_explained'))
         self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
@@ -1159,11 +1160,11 @@ if __name__ == "__main__":
                     # We only need to compute the various island lists if we are working with the unifrac
                     # distance, else we just use the same base distance for the other metrics (BC and Jacc)
                     # and filter out the respective islands.
-                    if dist_method_18S != 'unifrac' and island_list is not None:
+                    if dist_method_18S not in ['unifrac', 'PCA'] and island_list is not None:
                         continue
                     
                     # Test combinations of the samples_at_least_threshold and most_abund_seq_cutoff
-                    for samples_at_least_threshold in list(np.arange(0, 0.1, 0.01)) + list(np.arange(0.1, 1, 0.1)):
+                    for samples_at_least_threshold in list(np.arange(0, 0.1, 0.01)) + list(np.arange(0.1, 0.8, 0.1)):
                         # most_abund_seq_cutoff = 0
                         normalisation_abundance = None
                         normalisation_method = 'rai'
