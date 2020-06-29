@@ -32,6 +32,7 @@ import json
 import hashlib
 from functools import partial
 import ntpath
+from sklearn import metrics
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1347,9 +1348,20 @@ class ComputeClassificationAgreement:
             compress_pickle.dump(self.kmeans_dict, self.kmeans_dict_pickle_path)
         
         # Here we have the kmeans calculated and we can now compute agreement to the snp classifications
+        # Create a kmeans df, reindex to the snp_class_df
+        # # TODO uncomment to use Adjusted Rand Index
+        # # Then pass in the k columns
+        # kmeans_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_dict.items()})
+        # kmeans_df.index = self.pcoa_df.index
+        # # We only want to work with the samples that are found in both snp and 18S samples
+        # samples_in_common = list(set(kmeans_df.index).intersect(set(self.snp_class_df.index)))
+        # self.snp_class_df = self.snp_class_df.reindex(index=samples_in_common)
+        # kmeans_df = kmeans_df.reindex(index=samples_in_common)
+        
         max_agreement = 0
         max_k = None
         for k in k_range:
+            # agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_df[k])
             agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
             if agreement > max_agreement:
                 max_agreement = agreement
