@@ -201,13 +201,13 @@ class ThreeRow:
         # self.cutoff_ax[0,1].legend(loc='upper left', fontsize='x-small')
         # plt.savefig(os.path.join(self.parent.eighteens_dir, 'temp_cutoff_fig.png'), dpi=1200)
         
-        for method_list in [['unifrac', 'braycurtis'],['jaccard', 'PCA']]:
-            self.contour_fig, self.contour_ax = plt.subplots(2,4, figsize=(16,8))
-            # It would be good to print out the exact parameters that gave the best results
-            best_results_dict = {}
-            self._plot_fourth_row_classification(best_results_dict)
-            plt.tight_layout()
-            plt.savefig(os.path.join(self.parent.eighteens_dir, f'temp_contour_fig_{method_list[0]}_{method_list[1]}_classification.png'), dpi=1200)
+        
+        self.contour_fig, self.contour_ax = plt.subplots(2,4, figsize=(16,8))
+        # It would be good to print out the exact parameters that gave the best results
+        best_results_dict = {}
+        self._plot_fourth_row_classification(best_results_dict)
+        plt.tight_layout()
+        plt.savefig(os.path.join(self.parent.eighteens_dir, f'temp_contour_fig_classification.png'), dpi=1200)
         # self.contour_ax[0,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
         # self.contour_ax[1,0].set_ylabel('minimum in sample cutoff', fontsize='x-small')
         # self.contour_ax[0,1].set_ylabel('minimum in sample cutoff', fontsize='x-small')
@@ -340,7 +340,7 @@ class ThreeRow:
                 cbar = self.contour_fig.colorbar(contour, ax=self.contour_ax[g_i,m_i])
                 cbar.ax.set_ylabel("Pearson's correlation coefficient")
 
-    def _plot_fourth_row_classification(self, best_results_dict, method_list=['unifrac', 'braycurtis']):
+    def _plot_fourth_row_classification(self, best_results_dict):
         """
         A variation on the _plot_fourth_row. This will look at classification agreement rather than mantel based Pearson's
         It will have 8 plots. if we do 2 genera, 2 dist method and 2 islands.
@@ -352,8 +352,8 @@ class ThreeRow:
         and the ['jaccard', 'PCA'] method lists.
         """
         for g_i, g in enumerate(self.genera):
-            for m_i, m in enumerate(method_list):
-                for i_i, i in enumerate(['original_three', 'ten_plus_one']):
+            for m_i, m in enumerate(['unifrac', 'braycurtis']):
+                for i_i, i in enumerate(['original_three']):
                     if m == 'unifrac':
                         norm_abund = 1000
                     else:
@@ -363,7 +363,7 @@ class ThreeRow:
                     if i == 'original_three':
                         num_proc = 50
                     else:
-                        num_proc = 2
+                        num_proc = 50
                     # If unifrac, we need to incorporate the island_list string 
                     # diretly when looking for the distance matrix.
                     # If braycurtis or jaccard then we will work with a single base 
@@ -372,7 +372,7 @@ class ThreeRow:
                     # If PCA, then we will not be looking for a dist matrix and rather will be looking direclty for a pcoa
                     # We will plot the genera per row, and then the dist method and islands on the same row
                     col_index = (m_i*2) + i_i
-                    contour = self._plot_countour_classification(ax=self.contour_ax[g_i, col_index], genus=g, normalisation_abundance=norm_abund, normalisation_method='pwr', distance_method=m, snp_only=False, island_list=i, num_proc=num_proc, best_results_dict=best_results_dict)
+                    contour = self._plot_countour_classification(ax=self.contour_ax[g_i, col_index], genus=g, normalisation_abundance=norm_abund, normalisation_method='rai', distance_method=m, snp_only=False, island_list=i, num_proc=num_proc, best_results_dict=best_results_dict)
                     if contour:
                         self.contour_ax[g_i,col_index].set_title(f'{g}_{m}\n{i}', fontsize='x-small')
                         cbar = self.contour_fig.colorbar(contour, ax=self.contour_ax[g_i,col_index])
@@ -553,7 +553,7 @@ class ThreeRow:
         contour = ax.contourf(list(df), list(df.index), df.to_numpy())
         return contour
 
-    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='pwr', snp_only=False, num_proc=2, calculate=True, best_results_dict=None):
+    def _plot_countour_classification(self, ax, genus, distance_method, normalisation_abundance, island_list, normalisation_method='rai', snp_only=False, num_proc=2, calculate=True, best_results_dict=None):
         """
         This is a modification for _plot_contour to work with classification agreement rather than Pearsons mantel agreement
         Currently the function will look for the distance matrices of interest that have
@@ -618,7 +618,7 @@ class ThreeRow:
                         with open(results_path, 'r') as f:
                             line = f.readline().split(',')
                             max_agreement = float(line[0])
-                            max_k = int(line[1])
+                            max_k = line[1]
                         # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
                         # samples_at_least_threshold due to the normalistaion testing.
                         # If we leave this 75 in it creates a vertical white stripe at 75.
@@ -635,7 +635,7 @@ class ThreeRow:
                             in_q.put(
                                 (distance_method, pcoa_path, island_list, genus, 
                                 samples_at_least_threshold, most_abund_seq_cutoff, 
-                                self.parent.output_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
+                                self.parent.output_dir, self.parent.cache_dir, self.parent.cache_dir_18s, self.parent.input_dir_18s, 
                                 self.parent.output_dir_18s, self.parent.fastq_info_df_path, self.parent.temp_dir_18s))
                             in_q_len += 1
         elif distance_method in ['braycurtis', 'jaccard']:
@@ -652,15 +652,17 @@ class ThreeRow:
                         # else, add it to the input queue for multiprocessing.
                         samples_at_least_threshold = float(dist_file.split('_')[11])
                         most_abund_seq_cutoff = int(dist_file.split('_')[12])
-                        if most_abund_seq_cutoff == 75:
+                        if most_abund_seq_cutoff == 75 or samples_at_least_threshold > 0.1 or most_abund_seq_cutoff > 30:
                                 continue
+                        # Let's narrow down what we are plotting here. Let's limit the misco to 0.1
+                        # and the MASCO to 30
                         if os.path.exists(results_path):
                             # Then we already have the results computed and we can simply read them in and plot them up
                             # We have not completed this yet
                             with open(results_path, 'r') as f:
                                 line = f.readline().split(',')
                                 max_agreement = float(line[0])
-                                max_k = int(line[1])
+                                max_k = line[1]
                             # We need to throw out the 75 value most_abund_seq_cutoff as we only have this for a single
                             # samples_at_least_threshold due to the normalistaion testing.
                             # If we leave this 75 in it creates a vertical white stripe at 75.
@@ -724,7 +726,8 @@ class ThreeRow:
             
             # the samples_at_least_threshold has most_abund_seq_cutoff up to 580, but the combinations
             # were only computed up to 100 so crop to this
-            df = df.iloc[:,:df.columns.get_loc(300) + 1]
+            df.dropna(axis=1, inplace=True)
+            # df = df.iloc[:,:df.columns.get_loc(300) + 1]
             contour = ax.contourf(list(df), list(df.index), df.to_numpy())
             print('Plot contour classification complete \n\n\n')
             
