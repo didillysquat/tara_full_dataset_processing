@@ -398,9 +398,9 @@ class EighteenSDistance(EighteenSBase):
             # value and the permutation results.
             # These will need to be written out somewhere using
             # the unique string as the name
-            if self.dist_method_18S != 'PCA':
-                self._compare_to_snp()
-            shutil.rmtree(self.temp_dir)
+            # if self.dist_method_18S != 'PCA':
+            #     self._compare_to_snp()
+            # shutil.rmtree(self.temp_dir)
 
     def _compare_to_snp(self):
         # NB Unfortunately we now have two formats of dist file. One that has headers
@@ -483,6 +483,7 @@ class EighteenSDistance(EighteenSBase):
         # NB the number of components of the PCA is defined by the minimum of the dimensions or the sample numbers
         self.pcoa_df = pd.DataFrame(pca_obj, index=self.abundance_df.index, columns = [f'PC{_}' for _ in range(1, min(self.abundance_df.shape) + 1)])
         self.pcoa_df = self.pcoa_df.append(pd.Series(pca_obj_fit.explained_variance_ratio_, index=list(self.pcoa_df), name='proportion_explained'))
+        self.pcoa_df.index.name='sample'
         self.pcoa_df.to_csv(self.pcoa_out_path, index=True, header=True, compression='infer')
 
     # BrayCurtis Jaccard
@@ -1154,25 +1155,22 @@ if __name__ == "__main__":
         out_q = Queue()
         tot = 0
         test_list = []
-        for dist_method_18S in ['unifrac', 'braycurtis', 'jaccard', 'PCA']:
-            for host_genus in ['Porites', 'Pocillopora']:
-                for island_list in [None, 'original_three', 'ten_plus_one', 'first_three']:
-                    # We only need to compute the various island lists if we are working with the unifrac
-                    # distance, else we just use the same base distance for the other metrics (BC and Jacc)
-                    # and filter out the respective islands.
-                    if dist_method_18S not in ['unifrac', 'PCA'] and island_list is not None:
-                        continue
-                    
-                    # Test combinations of the samples_at_least_threshold and most_abund_seq_cutoff
-                    for samples_at_least_threshold in list(np.arange(0, 0.1, 0.01)) + list(np.arange(0.1, 0.8, 0.1)):
-                        # most_abund_seq_cutoff = 0
-                        normalisation_abundance = None
-                        normalisation_method = 'rai'
-                        min_num_distinct_seqs_per_sample = 3
-                        only_snp_samples = False
-                        for most_abund_seq_cutoff in list(range(3,30,1)) + list(range(30, 380, 50)):
-                                in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
-                                tot += 1
+        for dist_method_18S in ['braycurtis' 'unifrac']:
+            for host_genus in ['Pocillopora']:
+                for island_list in ['original_three']:  
+                    for normalisation_method in ['pwr', 'rai']:
+                        # Test combinations of the samples_at_least_threshold and most_abund_seq_cutoff
+                        # We are seeing that misco is effective at very low values. So only do combinations up to 0.05
+                        for samples_at_least_threshold in list(np.arange(0, 0.06, 0.01)):
+                            # most_abund_seq_cutoff = 0
+                            normalisation_abundance = None
+                            normalisation_method = 'rai'
+                            min_num_distinct_seqs_per_sample = 3
+                            only_snp_samples = False
+                            # We are also seeing that 
+                            for most_abund_seq_cutoff in list(range(3,20,1)) + list(range(20, 320, 50)):
+                                    in_q.put((host_genus, samples_at_least_threshold, most_abund_seq_cutoff, dist_method_18S, only_snp_samples, normalisation_abundance, normalisation_method, min_num_distinct_seqs_per_sample, island_list))
+                                    tot += 1
             # Testing of the min_num_distinct_seqs_per_sample can be tested during clustering
         
         # Here we have the in_q loaded
@@ -1202,7 +1200,7 @@ if __name__ == "__main__":
 
         print(f'All dist analyses complete. {bad_tree} bad tree samples.')
 
-    do_multi_proc_launch()
+    # do_multi_proc_launch()
     
     # Island list names that can be used
     # 'original_three' = [6, 10, 15]
@@ -1212,7 +1210,7 @@ if __name__ == "__main__":
     # dist = EighteenSDistance(
     #     host_genus='Pocillopora', remove_majority_sequence=True, 
     #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-    #     snp_distance_type='biallelic', dist_method_18S='PCA', approach='dist',
+    #     snp_distance_type='biallelic', dist_method_18S='braycurtis', approach='dist',
     #     normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
     #     most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
     #     ).make_and_plot_dist_and_pcoa()

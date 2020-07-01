@@ -584,7 +584,7 @@ class ThreeRow:
         # calculated specifically for the island_list in question.
         # By contrast, for 'braycurtis' or 'jaccard' we will be looking for a distance matrix
         # removing samples according to the island list, and then caclulating a pcoa from this.
-        if distance_method in ['unifrac', 'PCA']:
+        if distance_method in ['unifrac']:
             for pcoa_file in [_ for _ in os.listdir(self.parent.output_dir_18s) if _.endswith('a.csv.gz')]:
                 if pcoa_file.startswith(f'{genus}_True_True_True_False_biallelic_{distance_method}_dist_{normalisation_abundance}_{normalisation_method}_{snp_only}_'):
                     # inbetween these two conditions are the misco and the masco scores
@@ -610,8 +610,8 @@ class ThreeRow:
                     # else, add it to the input queue for multiprocessing.
                     samples_at_least_threshold = float(pcoa_file.split('_')[11])
                     most_abund_seq_cutoff = int(pcoa_file.split('_')[12])
-                    if most_abund_seq_cutoff == 75:
-                            continue
+                    if most_abund_seq_cutoff == 75 or samples_at_least_threshold > 0.1 or most_abund_seq_cutoff > 30:
+                        continue
                     if os.path.exists(results_path):
                         # Then we already have the results computed and we can simply read them in and plot them up
                         # We have not completed this yet
@@ -735,9 +735,11 @@ class ThreeRow:
             if best_results_dict is not None:
                 best_agreement_list = []
                 # get the max agreement results
+                print(f'Best agreement for {genus}_{distance_method}_{island_list}:')
                 top_5_best_agreement = sorted(list(zip(x_samples_at_least_threshold, y_most_abund_seq_cutoff, z_coef, max_k_list)), key=lambda x: x[2], reverse=True)[:20]
                 for _ in top_5_best_agreement:
                     best_agreement_list.append(f'max_agreement={_[2]:.2f} for misco of {_[0]:.2f} and masco of {_[1]} k = {_[3]}')
+                    print(f'max_agreement={_[2]:.2f} for misco of {_[0]:.2f} and masco of {_[1]} k = {_[3]}')
                 best_results_dict[f'{genus}_{distance_method}_{island_list}'] = best_agreement_list
             return contour
         else:
