@@ -20,7 +20,7 @@ def warn(*args, **kwargs):
     pass
 import warnings
 warnings.warn = warn
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, AffinityPropagation, MiniBatchKMeans
 import subprocess
 from subprocess import CalledProcessError
 from sklearn.metrics import silhouette_score
@@ -33,6 +33,8 @@ import hashlib
 from functools import partial
 import ntpath
 from sklearn import metrics
+# I added fasta2net to the PYTHONPATH in the .bashrc
+from fasta2net import Fasta2Net
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1032,6 +1034,157 @@ class Cluster18S(EighteenSBase):
         plt.tight_layout()
         plt.savefig(os.path.join(self.fig_output_dir_18s, 'snmf_agreement.png'), dpi=600)
 
+class CheckPwrRai(EighteenSBase):
+    """
+    We are seeing some very strange disagreement between the PWR and the RAI normalisation in unifrac
+    """
+    def __init__(self, misco='0.01', masco='17'):
+        super().__init__()
+        self.misco = misco
+        self.masco = masco
+        self.meta_info_table_path = '/home/humebc/projects/tara/tara_full_dataset_processing/output/coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv'
+        self.meta_info_df = self._get_meta_info_df()
+        
+        self.genus = 'Pocillopora'
+        self.distance_method = 'unifrac'
+        self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
+        self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
+        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr)
+        # self.pwr_var = self.pcoa_df_pwr.iloc[-1]
+        self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
+        # self.pwr_var = self.pcoa_df_rai.iloc[-1]
+        # self.pcoa_df_pwr = self.pcoa_df_pwr.iloc[:-1]
+        # self.pcoa_df_rai = self.pcoa_df_rai.iloc[:-1]
+        self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        self.fig_dir = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/figures'
+        self.n_clusters = 3
+        self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.n_clusters}.png')
+        self.pwr_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_pwr).labels_, index=self.pcoa_df_pwr.index, name='label')
+        self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
+        self.snp_classification = self.poc_snp_classifications
+        self.agreement_list = []
+
+    def _get_meta_info_df(self):
+        return pd.read_csv(self.meta_info_table_path).set_index('readset')
+
+    def _plot_row(self, labels, pcoa_df, pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats, norm_m):
+        for k in labels.unique():
+            samples_pwr = labels[labels==k].index
+            pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'])
+            pc3_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC3'])
+        
+        samples_in_common = list(set(self.snp_classification.index).intersection(set(labels.index)))
+        labels = labels.reindex(index=samples_in_common)
+        snp_classification_reindexed = self.snp_classification.reindex(index=samples_in_common)
+        
+        agreement = AgreementCalculator(lab_ser_one=labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
+        self.agreement_list.append(agreement)
+        pc2_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        pc3_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+
+        # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
+        samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
+        pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC2'], c='lightgrey')
+        pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC3'], c='lightgrey')
+        for svd in self.snp_classification['label'].unique():
+            of_svd = self.snp_classification[self.snp_classification['label']==svd]
+            samples_in_common = [_ for _ in pcoa_df.index if _ in of_svd.index]
+            pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'])
+            pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'])
+
+        pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+
+    def plot(self):
+        # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
+        # at k==3
+        # Plot up the pwr row
+        self._plot_row(
+            labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
+            pc2_ax_kmeans_cats = self.ax_arr[0,0], pc3_ax_kmeans_cats = self.ax_arr[0,1], 
+            pc2_ax_snp_cats = self.ax_arr[0,2], pc3_ax_snp_cats = self.ax_arr[0,3], norm_m='pwr'
+            )
+
+        # Plot up the rai row
+        self._plot_row(
+            labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
+            pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
+            pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
+            )
+
+        
+
+
+
+        # for k in self.rai_kmeans_labels.unique():
+        #     samples_rai = self.rai_kmeans_labels[self.rai_kmeans_labels==k].index
+            
+        #     self.ax_arr[1,0].scatter(self.pcoa_df_rai.loc[samples_rai, 'PC1'], self.pcoa_df_rai.loc[samples_rai, 'PC2'])
+        #     self.ax_arr[1,1].scatter(self.pcoa_df_rai.loc[samples_rai, 'PC1'], self.pcoa_df_rai.loc[samples_rai, 'PC3'])
+        
+        # samples_in_common = list(set(self.snp_classification.index).intersection(set(self.rai_kmeans_labels.index)))
+        # self.rai_kmeans_labels = self.rai_kmeans_labels.reindex(index=samples_in_common)
+        # snp_classification_reindexed = self.snp_classification.reindex(index=samples_in_common)
+        
+        # agreement = AgreementCalculator(lab_ser_one=self.rai_kmeans_labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
+        # self.agreement_list.append(agreement)
+        # self.ax_arr[1,0].set_title(f'rai, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        # self.ax_arr[1,1].set_title(f'rai, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+
+        # # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
+        # samples_not_in_common = [_ for _ in self.pcoa_df_rai.index if _ not in self.snp_classification.index]
+        # self.ax_arr[1,2].scatter(self.pcoa_df_rai.loc[samples_not_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_not_in_common, 'PC2'], c='lightgrey')
+        # self.ax_arr[1,3].scatter(self.pcoa_df_rai.loc[samples_not_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_not_in_common, 'PC3'], c='lightgrey')
+        # for svd in self.snp_classification['label'].unique():
+        #     of_svd = self.snp_classification[self.snp_classification['label']==svd]
+        #     samples_in_common = [_ for _ in self.pcoa_df_rai.index if _ in of_svd.index]
+        #     self.ax_arr[1,2].scatter(self.pcoa_df_rai.loc[samples_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_in_common, 'PC2'])
+        #     self.ax_arr[1,3].scatter(self.pcoa_df_rai.loc[samples_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_in_common, 'PC3'])
+
+        # self.ax_arr[1,2].set_title(f'rai, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        # self.ax_arr[1,3].set_title(f'rai, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        
+        plt.tight_layout()
+        
+        # Append the agreement results to the name
+        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}_{self.agreement_list[1]:.2f}.png')
+        plt.savefig(self.fig_path, dpi=600)
+        foo = 'bar'
+
+    def _get_pcoa_df(self, pcoa_path):
+        # Read in the pcoa file of interest as a df
+        # get rid of tech reps and convert readset names to sample-id
+        try:
+            pcoa_df = pd.read_csv(pcoa_path, index_col=0)
+        except Exception as e:
+            foo = 'bar'
+        # try:
+        #     pcoa_df.set_index('sample', drop=True, inplace=True)
+        # except KeyError:
+        #     pass
+        # Get rid of the proportion explained
+        try:
+            pcoa_df = pcoa_df.iloc[:-1,:]
+        except Exception as e:
+            foo = 'bar'
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in pcoa_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        pcoa_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in pcoa_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        
+        pcoa_df.index = sample_id_list
+        return pcoa_df
+
+
 class AgreementCalculator:
     """
         Takes in a pairs of series where the index is sample name and the value is the classification.
@@ -1196,18 +1349,7 @@ class ComputeClassificationAgreement:
     def __init__(self, distance_method, island_list, genus, output_dir, cache_dir, cache_dir_18s, input_dir_18s, output_dir_18s, fastq_info_df_path, temp_dir_18s, distance_matrix_path=None, pcoa_path=None):
         self.distance_method = distance_method
         self.cache_dir = cache_dir
-        if self.distance_method in ['braycurtis', 'jaccard']:
-            assert(pcoa_path is None and distance_matrix_path is not None)
-            self.distance_matrix_path = distance_matrix_path
-            self.pcoa_path = self.distance_matrix_path.replace('.dist.gz', '_pcoa.csv.gz')
-            self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basedir(self.distance_matrix_path.replace('.dist.gz', '_abundance_dict.p.bz'))) 
-        elif self.distance_method in ['unifrac', 'PCA']:
-            assert(pcoa_path is not None and distance_matrix_path is None)
-            self.pcoa_path = pcoa_path
-            self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basedir(self.pcoa_path.replace('_pcoa.csv.gz', '_abundance_dict.p.bz'))) 
-        else:
-            raise NotImplementedError
-        
+        self.island_list = island_list
         self.output_dir = output_dir
         self.cache_dir_18s = cache_dir_18s
         self.input_dir_18s = input_dir_18s
@@ -1216,7 +1358,33 @@ class ComputeClassificationAgreement:
         self.temp_dir_18s = temp_dir_18s
         self.genus = genus
         self.snp_class_df = self._load_snp_classification_df()
-        self.island_list = island_list
+        if self.distance_method in ['braycurtis', 'jaccard']:
+            assert(pcoa_path is None and distance_matrix_path is not None)
+            self.distance_matrix_path = distance_matrix_path
+            self.pcoa_path = self.distance_matrix_path.replace('.dist.gz', f'_{self.island_list}_pcoa.csv.gz')
+            self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basename(self.distance_matrix_path.replace('.dist.gz', '_abundance_dict.p.bz'))) 
+        elif self.distance_method in ['unifrac', 'PCA']:
+            assert(pcoa_path is not None and distance_matrix_path is None)
+            self.pcoa_path = pcoa_path
+            if self.distance_method == 'unifrac':
+                # A distance matrix is available for the 'unifrac' but not for PCA obviously.
+                # We can use this for calculating some hierarchical clustering.
+                # TODO actually turn this into a distance matrix df below.
+                self.distance_matrix_path = pcoa_path.replace('_pcoa.csv.gz', '.dist.gz')
+                self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basename(self.pcoa_path.replace('_pcoa.csv.gz', '_abundance_dict.p.bz'))) 
+                self.results_path = self.pcoa_path.replace('_pcoa.csv.gz', '_classification_result.txt')
+                self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_dict.p.bz'))
+                self.kmeans_raw_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_raw_dict.p.bz'))
+                self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_agreement_dict.p.bz'))
+            else:
+                self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basename(self.pcoa_path.replace('_pca.csv.gz', '_abundance_dict.p.bz'))) 
+                self.results_path = self.pcoa_path.replace('_pca.csv.gz', '_classification_result.txt')
+                self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pca.csv.gz', '_kmeans_dict.p.bz'))
+                self.kmeans_raw_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pca.csv.gz', '_kmeans_raw_dict.p.bz'))
+                self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pca.csv.gz', '_agreement_dict.p.bz'))
+        else:
+            raise NotImplementedError
+        
         # Use the meta_info_table produced by output_tables.py
         self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
         self.meta_info_df = self._get_meta_info_df()
@@ -1226,23 +1394,32 @@ class ComputeClassificationAgreement:
         if self.distance_method in ['braycurtis', 'jaccard']:
             # Then we need to strip out the samples that do not belong to the islands
             # specified in the island_list
-            dist_df = pd.read_csv(self.distance_matrix_path, index_col=0, header=None)
+            try:
+                dist_df = pd.read_csv(self.distance_matrix_path, index_col=0, header=None).astype(float)
+                dist_df.columns = dist_df.index
+            except ValueError:
+                dist_df = pd.read_csv(self.distance_matrix_path, index_col=0).astype(float)
             # Create the abundance df from the abundance dictionary so that we can compute 
             # clusters based on the raw count data.
             # Same as the distance matrix we will need to drop the samples that aren't found
-            self.abundance_df = pd.from_dict(compress_pickle.load(self.abundance_dict_path, orient='index'))
-            dist_df.columns = dist_df.index
+            self.abundance_df = pd.DataFrame.from_dict(compress_pickle.load(self.abundance_dict_path), orient='index')
+            self.abundance_df[pd.isna(self.abundance_df)] = 0
+            
             drop_list = []
             if self.island_list == 'original_three':
                 island_list = ['I06', 'I10', 'I15']
             elif self.island_list == 'ten_plus_one':
                 island_list = ['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15']
+            else:
+                raise NotImplementedError
             samples_from_islands = self.meta_info_df[self.meta_info_df['ISLAND#'].isin(island_list)].index
             to_drop = [_ for _ in dist_df.index if _ not in samples_from_islands]
             dist_df.drop(index=to_drop, columns=to_drop, inplace=True)
             self.abundance_df.drop(index=to_drop, inplace=True)
             # Now we have the dist_df in shape and we should calculate the pcoa
+            print('executing pcoa')
             pcoa_result = pcoa(dist_df)
+            print('completed pcoa')
             self.pcoa_df = pcoa_result.samples
             self.pcoa_df.index = dist_df.index
             self.pcoa_df.index.name = 'sample'
@@ -1255,21 +1432,30 @@ class ComputeClassificationAgreement:
             self.pcoa_df.to_csv(self.pcoa_path)
             self.pcoa_df = self._get_pcoa_df(pcoa_path=self.pcoa_path)
             
+            # To keep things simple when checking the agreement results it will be helpful if the index
+            # is the same for both the abundance_df and the pcoa_df so that the classification labels
+            # are in the same order.
+            self.abundance_df = self._curate_abundance_df(self.abundance_df)
+            self.abundance_df = self.abundance_df.reindex(self.pcoa_df.index)
+            
             # Finally the results path should
             self.results_path = self.distance_matrix_path.replace('.dist.gz', f'_{self.island_list}_classification_result.txt')
             self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_kmeans_dict.p.bz'))
+            self.kmeans_raw_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_kmeans_raw_dict.p.bz'))
             self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.distance_matrix_path).replace('.dist.gz', f'_{self.island_list}_agreement_dict.p.bz'))
 
         elif self.distance_method in ['unifrac', 'PCA']:
             self.pcoa_df = self._get_pcoa_df(pcoa_path=self.pcoa_path)
-            self.results_path = self.pcoa_path.replace('_pcoa.csv.gz', '_classification_result.txt')
-            self.kmeans_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_dict.p.bz'))
-            self.kmeans_raw_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_kmeans_raw_dict.p.bz'))
-            self.agreement_dict_pickle_path = os.path.join(self.cache_dir_18s, ntpath.basename(self.pcoa_path).replace('_pcoa.csv.gz', '_agreement_dict.p.bz'))
+            
             # Also get the abundance dataframe
             # In theory the samples should already have been removed that aren't in the island list
-            self.abundance_df = pd.from_dict(compress_pickle.load(self.abundance_dict_path, orient='index'))
-            assert(set(self.pcoa_df.index) == set(self.abundance_df.index))
+            self.abundance_df = pd.DataFrame.from_dict(compress_pickle.load(self.abundance_dict_path), orient='index')
+            self.abundance_df[pd.isna(self.abundance_df)] = 0
+            # To keep things simple when checking the agreement results it will be helpful if the index
+            # is the same for both the abundance_df and the pcoa_df so that the classification labels
+            # are in the same order.
+            self.abundance_df = self._curate_abundance_df(self.abundance_df)
+            self.abundance_df = self.abundance_df.reindex(self.pcoa_df.index)
         else:
             raise NotImplementedError
         # Dict for holding the kmeans conducted on the pcoa
@@ -1299,11 +1485,39 @@ class ComputeClassificationAgreement:
     def _get_meta_info_df(self):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
 
+    def _curate_abundance_df(self, abundance_df):
+        """
+        Drop tech reps and convert readsets to sample-id
+        """
+
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in abundance_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        abundance_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in abundance_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        
+        abundance_df.index = sample_id_list
+        return abundance_df
+
     def _get_pcoa_df(self, pcoa_path):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
-        pcoa_df = pd.read_csv(pcoa_path)
-        pcoa_df.set_index('sample', drop=True, inplace=True)
+        try:
+            pcoa_df = pd.read_csv(pcoa_path, index_col=0)
+        except Exception as e:
+            foo = 'bar'
+        # try:
+        #     pcoa_df.set_index('sample', drop=True, inplace=True)
+        # except KeyError:
+        #     pass
         # Get rid of the proportion explained
         pcoa_df = pcoa_df.iloc[:-1,:]
         # Get rid of tech replicates and convert readset to sample-id
@@ -1351,75 +1565,90 @@ class ComputeClassificationAgreement:
         # and that the smaller level will generally be the k of the SNP data, then we can work with
         # quite a large k. let's start with k=20 to start with
         
+        # A dataframe that will hold the results of the clustering from the vairous methods
+        classification_df = pd.DataFrame(index=self.abundance_df.index)
         # KMEANS Clustering on PCoA
         # Let's implement a cache for this so that this effort is not wasted
-        if os.path.exists(self.kmeans_dict_pickle_path):
+        if os.path.exists(self.kmeans_dict_pickle_path + 'poo'):
             # Get cached kmeans dict
             self.kmeans_dict = compress_pickle.load(self.kmeans_dict_pickle_path)
+            for k in k_range:
+                kmeans = self.kmeans_dict[k]
+                classification_df[f'kmeans_pcoa_{k}'] = kmeans.labels_
         else:
             # Compute kmeans from scratch and pickle out
-            
             for k in k_range:
-                kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full', n_jobs=1).fit(self.pcoa_df)
+                kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full').fit(self.pcoa_df)
                 self.kmeans_dict[k] = kmeans
+                classification_df[f'kmeans_pcoa_{k}'] = kmeans.labels_
             compress_pickle.dump(self.kmeans_dict, self.kmeans_dict_pickle_path)
         
-        # KMEANS Clustering on abundance df
-        if os.path.exists(self.kmeans_raw_dict_pickle_path):
-            # Get cached kmeans dict
-            self.kmeans_raw_dict = compress_pickle.load(self.kmeans_raw_dict_pickle_path)
-        else:
-            # Compute kmeans from scratch and pickle out
-            for k in k_range:
-                kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full', n_jobs=1).fit(self.abundance_df)
-                self.kmeans_raw_dict[k] = kmeans
-            compress_pickle.dump(self.kmeans_raw_dict, self.kmeans_raw_dict_pickle_path)
+        # # KMEANS Clustering on abundance df
+        # # Only do this if we are working with 'unifrac' as it will just be doubling work to do
+        # # it with braycurtis too a we will be doing exactly the same calculations
+        # # if self.distance_method == 'unifrac':
+        # if os.path.exists(self.kmeans_raw_dict_pickle_path):
+        #     # Get cached kmeans dict
+        #     try:
+        #         self.kmeans_raw_dict = compress_pickle.load(self.kmeans_raw_dict_pickle_path)
+        #     except EOFError:
+        #         for k in k_range:
+        #             kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full', n_jobs=1).fit(self.abundance_df)
+        #             self.kmeans_raw_dict[k] = kmeans
+        #             classification_df[f'kmeans_abund_{k}'] = kmeans.labels_
+        #         try:
+        #             compress_pickle.dump(self.kmeans_raw_dict, self.kmeans_raw_dict_pickle_path)
+        #         except TypeError as e:
+        #             pass
+        #     for k in k_range:
+        #         kmeans = self.kmeans_raw_dict[k]
+        #         classification_df[f'kmeans_abund_{k}'] = kmeans.labels_
+        # else:
+        #     # Compute kmeans from scratch and pickle out
+        #     for k in k_range:
+        #         kmeans = KMeans(n_clusters=k, n_init=10, algorithm='full').fit(self.abundance_df)
+        #         self.kmeans_raw_dict[k] = kmeans
+        #         classification_df[f'kmeans_abund_{k}'] = kmeans.labels_
+        #     try:
+        #         compress_pickle.dump(self.kmeans_raw_dict, self.kmeans_raw_dict_pickle_path)
+        #     except TypeError:
+        #         # Not sure what is causing this so we just won't dump it out if we have an issue
+        #         pass
 
-        # Here we have the kmeans calculated and we can now compute agreement to the snp classifications
-        # Create a kmeans df, reindex to the snp_class_df
-        # TODO uncomment to use Adjusted Rand Index
-        # Then pass in the k columns
-        kmeans_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_dict.items()})
-        kmeans_raw_df = pd.from_dict({k: v.labels_, for k, v in self.kmeans_raw_dict.items()})
+        # # AffinityPropagation
+        # ap_pcoa = AffinityPropagation().fit(self.pcoa_df)
+        # classification_df[f'affinitiyp_pcoa'] = ap_pcoa.labels_
+        # # if self.distance_method == 'unifrac':
+        # ap_abund = AffinityPropagation().fit(self.abundance_df)
+        # classification_df[f'affinitiyp_abund'] = ap_pcoa.labels_
         
-        kmeans_df.index = self.pcoa_df.index
-        kmeans_raw_df.index = self.pcoa_df.index
-
         # We only want to work with the samples that are found in both snp and 18S samples
-        samples_in_common = list(set(kmeans_df.index).intersect(set(self.snp_class_df.index)))
+        samples_in_common = list(set(classification_df.index).intersection(set(self.snp_class_df.index)))
         self.snp_class_df = self.snp_class_df.reindex(index=samples_in_common)
-        kmeans_df = kmeans_df.reindex(index=samples_in_common)
-        kmeans_raw_df = kmeans_raw_df.reindex(index=samples_in_common)
+        classification_df = classification_df.reindex(index=samples_in_common)
         
         max_agreement = 0
-        max_k = None
+        # max_agreement_old = 0
         max_method = None
-        for k in k_range:
-            agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_df[k])
-            # agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
+        for classification_set in list(classification_df):
+            # The ARI is great but its also useful to know exactly what percent of agreement you're getting
+            # agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], classification_df[classification_set])
+            agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
             if agreement > max_agreement:
                 max_agreement = agreement
-                max_k = k
-                max_method = 'kmeans_pcoa'
+                max_method = classification_set
+                # max_agreement_old = agreement_old
             # self.agreement_dict[k] = agreement
         # self.agreement_dict['max'] = max(self.agreement_dict.values())
         # compress_pickle.dump(self.agreement_dict, self.agreement_dict_pickle_path)
 
-        for k in k_range:
-            agreement = metrics.adjusted_rand_score(self.snp_class_df['label'], kmeans_raw_df[k])
-            # agreement = AgreementCalculator(lab_ser_one=pd.Series(self.kmeans_dict[k].labels_, index=self.pcoa_df.index, name='label'), lab_ser_two=self.snp_class_df['label'], cache_dir_18s=self.cache_dir_18s, temp_dir_18s=self.temp_dir_18s, silence=True).calculate_agreement()
-            if agreement > max_agreement:
-                max_agreement = agreement
-                max_k = k
-                max_method = 'kmeans_raw'
-
         # For the time being we will write out the max agreement the cluster method used to obtain it and the 
         # number of classifications
         with open(self.results_path, 'w') as f:
-            f.write(f'{max_agreement:.2f},{max_k},{max_method}}')
+            f.write(f'{max_agreement:.2f},{max_method}')
 
         # Here we are done.
-        return max_agreement, max_k
+        return max_agreement, max_method
 
 class OneClusterCol:
     def __init__(self, genus, dist_method, misco, masco, ax, parent):
@@ -1725,7 +1954,7 @@ class OneClusterCol:
         
 
 if __name__ == "__main__":
-    c = Cluster18S()
+    # c = Cluster18S()
     # c.visalise_snp_new_clusters()
     # c.category_scores()
     # c.check_old_clustering_agreement()
@@ -1735,23 +1964,7 @@ if __name__ == "__main__":
     # that we used as a sanity check to see that we could still get good
     # classification agreement at a smaller number of islands.
     # c.check_original_three_agreement()
-    # This will do the clustering classification results for the 
-    # parameter optimisation
+    c = CheckPwrRai()
+    c.plot()
 
-    # TODO
-    # Run permanovas of the dist matrices with meta data for site, island, 
-    # sequencing depth pre normalisation, richness post-normalisation.
-    # Do this for both the 18S and the SNP
-    # We will presumably need a distance matrix to pass in and then a meta info df.
-
-    # TODO check clustering of between old poc and new poc.
-    # DONE
-
-    # TODO, plot up ordination figures one for poc and one for por
-    # comparing between the 18S structure and the SNP structure.
-    # 2 ordinations for the SNP (at low and high k)
-    # and 4 for the 18S, one for each dist method also at high and low k.
-    # We can use the in detail cluster figs for the 18S to choose which can be representative.
-    # DONE
-
-    # TODO autocorrelation between different 18S distance methods. for k=3 
+    
