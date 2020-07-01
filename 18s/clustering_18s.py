@@ -1037,6 +1037,12 @@ class Cluster18S(EighteenSBase):
 class CheckPwrRai(EighteenSBase):
     """
     We are seeing some very strange disagreement between the PWR and the RAI normalisation in unifrac
+    It seems like this was something going wrong in the ms_figure and agreement calculation scripting.
+    I'm walking away from that now.
+    We want to plot a network of the sequences. We will work with the misco and masco values used
+    here to generate a network that we will attempt to colour according to the the snp classifications.
+    This way we can hopefully see those sequnces that can be used to inform the classification
+    and those that cannot.
     """
     def __init__(self, misco='0.01', masco='17'):
         super().__init__()
@@ -1063,6 +1069,80 @@ class CheckPwrRai(EighteenSBase):
         self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
         self.snp_classification = self.poc_snp_classifications
         self.agreement_list = []
+        # To make the networks we will need to work with the abundance df
+        # The abundance df can be got from the cache.
+        # We will work with the pwr pcoa as this seems to be getting better agreement (slightly) than the rai
+        self.abundance_dict_path = os.path.join(self.cache_dir, ntpath.basename(self.pcoa_path_pwr.replace('_pcoa.csv.gz', '_abundance_dict.p.bz')))
+        # To keep things simple when checking the agreement results it will be helpful if the index
+        # is the same for both the abundance_df and the pcoa_df so that the classification labels
+        # are in the same order.
+        self.abundance_df = self._curate_abundance_df(self.abundance_dict_path)
+        self.abundance_df = self.abundance_df.reindex(self.pcoa_df_pwr.index)
+
+    def make_network(self):
+        """
+        Make a network from the sequences contained in the abundance_df. These are the sequences that the ordinations
+        are being made with. We will colour them according to the snp classifications. For each sequence, we will
+        get the cummulative abundance of the sqeuence and we will split this abundnace up by the different categories
+        I am excited for this. It will be a new way to look at the data.
+        Hopefully we will be able to see specific areas of the network that are specific to certain
+        classifications. We will hopefully also be able to see areas that are not specific. We'll then in theory
+        be able to imporove the ordination by selecting for the good sequences and throwing out the bad.
+        We will hopefully be able to identify a pattern for doing this and possibly we will be able to use something
+        like MED.
+        """
+        # First let's check that we can get a black and white network plotted up using the fasta2net.
+        # This may not be so simple.
+        # Currently the fasta2net works by accepting a names and fasta pairing so we can start with this.
+        
+    
+    def plot(self):
+        # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
+        # at k==3
+        # Plot up the pwr row
+        self._plot_row(
+            labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
+            pc2_ax_kmeans_cats = self.ax_arr[0,0], pc3_ax_kmeans_cats = self.ax_arr[0,1], 
+            pc2_ax_snp_cats = self.ax_arr[0,2], pc3_ax_snp_cats = self.ax_arr[0,3], norm_m='pwr'
+            )
+
+        # Plot up the rai row
+        self._plot_row(
+            labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
+            pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
+            pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
+            )
+
+        plt.tight_layout()
+        
+        # Append the agreement results to the name
+        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}_{self.agreement_list[1]:.2f}.png')
+        plt.savefig(self.fig_path, dpi=600)
+        
+
+    def _curate_abundance_df(self, abundance_dict_path):
+        """
+        Drop tech reps and convert readsets to sample-id
+        """
+        # Read in the abundance df
+        abundance_df = pd.DataFrame.from_dict(compress_pickle.load(abundance_dict_path), orient='index')
+        abundance_df[pd.isna(abundance_df)] = 0
+        # Get rid of tech replicates and convert readset to sample-id
+        drop_list = []
+        for ind in abundance_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        abundance_df.drop(index=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in abundance_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        
+        abundance_df.index = sample_id_list
+        return abundance_df
 
     def _get_meta_info_df(self):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
@@ -1095,62 +1175,7 @@ class CheckPwrRai(EighteenSBase):
         pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
         pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
 
-    def plot(self):
-        # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
-        # at k==3
-        # Plot up the pwr row
-        self._plot_row(
-            labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
-            pc2_ax_kmeans_cats = self.ax_arr[0,0], pc3_ax_kmeans_cats = self.ax_arr[0,1], 
-            pc2_ax_snp_cats = self.ax_arr[0,2], pc3_ax_snp_cats = self.ax_arr[0,3], norm_m='pwr'
-            )
-
-        # Plot up the rai row
-        self._plot_row(
-            labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
-            pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
-            pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
-            )
-
-        
-
-
-
-        # for k in self.rai_kmeans_labels.unique():
-        #     samples_rai = self.rai_kmeans_labels[self.rai_kmeans_labels==k].index
-            
-        #     self.ax_arr[1,0].scatter(self.pcoa_df_rai.loc[samples_rai, 'PC1'], self.pcoa_df_rai.loc[samples_rai, 'PC2'])
-        #     self.ax_arr[1,1].scatter(self.pcoa_df_rai.loc[samples_rai, 'PC1'], self.pcoa_df_rai.loc[samples_rai, 'PC3'])
-        
-        # samples_in_common = list(set(self.snp_classification.index).intersection(set(self.rai_kmeans_labels.index)))
-        # self.rai_kmeans_labels = self.rai_kmeans_labels.reindex(index=samples_in_common)
-        # snp_classification_reindexed = self.snp_classification.reindex(index=samples_in_common)
-        
-        # agreement = AgreementCalculator(lab_ser_one=self.rai_kmeans_labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
-        # self.agreement_list.append(agreement)
-        # self.ax_arr[1,0].set_title(f'rai, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-        # self.ax_arr[1,1].set_title(f'rai, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-
-        # # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
-        # samples_not_in_common = [_ for _ in self.pcoa_df_rai.index if _ not in self.snp_classification.index]
-        # self.ax_arr[1,2].scatter(self.pcoa_df_rai.loc[samples_not_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_not_in_common, 'PC2'], c='lightgrey')
-        # self.ax_arr[1,3].scatter(self.pcoa_df_rai.loc[samples_not_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_not_in_common, 'PC3'], c='lightgrey')
-        # for svd in self.snp_classification['label'].unique():
-        #     of_svd = self.snp_classification[self.snp_classification['label']==svd]
-        #     samples_in_common = [_ for _ in self.pcoa_df_rai.index if _ in of_svd.index]
-        #     self.ax_arr[1,2].scatter(self.pcoa_df_rai.loc[samples_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_in_common, 'PC2'])
-        #     self.ax_arr[1,3].scatter(self.pcoa_df_rai.loc[samples_in_common, 'PC1'], self.pcoa_df_rai.loc[samples_in_common, 'PC3'])
-
-        # self.ax_arr[1,2].set_title(f'rai, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-        # self.ax_arr[1,3].set_title(f'rai, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-        
-        plt.tight_layout()
-        
-        # Append the agreement results to the name
-        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}_{self.agreement_list[1]:.2f}.png')
-        plt.savefig(self.fig_path, dpi=600)
-        foo = 'bar'
-
+    
     def _get_pcoa_df(self, pcoa_path):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
