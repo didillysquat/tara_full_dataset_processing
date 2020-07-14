@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 """
 This script will concern the clustring/categorisation work that we will do
 on both the 18S and the SNP data.
@@ -35,6 +37,7 @@ import ntpath
 from sklearn import metrics
 # I added fasta2net to the PYTHONPATH in the .bashrc
 from fasta2net import Fasta2Net
+from collections import defaultdict
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1076,7 +1079,7 @@ class CheckPwrRai(EighteenSBase):
         # To keep things simple when checking the agreement results it will be helpful if the index
         # is the same for both the abundance_df and the pcoa_df so that the classification labels
         # are in the same order.
-        self.abundance_df = self._curate_abundance_df(self.abundance_dict_path)
+        self.abundance_df, self.abundance_dict = self._curate_abundance_df(self.abundance_dict_path)
         self.abundance_df = self.abundance_df.reindex(self.pcoa_df_pwr.index)
 
     def make_network(self):
@@ -1093,8 +1096,19 @@ class CheckPwrRai(EighteenSBase):
         """
         # First let's check that we can get a black and white network plotted up using the fasta2net.
         # This may not be so simple.
-        # Currently the fasta2net works by accepting a names and fasta pairing so we can start with this.
-        
+        # We have rewritten Fasta2Net so that it will take an abundance_dict as input
+        # Currently our abundance dictionary is a dictionary of dictionaries where first key is the readset name
+        # and second key is nucleotide sequence. We want to pass in a single abundance dictionary to Fasta2Net (tostart)
+        # where it key is sequence and value is cummulative relative abundance
+        net_abund_dict = defaultdict(float)
+        for k, v in self.abundance_dict.items():
+            tot = sum(v.values())
+            for k_, v_ in v.items():
+                net_abund_dict[k_] += v_/tot
+        net_abund_dict = {k: int(v*1000) for k, v in net_abund_dict.items()}
+        net = Fasta2Net(abundance_dictionary=net_abund_dict, output_dir=os.path.join(self.output_dir_18s, 'network'), size_scaler=0.1)
+        net.make_network()
+        foo = 'bar'
     
     def plot(self):
         # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
@@ -1125,7 +1139,8 @@ class CheckPwrRai(EighteenSBase):
         Drop tech reps and convert readsets to sample-id
         """
         # Read in the abundance df
-        abundance_df = pd.DataFrame.from_dict(compress_pickle.load(abundance_dict_path), orient='index')
+        abundance_dict = compress_pickle.load(abundance_dict_path)
+        abundance_df = pd.DataFrame.from_dict(abundance_dict, orient='index')
         abundance_df[pd.isna(abundance_df)] = 0
         # Get rid of tech replicates and convert readset to sample-id
         drop_list = []
@@ -1136,13 +1151,20 @@ class CheckPwrRai(EighteenSBase):
         # Now drop the rows and columns
         abundance_df.drop(index=drop_list, inplace=True)
 
+        # Drop in the dict too
+        for k in drop_list:
+            del abundance_dict['key']
+
         # Now we need to convert these to sample-id format.
         sample_id_list = []
         for ind in abundance_df.index:
             sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
-        
         abundance_df.index = sample_id_list
-        return abundance_df
+
+        # Convert dict too
+        abundance_dict = {self.fastq_info_df.at[k, 'sample-id'] : v for k, v in abundance_dict.items()}
+        
+        return abundance_df, abundance_dict
 
     def _get_meta_info_df(self):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
@@ -1990,6 +2012,6 @@ if __name__ == "__main__":
     # classification agreement at a smaller number of islands.
     # c.check_original_three_agreement()
     c = CheckPwrRai()
-    c.plot()
+    c.make_network()
 
     
