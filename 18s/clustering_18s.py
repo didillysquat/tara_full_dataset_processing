@@ -1100,16 +1100,42 @@ class CheckPwrRai(EighteenSBase):
         # Currently our abundance dictionary is a dictionary of dictionaries where first key is the readset name
         # and second key is nucleotide sequence. We want to pass in a single abundance dictionary to Fasta2Net (tostart)
         # where it key is sequence and value is cummulative relative abundance
-        net_abund_dict = defaultdict(float)
-        for k, v in self.abundance_dict.items():
-            tot = sum(v.values())
-            for k_, v_ in v.items():
-                net_abund_dict[k_] += v_/tot
-        net_abund_dict = {k: int(v*1000) for k, v in net_abund_dict.items()}
-        net = Fasta2Net(abundance_dictionary=net_abund_dict, output_dir=os.path.join(self.output_dir_18s, 'network'), size_scaler=0.1)
+        net_abund_dict, c_dist_dict = self._make_fasta2net_abundance_and_color_dicts()
+        net = Fasta2Net(abundance_dictionary=net_abund_dict, output_dir=os.path.join(self.output_dir_18s, 'network'), size_scaler=0.1, color_distribution_dict=c_dist_dict)
         net.make_network()
         foo = 'bar'
     
+    def _make_fasta2net_abundance_and_color_dicts(self):
+        """
+        Create an abundance dictionary to be used in the network generation
+        key = nuc seuqnece, value = value (cumrelabund * 1000)
+        Also generate a colour disribution dictionary for use in the network
+        key = nuc sequence, value is a list of the distribution of the sequence
+        across as many categories as we want. Given that the categories we want
+        to work with here are the SNP classifications the number of classifications
+        will be the number of classification that cover the samples we are dealing with plus
+        one for those samples that done have an snp classification
+        """
+        classification_index_dict = {classification:ind for ind, classification in enumerate(self.snp_classification['label'].unique())}
+        classification_index_dict['none'] = len(classification_index_dict.keys())
+        net_abund_dict = defaultdict(float)
+        classification_distribution_dict = defaultdict(self.class_ddict_constructor)
+        for k, v in self.abundance_dict.items(): # For each sample
+            try:
+                snp_classification = self.snp_classification.at[k, 'label']
+            except KeyError:
+                snp_classification = 'none'
+            classification_index = classification_index_dict[snp_classification]
+            tot = sum(v.values())
+            for k_, v_ in v.items(): # sequence, absolute abundance pairing
+                rel_abund = v_/tot
+                net_abund_dict[k_] += rel_abund
+                classification_distribution_dict[k_][classification_index] += rel_abund
+        return {k: int(v*1000) for k, v in net_abund_dict.items()}, classification_distribution_dict
+
+    def class_ddict_constructor(self):
+        return [0 for i in range( len(self.snp_classification['label'].unique()) + 1 )]
+
     def plot(self):
         # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
         # at k==3
