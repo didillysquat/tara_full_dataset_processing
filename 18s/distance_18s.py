@@ -56,7 +56,7 @@ class EighteenSDistance(EighteenSBase):
         self, host_genus, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis',
         remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, 
-        most_abund_seq_cutoff=0, exclude_no_use_samples=True, island_list=None):
+        most_abund_seq_cutoff=0, exclude_no_use_samples=True, island_list=None, inv_misco=1, sample_list=None):
         
         self.dist_method_18S = dist_method_18S
         self.remove_maj_seq = remove_majority_sequence
@@ -65,16 +65,20 @@ class EighteenSDistance(EighteenSBase):
         self.use_replicates = use_replicates
         self.exclude_no_use_samples = exclude_no_use_samples
         self.samples_at_least_threshold = samples_at_least_threshold
+        self.inv_misco = inv_misco
         self.most_abund_seq_cutoff = most_abund_seq_cutoff
         self.normalisation_method = normalisation_method
         self.approach = approach
         self.genus = host_genus
-        self.island_list = island_list
-        # if self.most_abund_seq_cutoff > 0 and self.samples_at_least_threshold != 0:
-        #     print('Both samples_at_least_threshold and most_abund_seq_cutoff have been passed.')
-        #     print('most_abund_seq_cutoff will be used and samples_at_least_threshold will be ignored.')
-        #     print(f'uing most_abund_seq_cutoff = {self.most_abund_seq_cutoff}')
-        #     self.samples_at_least_threshold = 0
+        if island_list == 'original_three':
+            self.island_list = ['I06', 'I10', 'I15']
+            self.island_string = 'original_three'
+        elif island_list == 'ten_plus_one':
+            self.island_list = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
+            self.island_string = 'ten_plus_one'
+        else:
+            self.island_list = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island_list.split(',')]
+            self.island_string = "_".join(self.island_list)
         self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
         if self.most_abund_seq_cutoff !=0 and self.most_abund_seq_cutoff < self.min_num_distinct_seqs_per_sample:
             raise RuntimeError(f'most_abund_seq_cutoff ({self.most_abund_seq_cutoff}) <' 
@@ -102,9 +106,9 @@ class EighteenSDistance(EighteenSBase):
         f'{snp_distance_type}_{self.dist_method_18S}_' \
         f'{self.approach}_{self.normalisation_abundance}_{self.normalisation_method}_' \
         f'{self.only_snp_samples}_{self.samples_at_least_threshold}_' \
-        f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}'
+        f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}_{self.inv_misco}'
         if self.island_list is not None:
-            self.unique_string += f'_{self.island_list}'
+            self.unique_string += f'_{self.island_string}'
         self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
         
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
@@ -243,14 +247,15 @@ class EighteenSDistance(EighteenSBase):
 
         # Then by island list
         if self.island_list is not None:
-            if self.island_list == 'original_three':
-                df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
-            elif self.island_list == 'ten_plus_one':
-                df = df[df['ISLAND#'].isin(['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15'])]
-            elif self.island_list == 'first_three':
-                df = df[df['ISLAND#'].isin(['I01', 'I02', 'I03'])]
-            else:
-                raise NotImplementedError
+            df = df[df['ISLAND#'].isin(self.island_list)]
+            # if self.island_list == 'original_three':
+            #     df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
+            # elif self.island_list == 'ten_plus_one':
+            #     df = df[df['ISLAND#'].isin(['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15'])]
+            # elif self.island_list == 'first_three':
+            #     df = df[df['ISLAND#'].isin(['I01', 'I02', 'I03'])]
+            # else:
+            #     raise NotImplementedError
         
         # Finally, we only want the list of the readsets, so get the indices from the df
         return list(df.index)
@@ -265,9 +270,9 @@ class EighteenSDistance(EighteenSBase):
         Because we may want to do some analyses to investigate what effect the various cutoffs
         and normalisation methods had on the abundances, we will pickle out the created dictionaries.
         """
-        if self.samples_at_least_threshold > 0: # TODO plot cutoff against mean seqs remaining and std.
+        if self.samples_at_least_threshold > 0 or self.inv_misco < 1: # TODO plot cutoff against mean seqs remaining and std.
             seq_to_sample_occurence_dict = self._get_seq_to_sample_occurence_dict()
-            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if v > self.samples_at_least_threshold}
+            threshold_set = {k for k, v in seq_to_sample_occurence_dict.items() if ((v > self.samples_at_least_threshold) and (v < self.inv_misco))}
         dict_to_create_df_from = {}
         print(f'Creating abundance_df')
         # NB there is one sample that only had one sequence in the consolidated_host_seqs_abund_dict
@@ -288,7 +293,7 @@ class EighteenSDistance(EighteenSBase):
                 del consolidated_host_seqs_abund_dict[most_abund_sequence]
             
             # if working with samples_at_least_threshold, screen out rare seqs here
-            if self.samples_at_least_threshold > 0:
+            if self.samples_at_least_threshold > 0 or self.inv_misco < 1:
                 consolidated_host_seqs_abund_dict = {k: v for k, v in consolidated_host_seqs_abund_dict.items() if k in threshold_set}
             if self.most_abund_seq_cutoff > 0:
                 sorted_dict_keys = sorted(consolidated_host_seqs_abund_dict, key=consolidated_host_seqs_abund_dict.get, reverse=True)[:self.most_abund_seq_cutoff]
@@ -1084,6 +1089,10 @@ if __name__ == "__main__":
     must be found in for it to be considered part of the calculation of the distance matrices. E.g. at 0.5, a
     sequence must be found in half of the readsets we are working with for the ordination. [0.0]
 
+    # TODO
+    inv_misco = This is essentially an inverse to the samples_at_least_threshold. We will implement this under the rationale
+    that the very common sequences are not informative, and rather the less abundant sequences may be the more informative [1.0]
+
     remove_majority_sequence = Whether to remove the most abundant sequence from each of the readsets before
     calculating the distance ordinations.
 
@@ -1206,14 +1215,15 @@ if __name__ == "__main__":
     # 'original_three' = [6, 10, 15]
     # 'ten_plus_one' = [1,2,3,4,5,6,7,8,9,10,15]
     # 'first_three' = [1, 2, 3]
-
-    # dist = EighteenSDistance(
-    #     host_genus='Pocillopora', remove_majority_sequence=True, 
-    #     exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
-    #     snp_distance_type='biallelic', dist_method_18S='braycurtis', approach='dist',
-    #     normalisation_abundance=None, normalisation_method='rai',  only_snp_samples=False, samples_at_least_threshold=0.08,
-    #     most_abund_seq_cutoff=200, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='original_three'
-    #     ).make_and_plot_dist_and_pcoa()
+    
+    # TODO we are here. We need to implement readset lists in distance_18s.py
+    dist = EighteenSDistance(
+        host_genus='Pocillopora', remove_majority_sequence=True, 
+        exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+        snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+        normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=0.01,
+        most_abund_seq_cutoff=17, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='7,8,15', inv_misco=0.95
+        ).make_and_plot_dist_and_pcoa()
 
     # TODO code up an Islands list input so that we limit to only certain islands. This way we
     # can limit ourselves to the original three islands and then later to the islands that the

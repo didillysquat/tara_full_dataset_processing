@@ -38,6 +38,7 @@ from sklearn import metrics
 # I added fasta2net to the PYTHONPATH in the .bashrc
 from fasta2net import Fasta2Net
 from collections import defaultdict
+from distance_18s import EighteenSDistance
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1046,30 +1047,47 @@ class CheckPwrRai(EighteenSBase):
     here to generate a network that we will attempt to colour according to the the snp classifications.
     This way we can hopefully see those sequnces that can be used to inform the classification
     and those that cannot.
+    NB This showed us that there is very little difference between rai and pwr.
+    NB we will implement dist_by as 'sample' or 'abundance'. If abundance, the sizes will be the cumulative relative abundances
+    in the given SVG classifications. If sample, then we will work with the number of samples the given sequence was found in.
     """
-    def __init__(self, misco='0.01', masco='17'):
+    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples'):
         super().__init__()
+        self.dist_by = dist_by
         self.misco = misco
+        self.inv_misco = inv_misco
         self.masco = masco
         self.meta_info_table_path = '/home/humebc/projects/tara/tara_full_dataset_processing/output/coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv'
         self.meta_info_df = self._get_meta_info_df()
-        
         self.genus = 'Pocillopora'
         self.distance_method = 'unifrac'
-        self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
-        self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
-        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr)
-        # self.pwr_var = self.pcoa_df_pwr.iloc[-1]
-        self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
-        # self.pwr_var = self.pcoa_df_rai.iloc[-1]
-        # self.pcoa_df_pwr = self.pcoa_df_pwr.iloc[:-1]
-        # self.pcoa_df_rai = self.pcoa_df_rai.iloc[:-1]
-        self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        self.n_clusters = 4
         self.fig_dir = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/figures'
-        self.n_clusters = 3
-        self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.n_clusters}.png')
+        if island == 'original_three':
+            self.island = 'original_three'
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.dist_by}'
+            # self.island = ['I06', 'I10', 'I15']
+        elif island == 'ten_plus_one':
+            self.island = 'ten_plus_one'
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.dist_by}'
+            # self.island = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
+        else:
+            self.island = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island.split(',')]
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}_{self.dist_by}'
+        
+        # self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
+        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island)
+        # self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
+        self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        
         self.pwr_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_pwr).labels_, index=self.pcoa_df_pwr.index, name='label')
-        self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
+        # self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
         self.snp_classification = self.poc_snp_classifications
         self.agreement_list = []
         # To make the networks we will need to work with the abundance df
@@ -1093,6 +1111,9 @@ class CheckPwrRai(EighteenSBase):
         be able to imporove the ordination by selecting for the good sequences and throwing out the bad.
         We will hopefully be able to identify a pattern for doing this and possibly we will be able to use something
         like MED.
+        NB some of the runnings are taking a really long time that looks like something has stalled.
+        As an alternative to the splits tree networks, we will modify the cntrl file so that
+        it can be used of PopArt. I actually think that this shouldn't be much extra effort at all.
         """
         # First let's check that we can get a black and white network plotted up using the fasta2net.
         # This may not be so simple.
@@ -1100,8 +1121,10 @@ class CheckPwrRai(EighteenSBase):
         # Currently our abundance dictionary is a dictionary of dictionaries where first key is the readset name
         # and second key is nucleotide sequence. We want to pass in a single abundance dictionary to Fasta2Net (tostart)
         # where it key is sequence and value is cummulative relative abundance
-        net_abund_dict, c_dist_dict = self._make_fasta2net_abundance_and_color_dicts()
-        net = Fasta2Net(abundance_dictionary=net_abund_dict, output_dir=os.path.join(self.output_dir_18s, 'network'), size_scaler=0.1, color_distribution_dict=c_dist_dict)
+        net_abund_dict, c_dist_dict, ordered_calssification_name_list = self._make_fasta2net_abundance_and_color_dicts()
+        net = Fasta2Net(abundance_dictionary=net_abund_dict, output_dir=os.path.join(self.output_dir_18s, 'network'), 
+        size_scaler=0.1, color_distribution_dict=c_dist_dict, fig_name=self.pop_art_fig_name, 
+        pop_art=True, ordered_calssification_name_list=ordered_calssification_name_list, dist_by=self.dist_by)
         net.make_network()
         foo = 'bar'
     
@@ -1118,6 +1141,8 @@ class CheckPwrRai(EighteenSBase):
         """
         classification_index_dict = {classification:ind for ind, classification in enumerate(self.snp_classification['label'].unique())}
         classification_index_dict['none'] = len(classification_index_dict.keys())
+        
+        ordered_calssification_name_list = sorted(classification_index_dict, key=classification_index_dict.get, reverse=False)
         net_abund_dict = defaultdict(float)
         classification_distribution_dict = defaultdict(self.class_ddict_constructor)
         for k, v in self.abundance_dict.items(): # For each sample
@@ -1129,9 +1154,17 @@ class CheckPwrRai(EighteenSBase):
             tot = sum(v.values())
             for k_, v_ in v.items(): # sequence, absolute abundance pairing
                 rel_abund = v_/tot
-                net_abund_dict[k_] += rel_abund
-                classification_distribution_dict[k_][classification_index] += rel_abund
-        return {k: int(v*1000) for k, v in net_abund_dict.items()}, classification_distribution_dict
+                if self.dist_by == 'abund':
+                    net_abund_dict[k_] += rel_abund
+                    classification_distribution_dict[k_][classification_index] += rel_abund
+                elif self.dist_by == 'samples':
+                    net_abund_dict[k_] += 1
+                    classification_distribution_dict[k_][classification_index] += 1
+                else:
+                    raise NotImplementedError
+        if self.dist_by == 'abund':
+            net_abund_dict = {k: int(v*1000) for k, v in net_abund_dict.items()}
+        return net_abund_dict, classification_distribution_dict, ordered_calssification_name_list
 
     def class_ddict_constructor(self):
         return [0 for i in range( len(self.snp_classification['label'].unique()) + 1 )]
@@ -1146,17 +1179,17 @@ class CheckPwrRai(EighteenSBase):
             pc2_ax_snp_cats = self.ax_arr[0,2], pc3_ax_snp_cats = self.ax_arr[0,3], norm_m='pwr'
             )
 
-        # Plot up the rai row
-        self._plot_row(
-            labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
-            pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
-            pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
-            )
+        # # Plot up the rai row
+        # self._plot_row(
+        #     labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
+        #     pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
+        #     pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
+        #     )
 
         plt.tight_layout()
         
         # Append the agreement results to the name
-        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}_{self.agreement_list[1]:.2f}.png')
+        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}.png')
         plt.savefig(self.fig_path, dpi=600)
         
 
@@ -1207,8 +1240,8 @@ class CheckPwrRai(EighteenSBase):
         
         agreement = AgreementCalculator(lab_ser_one=labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
         self.agreement_list.append(agreement)
-        pc2_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-        pc3_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        pc2_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
+        pc3_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
 
         # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
         samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
@@ -1220,17 +1253,31 @@ class CheckPwrRai(EighteenSBase):
             pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'])
             pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'])
 
-        pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
-        pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco}\nagreement={agreement:.2f}')
+        pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
+        pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
 
     
-    def _get_pcoa_df(self, pcoa_path):
+    def _get_pcoa_df(self, pcoa_path, island):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
         try:
             pcoa_df = pd.read_csv(pcoa_path, index_col=0)
-        except Exception as e:
             foo = 'bar'
+        except Exception as e:
+            dist = EighteenSDistance(
+            host_genus='Pocillopora', remove_majority_sequence=True, 
+            exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+            snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
+            normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=float(self.misco),
+            most_abund_seq_cutoff=int(self.masco), min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list=island, inv_misco=float(self.inv_misco)
+            )
+            dist.make_and_plot_dist_and_pcoa()
+            try:
+                pcoa_df = pd.read_csv(pcoa_path, index_col=0)
+            except Exception as e:
+                raise RunTimeError('pcoa file does not appear to exist')
+            # here we can make the pcoa file
+        
         # try:
         #     pcoa_df.set_index('sample', drop=True, inplace=True)
         # except KeyError:
@@ -1242,6 +1289,24 @@ class CheckPwrRai(EighteenSBase):
             foo = 'bar'
         # Get rid of tech replicates and convert readset to sample-id
         drop_list = []
+        # TODO we are here. We need to implement readset lists in distance_18s.py
+        # This is a cheeky bit of code I used to output the subsets of readsets from the ten plus one that I thought we could try working with.
+        # sub_one = pcoa_df[(pcoa_df['PC1'] > -0.02) & (pcoa_df['PC1'] < 0.02)]
+        # sub_two = sub_one[sub_one['PC3'] < -0.015]
+        # sub_three = sub_one[sub_one['PC3'] > -0.01]
+        # # Write these out 
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_one_readset_list.txt'),'w') as f:
+        #     for out_ind in sub_one.index:
+        #         f.write(f'{out_ind}\n')
+
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_two_readset_list.txt'),'w') as f:
+        #     for out_ind in sub_two.index:
+        #         f.write(f'{out_ind}\n')
+
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_three_readset_list.txt'),'w') as f:
+        #     for out_ind in sub_three.index:
+        #         f.write(f'{out_ind}\n')
+
         for ind in pcoa_df.index:
             if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
                 drop_list.append(ind)
@@ -2038,6 +2103,7 @@ if __name__ == "__main__":
     # classification agreement at a smaller number of islands.
     # c.check_original_three_agreement()
     c = CheckPwrRai()
+    c.plot()
     c.make_network()
 
     
