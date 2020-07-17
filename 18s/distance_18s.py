@@ -56,8 +56,8 @@ class EighteenSDistance(EighteenSBase):
         self, host_genus, exclude_secondary_seq_samples=True, samples_at_least_threshold=0.0, dist_method_18S='braycurtis',
         remove_majority_sequence=True, mafft_num_proc=6, normalisation_abundance=None, normalisation_method='pwr', approach='dist', 
         only_snp_samples=False, use_replicates=False, snp_distance_type='biallelic', min_num_distinct_seqs_per_sample=3, 
-        most_abund_seq_cutoff=0, exclude_no_use_samples=True, island_list=None, inv_misco=1, sample_list=None):
-        
+        most_abund_seq_cutoff=0, exclude_no_use_samples=True, island_list=None, inv_misco=1, sample_list=None, readset_list=None):
+        super().__init__()
         self.dist_method_18S = dist_method_18S
         self.remove_maj_seq = remove_majority_sequence
         self.exclude_secondary_seq_samples = exclude_secondary_seq_samples
@@ -70,15 +70,43 @@ class EighteenSDistance(EighteenSBase):
         self.normalisation_method = normalisation_method
         self.approach = approach
         self.genus = host_genus
+        # Use the meta_info_table produced by output_tables.py
+        self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
+        self.meta_info_df = self._get_meta_info_df()
         if island_list == 'original_three':
             self.island_list = ['I06', 'I10', 'I15']
             self.island_string = 'original_three'
         elif island_list == 'ten_plus_one':
             self.island_list = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
             self.island_string = 'ten_plus_one'
-        else:
+        elif island_list is not None:
             self.island_list = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island_list.split(',')]
             self.island_string = "_".join(self.island_list)
+        elif island_list is None:
+            self.island_list = None
+            self.island_string = ''
+        if readset_list is not None:
+            # Then we are being provided a set of sqeuences to work with
+            # We will allow these to be provided as well as the island list
+            # We will screen by the readset list. I.e. we will remove all readsets that aren't in
+            # this list.
+            if type(readset_list) == str:
+                # Then we have been provieded a path
+                with open(readset_list, 'r') as f:
+                    self.readset_list = [_.rstrip() for _ in f]
+                # Now check that all of the readsets are in the meta
+                for readset in self.readset_list:
+                    if readset not in self.meta_info_df.index:
+                        raise RuntimeError(f'readset {readset} not found in the meta_info_df')
+            elif type(readset_list) == list:
+                # Then we have been provided a list of readsets
+                self.readset_list = readset_list
+                for readset in self.readset_list:
+                    if readset not in self.meta_info_df.index:
+                        raise RuntimeError(f'readset {readset} not found in the meta_info_df')
+            else:
+                raise NotImplementedError('Unrecognised type of reaset_list')
+            readset_hash = hashlib.md5(str(self.readset_list).encode('utf-8')).hexdigest()
         self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
         if self.most_abund_seq_cutoff !=0 and self.most_abund_seq_cutoff < self.min_num_distinct_seqs_per_sample:
             raise RuntimeError(f'most_abund_seq_cutoff ({self.most_abund_seq_cutoff}) <' 
@@ -109,6 +137,8 @@ class EighteenSDistance(EighteenSBase):
         f'{self.most_abund_seq_cutoff}_{self.min_num_distinct_seqs_per_sample}_{self.inv_misco}'
         if self.island_list is not None:
             self.unique_string += f'_{self.island_string}'
+        if self.readset_list is not None:
+            self.unique_string += f'_{readset_hash[:5]}'
         self.unique_string_hash = hashlib.md5(self.unique_string.encode('utf-8')).hexdigest()
         
         self.result_path = os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/output', f'{self.unique_string}_mantel_result.txt')
@@ -117,11 +147,9 @@ class EighteenSDistance(EighteenSBase):
             return
         else:
             self.skip = False
-        super().__init__()
         
-        # Use the meta_info_table produced by output_tables.py
-        self.meta_info_table_path = os.path.join(self.output_dir, 'coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv')
-        self.meta_info_df = self._get_meta_info_df()
+        
+        
         # Dict where genus if key and primary seq (nucleotide seq) is value.
         self.primary_seq_dict = self._make_primary_seq_dict()
         # Here we can make use of the meta_info_table that we created in output_tables.py
@@ -248,14 +276,10 @@ class EighteenSDistance(EighteenSBase):
         # Then by island list
         if self.island_list is not None:
             df = df[df['ISLAND#'].isin(self.island_list)]
-            # if self.island_list == 'original_three':
-            #     df = df[df['ISLAND#'].isin(['I06', 'I10', 'I15'])]
-            # elif self.island_list == 'ten_plus_one':
-            #     df = df[df['ISLAND#'].isin(['I01','I02','I03','I04','I05', 'I06','I07','I08','I09','I10', 'I15'])]
-            # elif self.island_list == 'first_three':
-            #     df = df[df['ISLAND#'].isin(['I01', 'I02', 'I03'])]
-            # else:
-            #     raise NotImplementedError
+
+        # Then by readset_list
+        if self.readset_list is not None:
+            df = df.loc[self.readset_list]
         
         # Finally, we only want the list of the readsets, so get the indices from the df
         return list(df.index)
@@ -1222,7 +1246,7 @@ if __name__ == "__main__":
         exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
         snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
         normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=0.01,
-        most_abund_seq_cutoff=17, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='7,8,15', inv_misco=0.95
+        most_abund_seq_cutoff=17, min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list='7,8,15', inv_misco=0.95, readset_list=None
         ).make_and_plot_dist_and_pcoa()
 
     # TODO code up an Islands list input so that we limit to only certain islands. This way we

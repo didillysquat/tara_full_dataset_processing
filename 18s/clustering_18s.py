@@ -1051,7 +1051,7 @@ class CheckPwrRai(EighteenSBase):
     NB we will implement dist_by as 'sample' or 'abundance'. If abundance, the sizes will be the cumulative relative abundances
     in the given SVG classifications. If sample, then we will work with the number of samples the given sequence was found in.
     """
-    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples'):
+    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples', readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_one_readset_list.txt'):
         super().__init__()
         self.dist_by = dist_by
         self.misco = misco
@@ -1063,26 +1063,44 @@ class CheckPwrRai(EighteenSBase):
         self.distance_method = 'unifrac'
         self.n_clusters = 4
         self.fig_dir = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/figures'
+        if readset_list is not None:
+            # Then we are being provided a set of sqeuences to work with
+            # We will allow these to be provided as well as the island list
+            # We will screen by the readset list. I.e. we will remove all readsets that aren't in
+            # this list.
+            if type(readset_list) == str:
+                # Then we have been provieded a path
+                with open(readset_list, 'r') as f:
+                    self.readset_list = [_.rstrip() for _ in f]
+            elif type(readset_list) == list:
+                # Then we have been provided a list of readsets
+                self.readset_list = readset_list
+            else:
+                raise NotImplementedError('Unrecognised type of reaset_list')
+            readset_hash = hashlib.md5(str(self.readset_list).encode('utf-8')).hexdigest()
+            readset_hash_str = '_' + readset_hash[:5]
+        else:
+            readset_hash_str = ''
         if island == 'original_three':
             self.island = 'original_three'
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.dist_by}'
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I06', 'I10', 'I15']
         elif island == 'ten_plus_one':
             self.island = 'ten_plus_one'
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}_{self.dist_by}'
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
         else:
             self.island = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island.split(',')]
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}_{self.dist_by}'
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
         
         # self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
-        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island)
+        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
         # self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
         self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
         
@@ -1257,7 +1275,7 @@ class CheckPwrRai(EighteenSBase):
         pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
 
     
-    def _get_pcoa_df(self, pcoa_path, island):
+    def _get_pcoa_df(self, pcoa_path, island, readset_list):
         # Read in the pcoa file of interest as a df
         # get rid of tech reps and convert readset names to sample-id
         try:
@@ -1269,7 +1287,8 @@ class CheckPwrRai(EighteenSBase):
             exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
             snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
             normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=float(self.misco),
-            most_abund_seq_cutoff=int(self.masco), min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list=island, inv_misco=float(self.inv_misco)
+            most_abund_seq_cutoff=int(self.masco), min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list=island,
+            inv_misco=float(self.inv_misco), readset_list=readset_list
             )
             dist.make_and_plot_dist_and_pcoa()
             try:
