@@ -39,6 +39,9 @@ from sklearn import metrics
 from fasta2net import Fasta2Net
 from collections import defaultdict
 from distance_18s import EighteenSDistance
+import scipy.spatial.distance
+import scipy.cluster.hierarchy
+from matplotlib.ticker import AutoMinorLocator
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -149,6 +152,7 @@ class Cluster18S(EighteenSBase):
         self.axar[0,0].set_title('Pocillopora')
         self.axar[0,0].set_xlabel('k')
         self.axar[0,0].set_ylabel('inertia')
+        
         self.axar[0,0].grid(linewidth=0.5, color='lightgrey')
         
         ax2 = self.axar[0,0].twinx()
@@ -1050,8 +1054,23 @@ class CheckPwrRai(EighteenSBase):
     NB This showed us that there is very little difference between rai and pwr.
     NB we will implement dist_by as 'sample' or 'abundance'. If abundance, the sizes will be the cumulative relative abundances
     in the given SVG classifications. If sample, then we will work with the number of samples the given sequence was found in.
+    
+    We use a hash as the unique identifier for the readset list plots.
+    It will be useful to keep track of which hash applies to which readset list
+    14e1c = sub_one_readset_list.txt This is the sub set that is the 10 plus one ordination group that had snp classifications
+    39ff6 = sub_two_readset_list.txt. This is the smaller of the two subset that is found within the sub_one_readset
+    f1fff0 = sub_three_readset_list.txt. This is the larger of the two subsets. From this one group had perfect agreement with 
+        SVD1 so we removed these samples to create sub_four_readset.txt.
+    a6936 =sub_four_readset_list.txt is from f1fff0 with the perfect agreement group removed. From this there were two large, discrete clusters an oragnge and a blue.
+        We will pull out the organge and the blue. orange = sub_five, blue = sub_6. remainder = sub_7
+    4cd75 = sub_five = the orange from above. This is an end of the line.
+    939d3 = sub_six = This is quite messy and requires more. We will get rid of the right hand side. sub_8 = rhs sub_9 = lhs
+    ec2ab = sub_seven = This is end of the line, it is messy, no clear clustering.
+    1831a = sub_8 it is end of the line
+
     """
-    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples', readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_one_readset_list.txt'):
+    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
+    readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_six_readset_list.txt'):
         super().__init__()
         self.dist_by = dist_by
         self.misco = misco
@@ -1098,11 +1117,20 @@ class CheckPwrRai(EighteenSBase):
             self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}{readset_hash_str}_pcoa.csv.gz')
             self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}.png')
             self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
+        self.dist_path = self.pcoa_path_pwr.replace('_pcoa.csv.gz', '.dist.gz')
         
         # self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
         self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
+        self.dist_df = self._get_dist_df()
         # self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
-        self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        # self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        self.fig = plt.figure(figsize=(16,8))
+        gs = self.fig.add_gridspec(2, 4, height_ratios=[0.5,0.5])
+        self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
+        self.dendro_ax = self.fig.add_subplot(gs[1, :])
+        # self.dendo_scat = self.fig.add_subplot(gs[2,:])
+        # Four plots on first row for the pcoa plots
+        # join the four plots on second row to plot the hierarchical clustering in.
         
         self.pwr_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_pwr).labels_, index=self.pcoa_df_pwr.index, name='label')
         # self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
@@ -1117,6 +1145,29 @@ class CheckPwrRai(EighteenSBase):
         # are in the same order.
         self.abundance_df, self.abundance_dict = self._curate_abundance_df(self.abundance_dict_path)
         self.abundance_df = self.abundance_df.reindex(self.pcoa_df_pwr.index)
+
+    def _get_dist_df(self):
+        dist_df = pd.read_csv(self.dist_path, index_col=0, header=None)
+        dist_df.columns = dist_df.index
+
+        drop_list = []
+
+        for ind in dist_df.index:
+            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+                drop_list.append(ind)
+        
+        # Now drop the rows and columns
+        dist_df.drop(index=drop_list, columns=drop_list, inplace=True)
+
+        # Now we need to convert these to sample-id format.
+        sample_id_list = []
+        for ind in dist_df.index:
+            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        
+        dist_df.index = sample_id_list
+        dist_df.columns = sample_id_list
+        return dist_df
+        
 
     def make_network(self):
         """
@@ -1144,6 +1195,7 @@ class CheckPwrRai(EighteenSBase):
         size_scaler=0.1, color_distribution_dict=c_dist_dict, fig_name=self.pop_art_fig_name, 
         pop_art=True, ordered_calssification_name_list=ordered_calssification_name_list, dist_by=self.dist_by)
         net.make_network()
+        print(f'popart network output to: {net.fig_output_path}')
         foo = 'bar'
     
     def _make_fasta2net_abundance_and_color_dicts(self):
@@ -1191,24 +1243,62 @@ class CheckPwrRai(EighteenSBase):
         # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
         # at k==3
         # Plot up the pwr row
-        self._plot_row(
+        kmeans_cat_colours_dict, svd_cat_colours_dict = self._plot_row(
             labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
-            pc2_ax_kmeans_cats = self.ax_arr[0,0], pc3_ax_kmeans_cats = self.ax_arr[0,1], 
-            pc2_ax_snp_cats = self.ax_arr[0,2], pc3_ax_snp_cats = self.ax_arr[0,3], norm_m='pwr'
+            pc2_ax_kmeans_cats = self.pcoa_axes[0], pc3_ax_kmeans_cats = self.pcoa_axes[1], 
+            pc2_ax_snp_cats = self.pcoa_axes[2], pc3_ax_snp_cats = self.pcoa_axes[3], norm_m='pwr'
             )
 
-        # # Plot up the rai row
-        # self._plot_row(
-        #     labels = self.rai_kmeans_labels, pcoa_df = self.pcoa_df_rai,
-        #     pc2_ax_kmeans_cats = self.ax_arr[1,0], pc3_ax_kmeans_cats = self.ax_arr[1,1], 
-        #     pc2_ax_snp_cats = self.ax_arr[1,2], pc3_ax_snp_cats = self.ax_arr[1,3], norm_m='rai'
-        #     )
-
+        # now make the dendogram figure
+        condensed_dist = scipy.spatial.distance.squareform(self.dist_df)
+        linkage = scipy.cluster.hierarchy.linkage(y=condensed_dist, optimal_ordering=True)
+        dendro = scipy.cluster.hierarchy.dendrogram(linkage, ax=self.dendro_ax, labels=list(self.dist_df.index), link_color_func=lambda k: 'black')
+        # We can get the order of the samples from dendro['ivl']
+        # getting the x coords is trickier to get from the dendro
+        # so we will just compute them
+        x_coords = range(5,int(self.dendro_ax.get_xlim()[1]),10)
+        # THen check that this is the right number of coords
+        assert(len(x_coords) == len(dendro['ivl']))
+        # we can then make a dict of this
+        sample_xcoord_dict = {samp: xcoord for samp, xcoord in zip(dendro['ivl'], x_coords)}
+        # Then we can plot up a miniscatter below the dendro ax
+        # Now we plot up for each of the classifications and the unclassified
+        
+        samples_wo_classification = [_ for _ in sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
+        # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[1 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
+        self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.001 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
+        for svd in self.snp_classification['label'].unique():
+            of_svd = self.snp_classification[self.snp_classification['label']==svd]
+            samples_in_common = [_ for _ in sample_xcoord_dict.keys() if _ in of_svd.index]
+            # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[1 for i in range(len(samples_in_common))], s=2)
+            self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 for i in range(len(samples_in_common))], s=3, marker='s', c=svd_cat_colours_dict[svd])
+        for kclass in self.pwr_kmeans_labels.unique():
+            of_class = self.pwr_kmeans_labels[self.pwr_kmeans_labels==kclass]
+            samples_in_common = [_ for _ in sample_xcoord_dict.keys() if _ in of_class.index]
+            self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[-.0005 for i in range(len(samples_in_common))], s=3, marker='s', c=kmeans_cat_colours_dict[kclass])
+        # self.dendo_scat.set_xlim(self.dendro_ax.get_xlim())
+        self.dendro_ax.set_ylim(-0.002, self.dendro_ax.get_ylim()[1])
+        self.dendro_ax.collections[0]._linewidths=np.array([0.5])
+        
+        
+        
+        
+        
+        self.dendro_ax.spines['right'].set_visible(False)
+        self.dendro_ax.spines['top'].set_visible(False)
+        self.dendro_ax.spines['bottom'].set_visible(False)
+        
+        # self.dendro_ax.set_xticks([])
+        foo = 'bar'
         plt.tight_layout()
         
         # Append the agreement results to the name
         self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}.png')
+        print('saving .png')
+        
         plt.savefig(self.fig_path, dpi=600)
+        print(f'fig_path: {self.fig_path}')
+        print('done')
         
 
     def _curate_abundance_df(self, abundance_dict_path):
@@ -1247,10 +1337,12 @@ class CheckPwrRai(EighteenSBase):
         return pd.read_csv(self.meta_info_table_path).set_index('readset')
 
     def _plot_row(self, labels, pcoa_df, pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats, norm_m):
+        colour_dict_kmeans = {}
         for k in labels.unique():
             samples_pwr = labels[labels==k].index
-            pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'])
+            scat = pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'])
             pc3_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC3'])
+            colour_dict_kmeans[k] = scat._facecolors
         
         samples_in_common = list(set(self.snp_classification.index).intersection(set(labels.index)))
         labels = labels.reindex(index=samples_in_common)
@@ -1265,15 +1357,23 @@ class CheckPwrRai(EighteenSBase):
         samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
         pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC2'], c='lightgrey')
         pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC3'], c='lightgrey')
+        colour_dict_svd = {}
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
             samples_in_common = [_ for _ in pcoa_df.index if _ in of_svd.index]
-            pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'])
-            pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'])
-
+            scat = pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'])
+            pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'], label=svd)
+            colour_dict_svd[svd] = scat._facecolors
+        pc3_ax_snp_cats.legend(loc='best', fontsize='xx-small')
+        minor_locator = AutoMinorLocator(5)
+        for ax in [pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats]:
+            ax.xaxis.set_minor_locator(AutoMinorLocator(5))
+            ax.yaxis.set_minor_locator(AutoMinorLocator(5))
+            ax.grid(color='lightgrey', linestyle='-', linewidth='0.5', which='both')
+        
         pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
         pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
-
+        return colour_dict_kmeans, colour_dict_svd
     
     def _get_pcoa_df(self, pcoa_path, island, readset_list):
         # Read in the pcoa file of interest as a df
@@ -1310,21 +1410,23 @@ class CheckPwrRai(EighteenSBase):
         drop_list = []
         # TODO we are here. We need to implement readset lists in distance_18s.py
         # This is a cheeky bit of code I used to output the subsets of readsets from the ten plus one that I thought we could try working with.
-        # sub_one = pcoa_df[(pcoa_df['PC1'] > -0.02) & (pcoa_df['PC1'] < 0.02)]
-        # sub_two = sub_one[sub_one['PC3'] < -0.015]
-        # sub_three = sub_one[sub_one['PC3'] > -0.01]
-        # # Write these out 
-        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_one_readset_list.txt'),'w') as f:
-        #     for out_ind in sub_one.index:
+        
+        # sub_five = pcoa_df[(pcoa_df['PC3'] > -0.04) & (pcoa_df['PC1'] > 0) & (pcoa_df['PC2'] > 0.05)].index
+        # sub_six = pcoa_df[(pcoa_df['PC3'] > -0.04) & (pcoa_df['PC1'] > -0.01) & (pcoa_df['PC2'] < 0.05)].index
+        # sub_seven = [_ for _ in pcoa_df.index if (_ not in sub_five) and (_ not in sub_six)]
+        # sub_eight = pcoa_df[pcoa_df['PC1'] > 0.04].index
+        # sub_nine = pcoa_df[pcoa_df['PC1'] < 0.04].index
+
+        
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_seven_readset_list.txt'),'w') as f:
+        #     for out_ind in sub_seven:
+        #         f.write(f'{out_ind}\n')
+        
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_nine_readset_list.txt'),'w') as f:
+        #     for out_ind in sub_nine:
         #         f.write(f'{out_ind}\n')
 
-        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_two_readset_list.txt'),'w') as f:
-        #     for out_ind in sub_two.index:
-        #         f.write(f'{out_ind}\n')
-
-        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_three_readset_list.txt'),'w') as f:
-        #     for out_ind in sub_three.index:
-        #         f.write(f'{out_ind}\n')
+        
 
         for ind in pcoa_df.index:
             if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
