@@ -42,6 +42,9 @@ from distance_18s import EighteenSDistance
 import scipy.spatial.distance
 import scipy.cluster.hierarchy
 from matplotlib.ticker import AutoMinorLocator
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
+from matplotlib.colors import ListedColormap
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1070,7 +1073,7 @@ class CheckPwrRai(EighteenSBase):
 
     """
     def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
-    readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_six_readset_list.txt'):
+    readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_three_readset_list.txt'):
         super().__init__()
         self.dist_by = dist_by
         self.misco = misco
@@ -1125,9 +1128,10 @@ class CheckPwrRai(EighteenSBase):
         # self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
         # self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
         self.fig = plt.figure(figsize=(16,8))
-        gs = self.fig.add_gridspec(2, 4, height_ratios=[0.5,0.5])
+        gs = self.fig.add_gridspec(3, 4, height_ratios=[0.5,0.5, 0.5])
         self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
         self.dendro_ax = self.fig.add_subplot(gs[1, :])
+        self.stacked_bar_ax = self.fig.add_subplot(gs[2, :])
         # self.dendo_scat = self.fig.add_subplot(gs[2,:])
         # Four plots on first row for the pcoa plots
         # join the four plots on second row to plot the hierarchical clustering in.
@@ -1167,7 +1171,6 @@ class CheckPwrRai(EighteenSBase):
         dist_df.index = sample_id_list
         dist_df.columns = sample_id_list
         return dist_df
-        
 
     def make_network(self):
         """
@@ -1243,7 +1246,7 @@ class CheckPwrRai(EighteenSBase):
         # Start by visualising the first 3 components of the PCOA's and colouring according to the kmeans clustering
         # at k==3
         # Plot up the pwr row
-        kmeans_cat_colours_dict, svd_cat_colours_dict = self._plot_row(
+        self.kmeans_cat_colours_dict, self.svd_cat_colours_dict = self._plot_row(
             labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
             pc2_ax_kmeans_cats = self.pcoa_axes[0], pc3_ax_kmeans_cats = self.pcoa_axes[1], 
             pc2_ax_snp_cats = self.pcoa_axes[2], pc3_ax_snp_cats = self.pcoa_axes[3], norm_m='pwr'
@@ -1260,34 +1263,32 @@ class CheckPwrRai(EighteenSBase):
         # THen check that this is the right number of coords
         assert(len(x_coords) == len(dendro['ivl']))
         # we can then make a dict of this
-        sample_xcoord_dict = {samp: xcoord for samp, xcoord in zip(dendro['ivl'], x_coords)}
+        self.sample_xcoord_dict = {samp: xcoord for samp, xcoord in zip(dendro['ivl'], x_coords)}
         # Then we can plot up a miniscatter below the dendro ax
         # Now we plot up for each of the classifications and the unclassified
         
-        samples_wo_classification = [_ for _ in sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
+        samples_wo_classification = [_ for _ in self.sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
         # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[1 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
-        self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.001 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
+        self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.001 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
-            samples_in_common = [_ for _ in sample_xcoord_dict.keys() if _ in of_svd.index]
+            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_svd.index]
             # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[1 for i in range(len(samples_in_common))], s=2)
-            self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 for i in range(len(samples_in_common))], s=3, marker='s', c=svd_cat_colours_dict[svd])
+            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 for i in range(len(samples_in_common))], s=3, marker='s', c=self.svd_cat_colours_dict[svd])
         for kclass in self.pwr_kmeans_labels.unique():
             of_class = self.pwr_kmeans_labels[self.pwr_kmeans_labels==kclass]
-            samples_in_common = [_ for _ in sample_xcoord_dict.keys() if _ in of_class.index]
-            self.dendro_ax.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[-.0005 for i in range(len(samples_in_common))], s=3, marker='s', c=kmeans_cat_colours_dict[kclass])
+            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_class.index]
+            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.0005 for i in range(len(samples_in_common))], s=3, marker='s', c=self.kmeans_cat_colours_dict[kclass])
         # self.dendo_scat.set_xlim(self.dendro_ax.get_xlim())
         self.dendro_ax.set_ylim(-0.002, self.dendro_ax.get_ylim()[1])
         self.dendro_ax.collections[0]._linewidths=np.array([0.5])
-        
-        
-        
-        
         
         self.dendro_ax.spines['right'].set_visible(False)
         self.dendro_ax.spines['top'].set_visible(False)
         self.dendro_ax.spines['bottom'].set_visible(False)
         
+        self._plot_stacked_bars()
+
         # self.dendro_ax.set_xticks([])
         foo = 'bar'
         plt.tight_layout()
@@ -1299,7 +1300,89 @@ class CheckPwrRai(EighteenSBase):
         plt.savefig(self.fig_path, dpi=600)
         print(f'fig_path: {self.fig_path}')
         print('done')
+    
+    def _plot_stacked_bars(self):
+        """
+        Aim of this funciton will be to plot up stacked bar plots on a sample per sample basis based on the abundance_df.
+        e.g. This sequence abundances that have been used to calculate the dissimilarity matrices.
+        We want to look for similarites and disimilarites in the samples to see if we can get some further information on 
+        why the samples are clustering the way they are. As such we want to arrange the samples accorrding to their svg
+        classficiation.
+        As such we should plot the samples in order of SVG classification.
+        I think the best way to start this will be to get some basic plot up and then work from there.
+        """
+        # we need to know what the widths are.
+        # we can have a width of 1 for each sample and then a width of 2 between each of the svg categories.
+        # num_svg_cats = len(self.snp_classification['label'].unique())
+        # num_samples = len(self.abundance_df.index)
+        # tot_width = num_samples + (num_svg_cats * 2)
+        # For each sample, we will want to plot the sequences in the order of total abundance
+        self.abundance_df = self.abundance_df.reindex(self.abundance_df.sum().sort_values(ascending=False).index, axis=1)
+        seq_c_list = get_colour_list()
+        assert(len(list(self.abundance_df)) < len(seq_c_list))
+        seq_c_dict = {seq:c for seq, c in zip(list(self.abundance_df), seq_c_list[:len(list(self.abundance_df))])}
+        # now go on a per svg cat, per sample, per seq basis to create the rectangles and add them to a patches list
+        rect_patch_list = []
+        rect_c_list = []
         
+        for sample, x_loc in self.sample_xcoord_dict.items():
+            bottom = 0
+            abund_series = self.abundance_df.loc[sample]
+            abund_series = abund_series[abund_series>0]
+            abund_series = abund_series / sum(abund_series)
+            for seq, abund in abund_series.items():
+                rect_patch_list.append(Rectangle((x_loc, bottom), 10, abund, color=seq_c_dict[seq]))
+                rect_c_list.append(seq_c_dict[seq])
+                bottom += abund
+            
+        # for svg in self.snp_classification['label'].unique():
+        #     samples_of_cat = [_ for _ in self.abundance_df.index if _ in self.snp_classification[self.snp_classification['label'] == svg].index]
+        #     for sample in samples_of_cat:
+        #         bottom = 0
+        #         abund_series = self.abundance_df.loc[sample]
+        #         abund_series = abund_series[abund_series>0]
+        #         abund_series = abund_series / sum(abund_series)
+        #         for seq, abund in abund_series.items():
+        #             rect_patch_list.append(Rectangle((x_loc, bottom), 1, abund, color=seq_c_dict[seq]))
+        #             rect_c_list.append(seq_c_dict[seq])
+        #             bottom += abund
+        #         x_loc += 1
+        #         done_samples.append(sample)
+        #     x_loc += 2
+        # # here we have the svg samples plotted up
+        # # now plot up the remainder of the samples
+        # remaining_samples = [_ for _ in self.abundance_df.index if _ not in done_samples]
+        # for sample in remaining_samples:
+        #     bottom = 0
+        #     abund_series = self.abundance_df.loc[sample]
+        #     abund_series = abund_series[abund_series>0]
+        #     abund_series = abund_series / sum(abund_series)
+        #     for seq, abund in abund_series.items():
+        #         rect_patch_list.append(Rectangle((x_loc, bottom), 1, abund, color=seq_c_dict[seq]))
+        #         rect_c_list.append(seq_c_dict[seq])
+        #         bottom += abund
+        #     x_loc += 1
+        #     done_samples.append(sample)
+
+        # Here we have the rectangle patches done
+        this_cmap = ListedColormap(rect_c_list)
+        
+        # Here we have a list of Rectangle patches
+        # Create the PatchCollection object from the patches_list
+        patches_collection = PatchCollection(rect_patch_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(rect_patch_list)))
+        # if n_subplots is only 1 then we can refer directly to the axarr object
+        # else we will need ot reference the correct set of axes with i
+        # Add the pathces to the axes
+        self.stacked_bar_ax.set_xlim(self.dendro_ax.get_xlim())
+        self.stacked_bar_ax.set_ylim(0,1)
+        self.stacked_bar_ax.spines['right'].set_visible(False)
+        self.stacked_bar_ax.spines['top'].set_visible(False)
+        self.stacked_bar_ax.spines['bottom'].set_visible(False)
+        self.stacked_bar_ax.spines['left'].set_visible(False)
+        self.stacked_bar_ax.add_collection(patches_collection)
+        self.stacked_bar_ax.autoscale_view()
+        return
 
     def _curate_abundance_df(self, abundance_dict_path):
         """
@@ -2212,6 +2295,39 @@ class OneClusterCol:
             self.sil[i] = silhouette_score(self.pcoa_df, kmeans.labels_, metric = 'euclidean')
         
 
+def get_colour_list():
+    colour_list = ["#FFFF00", "#1CE6FF", "#FF34FF", "#FF4A46", "#008941", "#006FA6", "#A30059", "#FFDBE5",
+                "#7A4900", "#0000A6", "#63FFAC", "#B79762", "#004D43", "#8FB0FF", "#997D87", "#5A0007", "#809693",
+                "#FEFFE6", "#1B4400", "#4FC601", "#3B5DFF", "#4A3B53", "#FF2F80", "#61615A", "#BA0900", "#6B7900",
+                "#00C2A0", "#FFAA92", "#FF90C9", "#B903AA", "#D16100", "#DDEFFF", "#000035", "#7B4F4B", "#A1C299",
+                "#300018", "#0AA6D8", "#013349", "#00846F", "#372101", "#FFB500", "#C2FFED", "#A079BF", "#CC0744",
+                "#C0B9B2", "#C2FF99", "#001E09", "#00489C", "#6F0062", "#0CBD66", "#EEC3FF", "#456D75", "#B77B68",
+                "#7A87A1", "#788D66", "#885578", "#FAD09F", "#FF8A9A", "#D157A0", "#BEC459", "#456648", "#0086ED",
+                "#886F4C", "#34362D", "#B4A8BD", "#00A6AA", "#452C2C", "#636375", "#A3C8C9", "#FF913F", "#938A81",
+                "#575329", "#00FECF", "#B05B6F", "#8CD0FF", "#3B9700", "#04F757", "#C8A1A1", "#1E6E00", "#7900D7",
+                "#A77500", "#6367A9", "#A05837", "#6B002C", "#772600", "#D790FF", "#9B9700", "#549E79", "#FFF69F",
+                "#201625", "#72418F", "#BC23FF", "#99ADC0", "#3A2465", "#922329", "#5B4534", "#FDE8DC", "#404E55",
+                "#0089A3", "#CB7E98", "#A4E804", "#324E72", "#6A3A4C", "#83AB58", "#001C1E", "#D1F7CE", "#004B28",
+                "#C8D0F6", "#A3A489", "#806C66", "#222800", "#BF5650", "#E83000", "#66796D", "#DA007C", "#FF1A59",
+                "#8ADBB4", "#1E0200", "#5B4E51", "#C895C5", "#320033", "#FF6832", "#66E1D3", "#CFCDAC", "#D0AC94",
+                "#7ED379", "#012C58", "#7A7BFF", "#D68E01", "#353339", "#78AFA1", "#FEB2C6", "#75797C", "#837393",
+                "#943A4D", "#B5F4FF", "#D2DCD5", "#9556BD", "#6A714A", "#001325", "#02525F", "#0AA3F7", "#E98176",
+                "#DBD5DD", "#5EBCD1", "#3D4F44", "#7E6405", "#02684E", "#962B75", "#8D8546", "#9695C5", "#E773CE",
+                "#D86A78", "#3E89BE", "#CA834E", "#518A87", "#5B113C", "#55813B", "#E704C4", "#00005F", "#A97399",
+                "#4B8160", "#59738A", "#FF5DA7", "#F7C9BF", "#643127", "#513A01", "#6B94AA", "#51A058", "#A45B02",
+                "#1D1702", "#E20027", "#E7AB63", "#4C6001", "#9C6966", "#64547B", "#97979E", "#006A66", "#391406",
+                "#F4D749", "#0045D2", "#006C31", "#DDB6D0", "#7C6571", "#9FB2A4", "#00D891", "#15A08A", "#BC65E9",
+                "#FFFFFE", "#C6DC99", "#203B3C", "#671190", "#6B3A64", "#F5E1FF", "#FFA0F2", "#CCAA35", "#374527",
+                "#8BB400", "#797868", "#C6005A", "#3B000A", "#C86240", "#29607C", "#402334", "#7D5A44", "#CCB87C",
+                "#B88183", "#AA5199", "#B5D6C3", "#A38469", "#9F94F0", "#A74571", "#B894A6", "#71BB8C", "#00B433",
+                "#789EC9", "#6D80BA", "#953F00", "#5EFF03", "#E4FFFC", "#1BE177", "#BCB1E5", "#76912F", "#003109",
+                "#0060CD", "#D20096", "#895563", "#29201D", "#5B3213", "#A76F42", "#89412E", "#1A3A2A", "#494B5A",
+                "#A88C85", "#F4ABAA", "#A3F3AB", "#00C6C8", "#EA8B66", "#958A9F", "#BDC9D2", "#9FA064", "#BE4700",
+                "#658188", "#83A485", "#453C23", "#47675D", "#3A3F00", "#061203", "#DFFB71", "#868E7E", "#98D058",
+                "#6C8F7D", "#D7BFC2", "#3C3E6E", "#D83D66", "#2F5D9B", "#6C5E46", "#D25B88", "#5B656C", "#00B57F",
+                "#545C46", "#866097", "#365D25", "#252F99", "#00CCFF", "#674E60", "#FC009C", "#92896B"]
+    return colour_list
+
 if __name__ == "__main__":
     # c = Cluster18S()
     # c.visalise_snp_new_clusters()
@@ -2227,4 +2343,5 @@ if __name__ == "__main__":
     c.plot()
     c.make_network()
 
-    
+
+
