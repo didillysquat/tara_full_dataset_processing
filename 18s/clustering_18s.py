@@ -45,6 +45,7 @@ from matplotlib.ticker import AutoMinorLocator
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
 from matplotlib.colors import ListedColormap
+from cycler import cycler
 
 class Cluster18S(EighteenSBase):
     def __init__(self):
@@ -1072,7 +1073,7 @@ class CheckPwrRai(EighteenSBase):
     1831a = sub_8 it is end of the line
 
     """
-    def __init__(self, misco='0.01', masco='20', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
+    def __init__(self, misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
     readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_three_readset_list.txt'):
         super().__init__()
         self.dist_by = dist_by
@@ -1279,7 +1280,6 @@ class CheckPwrRai(EighteenSBase):
             of_class = self.pwr_kmeans_labels[self.pwr_kmeans_labels==kclass]
             samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_class.index]
             self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.0005 for i in range(len(samples_in_common))], s=3, marker='s', c=self.kmeans_cat_colours_dict[kclass])
-        # self.dendo_scat.set_xlim(self.dendro_ax.get_xlim())
         self.dendro_ax.set_ylim(-0.002, self.dendro_ax.get_ylim()[1])
         self.dendro_ax.collections[0]._linewidths=np.array([0.5])
         
@@ -1288,8 +1288,8 @@ class CheckPwrRai(EighteenSBase):
         self.dendro_ax.spines['bottom'].set_visible(False)
         
         self._plot_stacked_bars()
-
-        # self.dendro_ax.set_xticks([])
+        lab_list = [tick_lab._text.replace('TARA_', '') for tick_lab in self.dendro_ax.get_xticklabels()]
+        self.dendro_ax.set_xticklabels(lab_list)
         foo = 'bar'
         plt.tight_layout()
         
@@ -1331,38 +1331,9 @@ class CheckPwrRai(EighteenSBase):
             abund_series = abund_series[abund_series>0]
             abund_series = abund_series / sum(abund_series)
             for seq, abund in abund_series.items():
-                rect_patch_list.append(Rectangle((x_loc, bottom), 10, abund, color=seq_c_dict[seq]))
+                rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=seq_c_dict[seq]))
                 rect_c_list.append(seq_c_dict[seq])
                 bottom += abund
-            
-        # for svg in self.snp_classification['label'].unique():
-        #     samples_of_cat = [_ for _ in self.abundance_df.index if _ in self.snp_classification[self.snp_classification['label'] == svg].index]
-        #     for sample in samples_of_cat:
-        #         bottom = 0
-        #         abund_series = self.abundance_df.loc[sample]
-        #         abund_series = abund_series[abund_series>0]
-        #         abund_series = abund_series / sum(abund_series)
-        #         for seq, abund in abund_series.items():
-        #             rect_patch_list.append(Rectangle((x_loc, bottom), 1, abund, color=seq_c_dict[seq]))
-        #             rect_c_list.append(seq_c_dict[seq])
-        #             bottom += abund
-        #         x_loc += 1
-        #         done_samples.append(sample)
-        #     x_loc += 2
-        # # here we have the svg samples plotted up
-        # # now plot up the remainder of the samples
-        # remaining_samples = [_ for _ in self.abundance_df.index if _ not in done_samples]
-        # for sample in remaining_samples:
-        #     bottom = 0
-        #     abund_series = self.abundance_df.loc[sample]
-        #     abund_series = abund_series[abund_series>0]
-        #     abund_series = abund_series / sum(abund_series)
-        #     for seq, abund in abund_series.items():
-        #         rect_patch_list.append(Rectangle((x_loc, bottom), 1, abund, color=seq_c_dict[seq]))
-        #         rect_c_list.append(seq_c_dict[seq])
-        #         bottom += abund
-        #     x_loc += 1
-        #     done_samples.append(sample)
 
         # Here we have the rectangle patches done
         this_cmap = ListedColormap(rect_c_list)
@@ -1380,6 +1351,8 @@ class CheckPwrRai(EighteenSBase):
         self.stacked_bar_ax.spines['top'].set_visible(False)
         self.stacked_bar_ax.spines['bottom'].set_visible(False)
         self.stacked_bar_ax.spines['left'].set_visible(False)
+        self.stacked_bar_ax.set_xticks([])
+        self.stacked_bar_ax.set_yticks([])
         self.stacked_bar_ax.add_collection(patches_collection)
         self.stacked_bar_ax.autoscale_view()
         return
@@ -1421,20 +1394,27 @@ class CheckPwrRai(EighteenSBase):
 
     def _plot_row(self, labels, pcoa_df, pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats, norm_m):
         colour_dict_kmeans = {}
+        kmeans_c_cycler = cycler(color=['#010ca6', 'y', 'c', 'pink'])
+        pc2_ax_kmeans_cats.set_prop_cycle(kmeans_c_cycler)
+        pc3_ax_kmeans_cats.set_prop_cycle(kmeans_c_cycler)
         for k in labels.unique():
             samples_pwr = labels[labels==k].index
-            scat = pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'])
+            scat = pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'], label=f'kmeans_{k}')
             pc3_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC3'])
             colour_dict_kmeans[k] = scat._facecolors
-        
+        handles, leg_labels = pc2_ax_kmeans_cats.get_legend_handles_labels()
+        # sort both labels and handles by labels
+        leg_labels, handles = zip(*sorted(zip(leg_labels, handles), key=lambda t: t[0]))
+        pc2_ax_kmeans_cats.legend(handles, leg_labels, loc='best', fontsize='xx-small')
+        # pc2_ax_kmeans_cats.legend(loc='best', fontsize='xx-small')
         samples_in_common = list(set(self.snp_classification.index).intersection(set(labels.index)))
         labels = labels.reindex(index=samples_in_common)
         snp_classification_reindexed = self.snp_classification.reindex(index=samples_in_common)
         
         agreement = AgreementCalculator(lab_ser_one=labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
         self.agreement_list.append(agreement)
-        pc2_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
-        pc3_ax_kmeans_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
+        pc2_ax_kmeans_cats.set_title(f'PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
+        pc3_ax_kmeans_cats.set_title(f'PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
 
         # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
         samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
@@ -1444,18 +1424,22 @@ class CheckPwrRai(EighteenSBase):
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
             samples_in_common = [_ for _ in pcoa_df.index if _ in of_svd.index]
-            scat = pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'])
+            scat = pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'], label=svd)
             pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'], label=svd)
             colour_dict_svd[svd] = scat._facecolors
-        pc3_ax_snp_cats.legend(loc='best', fontsize='xx-small')
+        handles, leg_labels = pc2_ax_snp_cats.get_legend_handles_labels()
+        # sort both labels and handles by labels
+        leg_labels, handles = zip(*sorted(zip(leg_labels, handles), key=lambda t: t[0]))
+        pc2_ax_snp_cats.legend(handles, leg_labels, loc='best', fontsize='xx-small')
+        # pc2_ax_snp_cats.legend(loc='best', fontsize='xx-small')
         minor_locator = AutoMinorLocator(5)
         for ax in [pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats]:
             ax.xaxis.set_minor_locator(AutoMinorLocator(5))
             ax.yaxis.set_minor_locator(AutoMinorLocator(5))
             ax.grid(color='lightgrey', linestyle='-', linewidth='0.5', which='both')
         
-        pc2_ax_snp_cats.set_title(f'{norm_m}, PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
-        pc3_ax_snp_cats.set_title(f'{norm_m}, PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\nagreement={agreement:.2f}')
+        pc2_ax_snp_cats.set_title(f'PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
+        pc3_ax_snp_cats.set_title(f'PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
         return colour_dict_kmeans, colour_dict_svd
     
     def _get_pcoa_df(self, pcoa_path, island, readset_list):
