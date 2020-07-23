@@ -876,7 +876,6 @@ class Cluster18S(EighteenSBase):
         c_df.at['TARA_CO-0002135', 'label_4'] = 3
         c_df.at['TARA_CO-0002065', 'label_4'] = 3
         
-        
         non_classified_samples = [_ for _ in pcoa_df.index if _ not in c_df.index]
         classified_samples = [_ for _ in pcoa_df.index if _ in c_df.index]
         ax[2,0].scatter(pcoa_df.loc[non_classified_samples, 'PC1'], pcoa_df.loc[non_classified_samples, 'PC2'], c='lightgrey')
@@ -891,10 +890,6 @@ class Cluster18S(EighteenSBase):
 
         ax[2,0].set_title('location=18S colour=snmf categories (SNP) k=3\nAgreement with k=3 and k=3 = 22/27 = 0.81', fontsize=title_font_size)
 
-
-
-            
-        # new SNP onto 18s at k==3
         poc_biallelic_kmeans = compress_pickle.load(self.poc_snp_kmeans_dict_pickle_path)[3]
         poc_snp_labels_series = pd.Series(poc_biallelic_kmeans.labels_, index=self.poc_snp_pcoa_df.index, name='label')
         
@@ -1072,7 +1067,9 @@ class CheckPwrRai(EighteenSBase):
     ec2ab = sub_seven = This is end of the line, it is messy, no clear clustering.
     1831a = sub_8 it is end of the line
     '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/POC_sub_one_readset_list.txt'
-
+    TODO Plot the information points as rectanges, with set positions
+    TODO Add in Island and site information
+    TODO add in replicate information
     """
     def __init__(self, genus='Pocillopora', misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
     readset_list=None):
@@ -1125,19 +1122,24 @@ class CheckPwrRai(EighteenSBase):
             self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
         self.dist_path = self.pcoa_path_pwr.replace('_pcoa.csv.gz', '.dist.gz')
         
-        self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
+        self.pcoa_df = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
         self.dist_df = self._get_dist_df()
         
-        self.fig = plt.figure(figsize=(16,8))
-        gs = self.fig.add_gridspec(3, 4, height_ratios=[0.5,0.5, 0.5])
+        self.fig = plt.figure(figsize=(20,8))
+        gs = self.fig.add_gridspec(4, 4, height_ratios=[0.5, 0.5, 0.5, 0.5])
         self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
         self.dendro_ax = self.fig.add_subplot(gs[1, :])
         self.stacked_bar_ax = self.fig.add_subplot(gs[2, :])
+        self.stacked_bar_ax_sp = self.fig.add_subplot(gs[3, :])
         
+        # TODO import the sp_post_med_count data in a very similar format to the abundance df so that we can reuse the
+        # 18S stacked bar chart code
+        self.sp_df, self.sp_seq_c_dict = self.get_sp_post_med_df()
+
         # Four plots on first row for the pcoa plots
         # join the four plots on second row to plot the hierarchical clustering in.
         
-        self.pwr_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_pwr).labels_, index=self.pcoa_df_pwr.index, name='label')
+        self.kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df).labels_, index=self.pcoa_df.index, name='label')
         
         self.agreement_list = []
         # To make the networks we will need to work with the abundance df
@@ -1148,7 +1150,7 @@ class CheckPwrRai(EighteenSBase):
         # is the same for both the abundance_df and the pcoa_df so that the classification labels
         # are in the same order.
         self.abundance_df, self.abundance_dict = self._curate_abundance_df(self.abundance_dict_path)
-        self.abundance_df = self.abundance_df.reindex(self.pcoa_df_pwr.index)
+        self.abundance_df = self.abundance_df.reindex(self.pcoa_df.index)
         if self.genus == 'Pocillopora':
             self.poc_clone_list_str = [['I02S03C006POC', 'I02S03C010POC'], ['I03S01C011POC', 'I03S01C012POC'], ['I03S01C017POC', 'I03S01C018POC', 'I03S01C019POC', 'I03S01C020POC'], ['I03S01C015POC', 'I03S01C016POC'], ['I05S02C006POC', 'I05S02C010POC']]
             self.poc_clone_list_str = [self._convert_index_to_sample_ids(_) for _ in self.poc_clone_list_str]
@@ -1156,6 +1158,24 @@ class CheckPwrRai(EighteenSBase):
         else:
             self.poc_clone_list_str = []
             self.snp_classification = self.por_snp_classifications
+
+    def get_sp_post_med_df(self):
+        df = pd.read_csv('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sp_post_med_count/TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv')
+        df = df.set_index('sample-id')
+        df = df.iloc[:-1,12:]
+        col_list, grey_list = self.get_colour_lists()
+        df = df.loc[[_ for _ in df.index if _ in self.pcoa_df.index]]
+        # Normalise abundances to 1
+        df = df.divide(df.sum(axis=1), axis=0)
+        df = df.reindex(df.sum().sort_values(ascending=False).index, axis=1)
+        # Now the sequence are in order we can assign colours
+        sp_seq_c_dict = {seq: col_list[i] if i < len(col_list) else grey_list[i % len(grey_list)] for i, seq in enumerate(list(df))}
+        return df, sp_seq_c_dict
+
+    def get_colour_lists(self):
+        colour_palette = get_colour_list()
+        grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+        return colour_palette, grey_palette
 
     def _get_dist_df(self):
         dist_df = pd.read_csv(self.dist_path, index_col=0, header=None)
@@ -1254,7 +1274,7 @@ class CheckPwrRai(EighteenSBase):
         # at k==3
         # Plot up the pwr row
         self.kmeans_cat_colours_dict, self.svd_cat_colours_dict = self._plot_row(
-            labels = self.pwr_kmeans_labels, pcoa_df = self.pcoa_df_pwr,
+            labels = self.kmeans_labels, pcoa_df = self.pcoa_df,
             pc2_ax_kmeans_cats = self.pcoa_axes[0], pc3_ax_kmeans_cats = self.pcoa_axes[1], 
             pc2_ax_snp_cats = self.pcoa_axes[2], pc3_ax_snp_cats = self.pcoa_axes[3], norm_m='pwr'
             )
@@ -1277,24 +1297,53 @@ class CheckPwrRai(EighteenSBase):
         scale_factor = self.dendro_ax.get_ylim()[1]/.03
         samples_wo_classification = [_ for _ in self.sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
         # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[1 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
-        self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.002 * scale_factor for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
+        # Do these as rectangles rather than scatter
+        # Let's work with 5% of the height above.
+        d_height = self.dendro_ax.get_ylim()[1] - 0
+        ten_p = 0.15 * d_height
+        kmeans_bottom = 0
+        snp_bottom = kmeans_bottom - ten_p
+        clone_bottom = snp_bottom - ten_p
+        rect_patch_list = []
+        rect_c_list = []
+        # KMEANS
+        for kclass in self.kmeans_labels.unique():
+            of_class = self.kmeans_labels[self.kmeans_labels==kclass]
+            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_class.index]
+            for sample in samples_in_common:
+                rect_patch_list.append(Rectangle((self.sample_xcoord_dict[sample]-5, kmeans_bottom), 10, -ten_p, color=self.kmeans_cat_colours_dict[kclass][0]))
+                rect_c_list.append(self.kmeans_cat_colours_dict[kclass][0])
+        # SVD
+        for sample in samples_wo_classification:
+            rect_patch_list.append(Rectangle((self.sample_xcoord_dict[sample]-5, snp_bottom), 10, -ten_p, color='lightgrey'))
+            rect_c_list.append('lightgrey')
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
             samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_svd.index]
-            # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[1 for i in range(len(samples_in_common))], s=2)
-            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.002 * scale_factor for i in range(len(samples_in_common))], s=3, marker='s', c=self.svd_cat_colours_dict[svd])
-        for kclass in self.pwr_kmeans_labels.unique():
-            of_class = self.pwr_kmeans_labels[self.pwr_kmeans_labels==kclass]
-            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_class.index]
-            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 * scale_factor for i in range(len(samples_in_common))], s=3, marker='s', c=self.kmeans_cat_colours_dict[kclass])
+            for sample in samples_in_common:
+                rect_patch_list.append(Rectangle((self.sample_xcoord_dict[sample]-5, snp_bottom), 10, -ten_p, color=self.svd_cat_colours_dict[svd][0]))
+                rect_c_list.append(self.svd_cat_colours_dict[svd][0])
+        # Add rectangles
+        # Here we have the rectangle patches done
+        this_cmap = ListedColormap(rect_c_list)
+        
+        # Here we have a list of Rectangle patches
+        # Create the PatchCollection object from the patches_list
+        patches_collection = PatchCollection(rect_patch_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(rect_patch_list)))
+        self.dendro_ax.add_collection(patches_collection)
+        self.dendro_ax.autoscale_view()
+
         # Plot up the clone associations in this space below the dendo too
         for clone_ind, clone_list in enumerate(self.poc_clone_list_str):
             for clone_name in clone_list:
-                if clone_name in self.pcoa_df_pwr.index:
-                    self.dendro_ax.text(x=self.sample_xcoord_dict[clone_name], y=-.003 * scale_factor, s=f'{clone_ind}', fontsize='xx-small', horizontalalignment='center', verticalalignment='top')
+                if clone_name in self.pcoa_df.index:
+                    self.dendro_ax.text(x=self.sample_xcoord_dict[clone_name]-5, y=clone_bottom, s=f'{clone_ind}', fontsize='xx-small', horizontalalignment='left', verticalalignment='top')
                     # self.dendro_ax.scatter(x=self.sample_xcoord_dict[clone_name], y=-.0015, s=12, marker=f'${clone_ind}$', c='black')
         
-        self.dendro_ax.set_ylim(-0.004 * scale_factor, self.dendro_ax.get_ylim()[1])
+        
+        self.dendro_ax.set_ylim(-2 * ten_p, self.dendro_ax.get_ylim()[1])
+        # self.dendro_ax.set_ylim(-0.004 * scale_factor, self.dendro_ax.get_ylim()[1])
         self.dendro_ax.collections[0]._linewidths=np.array([0.5])
         
         self.dendro_ax.spines['right'].set_visible(False)
@@ -1302,7 +1351,8 @@ class CheckPwrRai(EighteenSBase):
         self.dendro_ax.spines['bottom'].set_visible(False)
         
         self._plot_stacked_bars()
-        lab_list = [tick_lab._text.replace('TARA_', '') for tick_lab in self.dendro_ax.get_xticklabels()]
+        self._plot_stacked_bars_zooxs()
+        lab_list = [''.join(self.sample_provenance_df.at[tick_lab._text, 'SAMPLING DESIGN LABEL'].split('-')[1:]) for tick_lab in self.dendro_ax.get_xticklabels()]
         self.dendro_ax.set_xticklabels(lab_list)
         foo = 'bar'
         plt.tight_layout()
@@ -1369,6 +1419,55 @@ class CheckPwrRai(EighteenSBase):
         self.stacked_bar_ax.set_yticks([])
         self.stacked_bar_ax.add_collection(patches_collection)
         self.stacked_bar_ax.autoscale_view()
+        return
+
+    def _plot_stacked_bars_zooxs(self):
+        """
+        Aim of this funciton will be to plot up stacked bar plots on a sample per sample basis based on the abundance_df.
+        e.g. This sequence abundances that have been used to calculate the dissimilarity matrices.
+        We want to look for similarites and disimilarites in the samples to see if we can get some further information on 
+        why the samples are clustering the way they are. As such we want to arrange the samples accorrding to their svg
+        classficiation.
+        As such we should plot the samples in order of SVG classification.
+        I think the best way to start this will be to get some basic plot up and then work from there.
+        self.sp_df, self.sp_seq_c_dict
+        """
+        
+        # now go on a per svg cat, per sample, per seq basis to create the rectangles and add them to a patches list
+        rect_patch_list = []
+        rect_c_list = []
+        
+        for sample, x_loc in self.sample_xcoord_dict.items():
+            if sample in self.sp_df.index:
+                bottom = 0
+                abund_series = self.sp_df.loc[sample]
+                abund_series = abund_series[abund_series>0]
+                abund_series = abund_series / sum(abund_series)
+                for seq, abund in abund_series.items():
+                    rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=self.sp_seq_c_dict[seq]))
+                    rect_c_list.append(self.sp_seq_c_dict[seq])
+                    bottom += abund
+
+        # Here we have the rectangle patches done
+        this_cmap = ListedColormap(rect_c_list)
+        
+        # Here we have a list of Rectangle patches
+        # Create the PatchCollection object from the patches_list
+        patches_collection = PatchCollection(rect_patch_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(rect_patch_list)))
+        # if n_subplots is only 1 then we can refer directly to the axarr object
+        # else we will need ot reference the correct set of axes with i
+        # Add the pathces to the axes
+        self.stacked_bar_ax_sp.set_xlim(self.dendro_ax.get_xlim())
+        self.stacked_bar_ax_sp.set_ylim(0,1)
+        self.stacked_bar_ax_sp.spines['right'].set_visible(False)
+        self.stacked_bar_ax_sp.spines['top'].set_visible(False)
+        self.stacked_bar_ax_sp.spines['bottom'].set_visible(False)
+        self.stacked_bar_ax_sp.spines['left'].set_visible(False)
+        self.stacked_bar_ax_sp.set_xticks([])
+        self.stacked_bar_ax_sp.set_yticks([])
+        self.stacked_bar_ax_sp.add_collection(patches_collection)
+        self.stacked_bar_ax_sp.autoscale_view()
         return
 
     def _curate_abundance_df(self, abundance_dict_path):
