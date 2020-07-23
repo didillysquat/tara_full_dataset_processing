@@ -1074,7 +1074,7 @@ class CheckPwrRai(EighteenSBase):
     '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/POC_sub_one_readset_list.txt'
 
     """
-    def __init__(self, genus='Porites', misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
+    def __init__(self, genus='Pocillopora', misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
     readset_list=None):
         super().__init__()
         self.dist_by = dist_by
@@ -1086,7 +1086,8 @@ class CheckPwrRai(EighteenSBase):
         self.genus = genus
         self.distance_method = 'unifrac'
         self.n_clusters = 4
-        self.fig_dir = os.path.join(self.fig_output_dir_18s, f'{}')
+        self.fig_dir = os.path.join(self.fig_output_dir_18s, f'{self.genus}')
+        os.makedirs(self.fig_dir, exist_ok=True)
         if readset_list is not None:
             # Then we are being provided a set of sqeuences to work with
             # We will allow these to be provided as well as the island list
@@ -1137,8 +1138,7 @@ class CheckPwrRai(EighteenSBase):
         # join the four plots on second row to plot the hierarchical clustering in.
         
         self.pwr_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_pwr).labels_, index=self.pcoa_df_pwr.index, name='label')
-        # self.rai_kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df_rai).labels_, index=self.pcoa_df_rai.index, name='label')
-        self.snp_classification = self.poc_snp_classifications
+        
         self.agreement_list = []
         # To make the networks we will need to work with the abundance df
         # The abundance df can be got from the cache.
@@ -1152,8 +1152,10 @@ class CheckPwrRai(EighteenSBase):
         if self.genus == 'Pocillopora':
             self.poc_clone_list_str = [['I02S03C006POC', 'I02S03C010POC'], ['I03S01C011POC', 'I03S01C012POC'], ['I03S01C017POC', 'I03S01C018POC', 'I03S01C019POC', 'I03S01C020POC'], ['I03S01C015POC', 'I03S01C016POC'], ['I05S02C006POC', 'I05S02C010POC']]
             self.poc_clone_list_str = [self._convert_index_to_sample_ids(_) for _ in self.poc_clone_list_str]
+            self.snp_classification = self.poc_snp_classifications
         else:
             self.poc_clone_list_str = []
+            self.snp_classification = self.por_snp_classifications
 
     def _get_dist_df(self):
         dist_df = pd.read_csv(self.dist_path, index_col=0, header=None)
@@ -1425,8 +1427,8 @@ class CheckPwrRai(EighteenSBase):
         
         agreement = AgreementCalculator(lab_ser_one=labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
         self.agreement_list.append(agreement)
-        pc2_ax_kmeans_cats.set_title(f'PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
-        pc3_ax_kmeans_cats.set_title(f'PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
+        pc2_ax_kmeans_cats.set_title(f'{self.genus} PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
+        pc3_ax_kmeans_cats.set_title(f'{self.genus} PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
 
         # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
         samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
@@ -1450,8 +1452,8 @@ class CheckPwrRai(EighteenSBase):
             ax.yaxis.set_minor_locator(AutoMinorLocator(5))
             ax.grid(color='lightgrey', linestyle='-', linewidth='0.5', which='both')
         
-        pc2_ax_snp_cats.set_title(f'PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
-        pc3_ax_snp_cats.set_title(f'PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
+        pc2_ax_snp_cats.set_title(f'{self.genus} PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
+        pc3_ax_snp_cats.set_title(f'{self.genus} PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=snp classifications')
         return colour_dict_kmeans, colour_dict_svd
     
     def _get_pcoa_df(self, pcoa_path, island, readset_list):
@@ -1462,7 +1464,7 @@ class CheckPwrRai(EighteenSBase):
             foo = 'bar'
         except Exception as e:
             dist = EighteenSDistance(
-            host_genus='Pocillopora', remove_majority_sequence=True, 
+            host_genus=self.genus, remove_majority_sequence=True, 
             exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
             snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
             normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=float(self.misco),
