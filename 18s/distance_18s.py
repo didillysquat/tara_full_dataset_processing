@@ -107,6 +107,8 @@ class EighteenSDistance(EighteenSBase):
             else:
                 raise NotImplementedError('Unrecognised type of reaset_list')
             readset_hash = hashlib.md5(str(self.readset_list).encode('utf-8')).hexdigest()
+        else:
+            self.readset_list = None
         self.min_num_distinct_seqs_per_sample = min_num_distinct_seqs_per_sample
         if self.most_abund_seq_cutoff !=0 and self.most_abund_seq_cutoff < self.min_num_distinct_seqs_per_sample:
             raise RuntimeError(f'most_abund_seq_cutoff ({self.most_abund_seq_cutoff}) <' 

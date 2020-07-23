@@ -1071,10 +1071,11 @@ class CheckPwrRai(EighteenSBase):
     939d3 = sub_six = This is quite messy and requires more. We will get rid of the right hand side. sub_8 = rhs sub_9 = lhs
     ec2ab = sub_seven = This is end of the line, it is messy, no clear clustering.
     1831a = sub_8 it is end of the line
+    '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/POC_sub_one_readset_list.txt'
 
     """
-    def __init__(self, misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
-    readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/sub_three_readset_list.txt'):
+    def __init__(self, genus='Porites', misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
+    readset_list=None):
         super().__init__()
         self.dist_by = dist_by
         self.misco = misco
@@ -1082,10 +1083,10 @@ class CheckPwrRai(EighteenSBase):
         self.masco = masco
         self.meta_info_table_path = '/home/humebc/projects/tara/tara_full_dataset_processing/output/coral_18S_meta_info_table_2020-04-15T12_53_51.189071UTC.csv'
         self.meta_info_df = self._get_meta_info_df()
-        self.genus = 'Pocillopora'
+        self.genus = genus
         self.distance_method = 'unifrac'
         self.n_clusters = 4
-        self.fig_dir = '/home/humebc/projects/tara/tara_full_dataset_processing/18s/figures'
+        self.fig_dir = os.path.join(self.fig_output_dir_18s, f'{}')
         if readset_list is not None:
             # Then we are being provided a set of sqeuences to work with
             # We will allow these to be provided as well as the island list
@@ -1107,33 +1108,31 @@ class CheckPwrRai(EighteenSBase):
         if island == 'original_three':
             self.island = 'original_three'
             self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I06', 'I10', 'I15']
         elif island == 'ten_plus_one':
             self.island = 'ten_plus_one'
             self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
         else:
             self.island = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island.split(',')]
             self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'pwr_rai_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}.png')
-            self.pop_art_fig_name = f'popart_in_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}.png')
+            self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
         self.dist_path = self.pcoa_path_pwr.replace('_pcoa.csv.gz', '.dist.gz')
         
-        # self.pcoa_path_rai = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_rai_False_{misco}_{masco}_3_original_three_pcoa.csv.gz')
         self.pcoa_df_pwr = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
         self.dist_df = self._get_dist_df()
-        # self.pcoa_df_rai = self._get_pcoa_df(self.pcoa_path_rai)
-        # self.fig, self.ax_arr = plt.subplots(2,4, figsize=(16,8))
+        
         self.fig = plt.figure(figsize=(16,8))
         gs = self.fig.add_gridspec(3, 4, height_ratios=[0.5,0.5, 0.5])
         self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
         self.dendro_ax = self.fig.add_subplot(gs[1, :])
         self.stacked_bar_ax = self.fig.add_subplot(gs[2, :])
-        # self.dendo_scat = self.fig.add_subplot(gs[2,:])
+        
         # Four plots on first row for the pcoa plots
         # join the four plots on second row to plot the hierarchical clustering in.
         
@@ -1150,6 +1149,11 @@ class CheckPwrRai(EighteenSBase):
         # are in the same order.
         self.abundance_df, self.abundance_dict = self._curate_abundance_df(self.abundance_dict_path)
         self.abundance_df = self.abundance_df.reindex(self.pcoa_df_pwr.index)
+        if self.genus == 'Pocillopora':
+            self.poc_clone_list_str = [['I02S03C006POC', 'I02S03C010POC'], ['I03S01C011POC', 'I03S01C012POC'], ['I03S01C017POC', 'I03S01C018POC', 'I03S01C019POC', 'I03S01C020POC'], ['I03S01C015POC', 'I03S01C016POC'], ['I05S02C006POC', 'I05S02C010POC']]
+            self.poc_clone_list_str = [self._convert_index_to_sample_ids(_) for _ in self.poc_clone_list_str]
+        else:
+            self.poc_clone_list_str = []
 
     def _get_dist_df(self):
         dist_df = pd.read_csv(self.dist_path, index_col=0, header=None)
@@ -1267,20 +1271,28 @@ class CheckPwrRai(EighteenSBase):
         self.sample_xcoord_dict = {samp: xcoord for samp, xcoord in zip(dendro['ivl'], x_coords)}
         # Then we can plot up a miniscatter below the dendro ax
         # Now we plot up for each of the classifications and the unclassified
-        
+        # The points at which we place the classification colours needs to be adjusted dynamically.
+        scale_factor = self.dendro_ax.get_ylim()[1]/.03
         samples_wo_classification = [_ for _ in self.sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
         # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[1 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
-        self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.001 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
+        self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_wo_classification], y=[-.002 * scale_factor for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
             samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_svd.index]
             # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_in_common], y=[1 for i in range(len(samples_in_common))], s=2)
-            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 for i in range(len(samples_in_common))], s=3, marker='s', c=self.svd_cat_colours_dict[svd])
+            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.002 * scale_factor for i in range(len(samples_in_common))], s=3, marker='s', c=self.svd_cat_colours_dict[svd])
         for kclass in self.pwr_kmeans_labels.unique():
             of_class = self.pwr_kmeans_labels[self.pwr_kmeans_labels==kclass]
             samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_class.index]
-            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.0005 for i in range(len(samples_in_common))], s=3, marker='s', c=self.kmeans_cat_colours_dict[kclass])
-        self.dendro_ax.set_ylim(-0.002, self.dendro_ax.get_ylim()[1])
+            self.dendro_ax.scatter(x=[self.sample_xcoord_dict[_] for _ in samples_in_common], y=[-.001 * scale_factor for i in range(len(samples_in_common))], s=3, marker='s', c=self.kmeans_cat_colours_dict[kclass])
+        # Plot up the clone associations in this space below the dendo too
+        for clone_ind, clone_list in enumerate(self.poc_clone_list_str):
+            for clone_name in clone_list:
+                if clone_name in self.pcoa_df_pwr.index:
+                    self.dendro_ax.text(x=self.sample_xcoord_dict[clone_name], y=-.003 * scale_factor, s=f'{clone_ind}', fontsize='xx-small', horizontalalignment='center', verticalalignment='top')
+                    # self.dendro_ax.scatter(x=self.sample_xcoord_dict[clone_name], y=-.0015, s=12, marker=f'${clone_ind}$', c='black')
+        
+        self.dendro_ax.set_ylim(-0.004 * scale_factor, self.dendro_ax.get_ylim()[1])
         self.dendro_ax.collections[0]._linewidths=np.array([0.5])
         
         self.dendro_ax.spines['right'].set_visible(False)
@@ -1297,7 +1309,7 @@ class CheckPwrRai(EighteenSBase):
         self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}.png')
         print('saving .png')
         
-        plt.savefig(self.fig_path, dpi=600)
+        plt.savefig(self.fig_path, dpi=1200)
         print(f'fig_path: {self.fig_path}')
         print('done')
     
