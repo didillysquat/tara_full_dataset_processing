@@ -1066,14 +1066,20 @@ class CheckPwrRai(EighteenSBase):
     939d3 = sub_six = This is quite messy and requires more. We will get rid of the right hand side. sub_8 = rhs sub_9 = lhs
     ec2ab = sub_seven = This is end of the line, it is messy, no clear clustering.
     1831a = sub_8 it is end of the line
-    '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/POC_sub_one_readset_list.txt'
-    TODO Plot the information points as rectanges, with set positions
-    TODO Add in Island and site information
-    TODO add in replicate information
+    '/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/tech_sub_one_readset_list.txt'
+    
+    When we included the replicates, all of the above subgroups became meaningless.
+    tech_sub_one_readset_list.txt is the ten plus 1 minus 7 samples that were outliers.
     """
-    def __init__(self, genus='Pocillopora', misco='0.01', masco='10', inv_misco='0.95', island='ten_plus_one', dist_by='samples', 
-    readset_list=None):
+    def __init__(self, genus='Pocillopora', misco='0.01', masco='0', inv_misco='1.0', island='original_three', dist_by='samples', 
+    readset_list='/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/original_three_readsets.txt', use_replicates=False, w_zooxs=False):
         super().__init__()
+        self.w_zooxs = w_zooxs
+        if w_zooxs:
+            self.w_zooxs_str = 'w_zooxs'
+        else:
+            self.w_zooxs_str = 'wo_zooxs'
+        self.use_replicates = use_replicates
         self.dist_by = dist_by
         self.misco = misco
         self.inv_misco = inv_misco
@@ -1082,7 +1088,7 @@ class CheckPwrRai(EighteenSBase):
         self.meta_info_df = self._get_meta_info_df()
         self.genus = genus
         self.distance_method = 'unifrac'
-        self.n_clusters = 4
+        self.n_clusters = 3
         self.fig_dir = os.path.join(self.fig_output_dir_18s, f'{self.genus}')
         os.makedirs(self.fig_dir, exist_ok=True)
         if readset_list is not None:
@@ -1105,40 +1111,61 @@ class CheckPwrRai(EighteenSBase):
             readset_hash_str = ''
         if island == 'original_three':
             self.island = 'original_three'
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_{self.use_replicates}_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}_{self.w_zooxs_str}.png')
             self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I06', 'I10', 'I15']
         elif island == 'ten_plus_one':
             self.island = 'ten_plus_one'
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}.png')
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_{self.use_replicates}_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{self.island}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.n_clusters}_{self.w_zooxs_str}.png')
             self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{self.island}{readset_hash_str}_{self.dist_by}'
             # self.island = ['I01','I02','I03','I04','I05','I06','I07','I08','I09','I10','I15']
         else:
             self.island = [f'I0{_}' if int(_) < 10 else f'I{_}' for _ in island.split(',')]
-            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_False_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}{readset_hash_str}_pcoa.csv.gz')
-            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}.png')
+            self.pcoa_path_pwr = os.path.join(self.output_dir_18s, f'{self.genus}_True_True_True_{self.use_replicates}_biallelic_{self.distance_method}_dist_1000_pwr_False_{misco}_{masco}_3_{inv_misco}_{"_".join(self.island)}{readset_hash_str}_pcoa.csv.gz')
+            self.fig_path = os.path.join(self.fig_dir, f'{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.n_clusters}_{self.w_zooxs_str}.png')
             self.pop_art_fig_name = f'popart_in_{self.genus}_{self.misco}_{self.masco}_{self.inv_misco}_{"_".join(self.island)}{readset_hash_str}_{self.dist_by}'
+        
+        self.readset_to_sample_id_dict = {rs_ind: smp_id for rs_ind, smp_id in zip(self.fastq_info_df.index, self.fastq_info_df['sample-id'])}
         self.dist_path = self.pcoa_path_pwr.replace('_pcoa.csv.gz', '.dist.gz')
         
         self.pcoa_df = self._get_pcoa_df(self.pcoa_path_pwr, island, readset_list)
+        # Given that we are going to hvae to work with readsets in the various dataframes
+        # so that we can work with tech reps, we will need to know which sample-id the readsets we have represent
+        self.sample_ids_represented = set([self.readset_to_sample_id_dict[_] for _ in self.pcoa_df.index])
+        # Now refine the self.readset_to_sample_id_dict
+        self.readset_to_sample_id_dict = {k: v for k, v in self.readset_to_sample_id_dict.items() if v in self.sample_ids_represented}
         self.dist_df = self._get_dist_df()
         
-        self.fig = plt.figure(figsize=(20,8))
-        gs = self.fig.add_gridspec(4, 4, height_ratios=[0.5, 0.5, 0.5, 0.5])
+        # For readset in the fastq info df get the sample-id
+        # add to done. Then if replicate identify the other readsets
+        self.sample_id_to_readset_list_dict = {}
+        done_list = []
+        for readset_ind in self.fastq_info_df.index:
+            sample_id = self.fastq_info_df.at[readset_ind, 'sample-id']
+            if sample_id in self.sample_ids_represented:
+                if  not sample_id in done_list:
+                    done_list.append(sample_id)
+                    # Get all the other readsets that have this sample-id in common
+                    self.sample_id_to_readset_list_dict[sample_id] = list(self.fastq_info_df[self.fastq_info_df['sample-id']==sample_id].index)
+                else:
+                    continue
+
+        if self.w_zooxs:
+            self.fig = plt.figure(figsize=(20,8))
+            gs = self.fig.add_gridspec(4, 4, height_ratios=[0.5, 0.5, 0.5, 0.5])
+            self.stacked_bar_ax_sp = self.fig.add_subplot(gs[3, :])
+            self.sp_df, self.sp_seq_c_dict = self.get_sp_post_med_df()
+        else:
+            self.fig = plt.figure(figsize=(16,8))
+            gs = self.fig.add_gridspec(3, 4, height_ratios=[0.5, 0.5, 0.5])
         self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
         self.dendro_ax = self.fig.add_subplot(gs[1, :])
         self.stacked_bar_ax = self.fig.add_subplot(gs[2, :])
-        self.stacked_bar_ax_sp = self.fig.add_subplot(gs[3, :])
         
-        # TODO import the sp_post_med_count data in a very similar format to the abundance df so that we can reuse the
-        # 18S stacked bar chart code
-        self.sp_df, self.sp_seq_c_dict = self.get_sp_post_med_df()
-
         # Four plots on first row for the pcoa plots
         # join the four plots on second row to plot the hierarchical clustering in.
-        
         self.kmeans_labels = pd.Series(KMeans(n_clusters=self.n_clusters, n_init=100).fit(self.pcoa_df).labels_, index=self.pcoa_df.index, name='label')
         
         self.agreement_list = []
@@ -1164,7 +1191,7 @@ class CheckPwrRai(EighteenSBase):
         df = df.set_index('sample-id')
         df = df.iloc[:-1,12:]
         col_list, grey_list = self.get_colour_lists()
-        df = df.loc[[_ for _ in df.index if _ in self.pcoa_df.index]]
+        df = df.loc[[_ for _ in df.index if _ in self.sample_ids_represented]]
         # Normalise abundances to 1
         df = df.divide(df.sum(axis=1), axis=0)
         df = df.reindex(df.sum().sort_values(ascending=False).index, axis=1)
@@ -1180,23 +1207,6 @@ class CheckPwrRai(EighteenSBase):
     def _get_dist_df(self):
         dist_df = pd.read_csv(self.dist_path, index_col=0, header=None)
         dist_df.columns = dist_df.index
-
-        drop_list = []
-
-        for ind in dist_df.index:
-            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
-                drop_list.append(ind)
-        
-        # Now drop the rows and columns
-        dist_df.drop(index=drop_list, columns=drop_list, inplace=True)
-
-        # Now we need to convert these to sample-id format.
-        sample_id_list = []
-        for ind in dist_df.index:
-            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
-        
-        dist_df.index = sample_id_list
-        dist_df.columns = sample_id_list
         return dist_df
 
     def make_network(self):
@@ -1294,8 +1304,7 @@ class CheckPwrRai(EighteenSBase):
         # Then we can plot up a miniscatter below the dendro ax
         # Now we plot up for each of the classifications and the unclassified
         # The points at which we place the classification colours needs to be adjusted dynamically.
-        scale_factor = self.dendro_ax.get_ylim()[1]/.03
-        samples_wo_classification = [_ for _ in self.sample_xcoord_dict.keys() if _ not in self.snp_classification.index]
+        samples_wo_classification = [_ for _ in self.sample_xcoord_dict.keys() if self.readset_to_sample_id_dict[_] not in self.snp_classification.index]
         # self.dendo_scat.scatter(x=[sample_xcoord_dict[_] for _ in samples_wo_classification], y=[1 for i in range(len(samples_wo_classification))], c='lightgrey', s=2)
         # Do these as rectangles rather than scatter
         # Let's work with 5% of the height above.
@@ -1304,6 +1313,7 @@ class CheckPwrRai(EighteenSBase):
         kmeans_bottom = 0
         snp_bottom = kmeans_bottom - ten_p
         clone_bottom = snp_bottom - ten_p
+        rep_bottom = clone_bottom - ten_p
         rect_patch_list = []
         rect_c_list = []
         # KMEANS
@@ -1319,7 +1329,7 @@ class CheckPwrRai(EighteenSBase):
             rect_c_list.append('lightgrey')
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
-            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if _ in of_svd.index]
+            samples_in_common = [_ for _ in self.sample_xcoord_dict.keys() if self.readset_to_sample_id_dict[_] in of_svd.index]
             for sample in samples_in_common:
                 rect_patch_list.append(Rectangle((self.sample_xcoord_dict[sample]-5, snp_bottom), 10, -ten_p, color=self.svd_cat_colours_dict[svd][0]))
                 rect_c_list.append(self.svd_cat_colours_dict[svd][0])
@@ -1337,34 +1347,78 @@ class CheckPwrRai(EighteenSBase):
         # Plot up the clone associations in this space below the dendo too
         for clone_ind, clone_list in enumerate(self.poc_clone_list_str):
             for clone_name in clone_list:
-                if clone_name in self.pcoa_df.index:
-                    self.dendro_ax.text(x=self.sample_xcoord_dict[clone_name]-5, y=clone_bottom, s=f'{clone_ind}', fontsize='xx-small', horizontalalignment='left', verticalalignment='top')
-                    # self.dendro_ax.scatter(x=self.sample_xcoord_dict[clone_name], y=-.0015, s=12, marker=f'${clone_ind}$', c='black')
+                if clone_name in self.sample_ids_represented:
+                    # Now there could be multiple samples that match this
+                    for readset_name in self.sample_id_to_readset_list_dict[clone_name]:
+                        self.dendro_ax.text(x=self.sample_xcoord_dict[readset_name]-5, y=clone_bottom - (0.5*ten_p), s=f'{clone_ind}', fontsize='xx-small', horizontalalignment='left', verticalalignment='center')
         
-        
-        self.dendro_ax.set_ylim(-2 * ten_p, self.dendro_ax.get_ylim()[1])
-        # self.dendro_ax.set_ylim(-0.004 * scale_factor, self.dendro_ax.get_ylim()[1])
+        self.dendro_ax.set_ylim(-7 * ten_p, self.dendro_ax.get_ylim()[1])
         self.dendro_ax.collections[0]._linewidths=np.array([0.5])
         
         self.dendro_ax.spines['right'].set_visible(False)
         self.dendro_ax.spines['top'].set_visible(False)
         self.dendro_ax.spines['bottom'].set_visible(False)
+        self.dendro_ax.spines['left'].set_visible(False)
+        self.dendro_ax.set_yticks([])
+        # Add text for the snp classification and the kmeans classification
+        len_of_ax = self.dendro_ax.get_xlim()[1]
+        # let's have a 2% buffer.
+        buff = 0.005 * len_of_ax
+        self.dendro_ax.text(s='kmeans', x=0-buff, y=0.5*-ten_p + kmeans_bottom, horizontalalignment='right', fontsize='xx-small', verticalalignment='center')
+        self.dendro_ax.text(s='SNP', x=0-buff, y=0.5*-ten_p + snp_bottom, horizontalalignment='right', fontsize='xx-small', verticalalignment='center')
+        if self.genus == 'Pocillopora':
+            self.dendro_ax.text(s='clones', x=0-buff, y=0.5*-ten_p + clone_bottom, horizontalalignment='right', fontsize='xx-small', verticalalignment='center')
         
+        # for readset in self.pcoa_df.index:
+        #     sample_id = self.readset_to_sample_id_dict[readset]
+        #     if len(self.sample_id_to_readset_list_dict[sample_id]) > 1:
+        #         print(sample_id)
+
         self._plot_stacked_bars()
-        self._plot_stacked_bars_zooxs()
-        lab_list = [''.join(self.sample_provenance_df.at[tick_lab._text, 'SAMPLING DESIGN LABEL'].split('-')[1:]) for tick_lab in self.dendro_ax.get_xticklabels()]
-        self.dendro_ax.set_xticklabels(lab_list)
+        if self.w_zooxs:
+            self._plot_stacked_bars_zooxs()
+        # We want the labels to reflect whether they are tech reps or not. We will add an R
+        # at the end of the label and a number to signify
+        # There is no easy way to convert the readset labels to the location format
+        # to include tech rep identifier.
+        # Work through a subset of the sample-id to readset dict
+        # and use this to convert eh label names
+        new_lab_list = []
+        logged_dict = {}
+        for readset in [tick_lab._text for tick_lab in self.dendro_ax.get_xticklabels()]:
+            sample_id = self.readset_to_sample_id_dict[readset]
+            num_of_reps = len(self.sample_id_to_readset_list_dict[sample_id])
+            if num_of_reps == 1:
+                # No tech reps
+                new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]))
+            else:
+                # Should be techreps
+                if sample_id not in logged_dict:
+                    tech_rep = 0
+                    logged_dict[sample_id] = 0
+                else:
+                    tech_rep = logged_dict[sample_id] + 1
+                    logged_dict[sample_id] += 1
+                new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]) + f'R{tech_rep}')
+                
+        # lab_list = [''.join(self.sample_provenance_df.at[self.readset_to_sample_id_dict[tick_lab._text], 'SAMPLING DESIGN LABEL'].split('-')[1:]) for tick_lab in self.dendro_ax.get_xticklabels()]
+        self.dendro_ax.set_xticklabels(new_lab_list, verticalalignment='bottom')
         foo = 'bar'
         plt.tight_layout()
         
         # Append the agreement results to the name
-        self.fig_path = self.fig_path.replace('.png', f'_{self.agreement_list[0]:.2f}.png')
+        # self.fig_path = self.fig_path.replace('.png', f'.png')
         print('saving .png')
         
         plt.savefig(self.fig_path, dpi=1200)
         print(f'fig_path: {self.fig_path}')
         print('done')
     
+    def _get_colour_lists(self):
+        colour_palette = get_colour_list()
+        grey_palette = ['#D0CFD4', '#89888D', '#4A4A4C', '#8A8C82', '#D4D5D0', '#53544F']
+        return colour_palette, grey_palette
+
     def _plot_stacked_bars(self):
         """
         Aim of this funciton will be to plot up stacked bar plots on a sample per sample basis based on the abundance_df.
@@ -1382,9 +1436,11 @@ class CheckPwrRai(EighteenSBase):
         # tot_width = num_samples + (num_svg_cats * 2)
         # For each sample, we will want to plot the sequences in the order of total abundance
         self.abundance_df = self.abundance_df.reindex(self.abundance_df.sum().sort_values(ascending=False).index, axis=1)
-        seq_c_list = get_colour_list()
-        assert(len(list(self.abundance_df)) < len(seq_c_list))
-        seq_c_dict = {seq:c for seq, c in zip(list(self.abundance_df), seq_c_list[:len(list(self.abundance_df))])}
+        seq_c_list, grey_list = self._get_colour_lists()
+        # seq_c_list = get_colour_list()
+        # assert(len(list(self.abundance_df)) < len(seq_c_list))
+        # seq_c_dict = {seq:c for seq, c in zip(list(self.abundance_df), seq_c_list[:len(list(self.abundance_df))])}
+        seq_c_dict = {seq: seq_c_list[i] if i < len(seq_c_list) else grey_list[i % len(grey_list)] for i, seq in enumerate(list(self.abundance_df))}
         # now go on a per svg cat, per sample, per seq basis to create the rectangles and add them to a patches list
         rect_patch_list = []
         rect_c_list = []
@@ -1419,6 +1475,7 @@ class CheckPwrRai(EighteenSBase):
         self.stacked_bar_ax.set_yticks([])
         self.stacked_bar_ax.add_collection(patches_collection)
         self.stacked_bar_ax.autoscale_view()
+        self.stacked_bar_ax.set_ylabel('host 18S sequences', fontsize='small')
         return
 
     def _plot_stacked_bars_zooxs(self):
@@ -1437,16 +1494,21 @@ class CheckPwrRai(EighteenSBase):
         rect_patch_list = []
         rect_c_list = []
         
-        for sample, x_loc in self.sample_xcoord_dict.items():
-            if sample in self.sp_df.index:
-                bottom = 0
-                abund_series = self.sp_df.loc[sample]
+        # for sample, x_loc in self.sample_xcoord_dict.items():
+        for sample_id in self.sp_df.index:
+            if sample_id in self.sample_ids_represented:
+                # There could be two readsets for a given sample
+                # We should plot the zooxs data at both
+                abund_series = self.sp_df.loc[sample_id]
                 abund_series = abund_series[abund_series>0]
                 abund_series = abund_series / sum(abund_series)
-                for seq, abund in abund_series.items():
-                    rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=self.sp_seq_c_dict[seq]))
-                    rect_c_list.append(self.sp_seq_c_dict[seq])
-                    bottom += abund
+                for readset in self.sample_id_to_readset_list_dict[sample_id]:
+                    x_loc = self.sample_xcoord_dict[readset]
+                    bottom = 0
+                    for seq, abund in abund_series.items():
+                        rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=self.sp_seq_c_dict[seq]))
+                        rect_c_list.append(self.sp_seq_c_dict[seq])
+                        bottom += abund
 
         # Here we have the rectangle patches done
         this_cmap = ListedColormap(rect_c_list)
@@ -1468,6 +1530,7 @@ class CheckPwrRai(EighteenSBase):
         self.stacked_bar_ax_sp.set_yticks([])
         self.stacked_bar_ax_sp.add_collection(patches_collection)
         self.stacked_bar_ax_sp.autoscale_view()
+        self.stacked_bar_ax_sp.set_ylabel('zooxs ITS2 sequences', fontsize='small')
         return
 
     def _curate_abundance_df(self, abundance_dict_path):
@@ -1478,27 +1541,6 @@ class CheckPwrRai(EighteenSBase):
         abundance_dict = compress_pickle.load(abundance_dict_path)
         abundance_df = pd.DataFrame.from_dict(abundance_dict, orient='index')
         abundance_df[pd.isna(abundance_df)] = 0
-        # Get rid of tech replicates and convert readset to sample-id
-        drop_list = []
-        for ind in abundance_df.index:
-            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
-                drop_list.append(ind)
-        
-        # Now drop the rows and columns
-        abundance_df.drop(index=drop_list, inplace=True)
-
-        # Drop in the dict too
-        for k in drop_list:
-            del abundance_dict['key']
-
-        # Now we need to convert these to sample-id format.
-        sample_id_list = []
-        for ind in abundance_df.index:
-            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
-        abundance_df.index = sample_id_list
-
-        # Convert dict too
-        abundance_dict = {self.fastq_info_df.at[k, 'sample-id'] : v for k, v in abundance_dict.items()}
         
         return abundance_df, abundance_dict
 
@@ -1519,24 +1561,18 @@ class CheckPwrRai(EighteenSBase):
         # sort both labels and handles by labels
         leg_labels, handles = zip(*sorted(zip(leg_labels, handles), key=lambda t: t[0]))
         pc2_ax_kmeans_cats.legend(handles, leg_labels, loc='best', fontsize='xx-small')
-        # pc2_ax_kmeans_cats.legend(loc='best', fontsize='xx-small')
-        samples_in_common = list(set(self.snp_classification.index).intersection(set(labels.index)))
-        labels = labels.reindex(index=samples_in_common)
-        snp_classification_reindexed = self.snp_classification.reindex(index=samples_in_common)
         
-        agreement = AgreementCalculator(lab_ser_one=labels, lab_ser_two=snp_classification_reindexed['label'], temp_dir_18s=self.temp_dir_18s, cache_dir_18s=self.cache_dir_18s).calculate_agreement()
-        self.agreement_list.append(agreement)
         pc2_ax_kmeans_cats.set_title(f'{self.genus} PC1 PC2\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
         pc3_ax_kmeans_cats.set_title(f'{self.genus} PC1 PC3\nmisco {self.misco} masco {self.masco} inv_misco {self.inv_misco}\ncol=kmeans clustering @ k=4')
 
         # Secondly, plot up in the next two axes the 18s ordiantion first 3 coordinates but with the snp classiciations
-        samples_not_in_common = [_ for _ in pcoa_df.index if _ not in self.snp_classification.index]
+        samples_not_in_common = [_ for _ in self.pcoa_df.index if self.readset_to_sample_id_dict[_] not in self.snp_classification.index]
         pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC2'], c='lightgrey')
         pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_not_in_common, 'PC1'], pcoa_df.loc[samples_not_in_common, 'PC3'], c='lightgrey')
         colour_dict_svd = {}
         for svd in self.snp_classification['label'].unique():
             of_svd = self.snp_classification[self.snp_classification['label']==svd]
-            samples_in_common = [_ for _ in pcoa_df.index if _ in of_svd.index]
+            samples_in_common = [_ for _ in self.pcoa_df.index if self.readset_to_sample_id_dict[_] in of_svd.index]
             scat = pc2_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC2'], label=svd)
             pc3_ax_snp_cats.scatter(pcoa_df.loc[samples_in_common, 'PC1'], pcoa_df.loc[samples_in_common, 'PC3'], label=svd)
             colour_dict_svd[svd] = scat._facecolors
@@ -1564,7 +1600,7 @@ class CheckPwrRai(EighteenSBase):
         except Exception as e:
             dist = EighteenSDistance(
             host_genus=self.genus, remove_majority_sequence=True, 
-            exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=False, 
+            exclude_secondary_seq_samples=True, exclude_no_use_samples=True, use_replicates=self.use_replicates, 
             snp_distance_type='biallelic', dist_method_18S='unifrac', approach='dist',
             normalisation_abundance=None, normalisation_method='pwr',  only_snp_samples=False, samples_at_least_threshold=float(self.misco),
             most_abund_seq_cutoff=int(self.masco), min_num_distinct_seqs_per_sample=3, mafft_num_proc=10, island_list=island,
@@ -1573,8 +1609,14 @@ class CheckPwrRai(EighteenSBase):
             dist.make_and_plot_dist_and_pcoa()
             try:
                 pcoa_df = pd.read_csv(pcoa_path, index_col=0)
-            except Exception as e:
-                raise RunTimeError('pcoa file does not appear to exist')
+            except FileNotFoundError:
+                try:
+                    # We try this as the error is likely cause due to a formating of the float numbers in the paths.
+                    pcoa_df = pd.read_csv(dist.pcoa_out_path, index_col=0)
+                    self.pcoa_path_pwr = pcoa_path
+                    self.dist_path = dist.dist_out_path
+                except Exception as e:
+                    raise RuntimeError('pcoa file does not appear to exist')
             # here we can make the pcoa file
         
         # try:
@@ -1587,7 +1629,7 @@ class CheckPwrRai(EighteenSBase):
         except Exception as e:
             foo = 'bar'
         # Get rid of tech replicates and convert readset to sample-id
-        drop_list = []
+        # drop_list = []
         # TODO we are here. We need to implement readset lists in distance_18s.py
         # This is a cheeky bit of code I used to output the subsets of readsets from the ten plus one that I thought we could try working with.
         
@@ -1596,10 +1638,9 @@ class CheckPwrRai(EighteenSBase):
         # sub_seven = [_ for _ in pcoa_df.index if (_ not in sub_five) and (_ not in sub_six)]
         # sub_eight = pcoa_df[pcoa_df['PC1'] > 0.04].index
         # sub_nine = pcoa_df[pcoa_df['PC1'] < 0.04].index
-
-        
-        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_seven_readset_list.txt'),'w') as f:
-        #     for out_ind in sub_seven:
+        # tech_sub_one = [readset for readset in pcoa_df[(pcoa_df['PC1'] > -0.05) & (pcoa_df['PC1'] < 0.025)].index]
+        # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'tech_sub_one_readset_list.txt'),'w') as f:
+        #     for out_ind in tech_sub_one:
         #         f.write(f'{out_ind}\n')
         
         # with open(os.path.join('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input', 'sub_nine_readset_list.txt'),'w') as f:
@@ -1607,20 +1648,22 @@ class CheckPwrRai(EighteenSBase):
         #         f.write(f'{out_ind}\n')
 
         
-
-        for ind in pcoa_df.index:
-            if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
-                drop_list.append(ind)
+        # In theory the removal of replicates should already have happened.
+        # for ind in pcoa_df.index:
+        #     if not self.meta_info_df.at[ind, 'is_representative_for_sample']:
+        #         drop_list.append(ind)
         
-        # Now drop the rows and columns
-        pcoa_df.drop(index=drop_list, inplace=True)
+        # # Now drop the rows and columns
+        # pcoa_df.drop(index=drop_list, inplace=True)
 
         # Now we need to convert these to sample-id format.
-        sample_id_list = []
-        for ind in pcoa_df.index:
-            sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
+        # If we want to be able to work with replicates then we will need to work with a unique identifier
+        # We will have to shift to readset.
+        # sample_id_list = []
+        # for ind in pcoa_df.index:
+        #     sample_id_list.append(self.fastq_info_df.at[ind, 'sample-id'])
         
-        pcoa_df.index = sample_id_list
+        # pcoa_df.index = sample_id_list
         return pcoa_df
 
 
