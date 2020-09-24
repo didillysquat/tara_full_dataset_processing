@@ -1158,11 +1158,12 @@ class CheckPwrRai(EighteenSBase):
             self.stacked_bar_ax_sp = self.fig.add_subplot(gs[3, :])
             self.sp_df, self.sp_seq_c_dict = self.get_sp_post_med_df()
         else:
-            self.fig = plt.figure(figsize=(16,8))
-            gs = self.fig.add_gridspec(3, 4, height_ratios=[0.5, 0.5, 0.5])
-        self.pcoa_axes = [self.fig.add_subplot(gs[0, i]) for i in range(4)]
+            self.fig = plt.figure(figsize=(16,10))
+            gs = self.fig.add_gridspec(4, 4, height_ratios=[0.5, 0.5, 0.5, 0.5])
+        self.all_seqs_ax = self.fig.add_subplot(gs[0, :])
         self.dendro_ax = self.fig.add_subplot(gs[1, :])
         self.stacked_bar_ax = self.fig.add_subplot(gs[2, :])
+        self.pcoa_axes = [self.fig.add_subplot(gs[3, i]) for i in range(4)]
         
         # Four plots on first row for the pcoa plots
         # join the four plots on second row to plot the hierarchical clustering in.
@@ -1181,7 +1182,10 @@ class CheckPwrRai(EighteenSBase):
         if self.genus == 'Pocillopora':
             self.poc_clone_list_str = [['I02S03C006POC', 'I02S03C010POC'], ['I03S01C011POC', 'I03S01C012POC'], ['I03S01C017POC', 'I03S01C018POC', 'I03S01C019POC', 'I03S01C020POC'], ['I03S01C015POC', 'I03S01C016POC'], ['I05S02C006POC', 'I05S02C010POC']]
             self.poc_clone_list_str = [self._convert_index_to_sample_ids(_) for _ in self.poc_clone_list_str]
-            self.snp_classification = self.poc_snp_classifications
+            # self.snp_classification = self.poc_snp_classifications
+            self.snp_classification = pd.read_csv('/home/humebc/projects/tara/tara_full_dataset_processing/18s/input/POC_clusters_old_original_three.csv', index_col=0)
+            self.snp_classification = self.snp_classification.drop(columns='Colony')
+            self.snp_classification.columns = ['label'] 
         else:
             self.poc_clone_list_str = []
             self.snp_classification = self.por_snp_classifications
@@ -1377,32 +1381,33 @@ class CheckPwrRai(EighteenSBase):
         self._plot_stacked_bars()
         if self.w_zooxs:
             self._plot_stacked_bars_zooxs()
-        # We want the labels to reflect whether they are tech reps or not. We will add an R
-        # at the end of the label and a number to signify
-        # There is no easy way to convert the readset labels to the location format
-        # to include tech rep identifier.
-        # Work through a subset of the sample-id to readset dict
-        # and use this to convert eh label names
-        new_lab_list = []
-        logged_dict = {}
-        for readset in [tick_lab._text for tick_lab in self.dendro_ax.get_xticklabels()]:
-            sample_id = self.readset_to_sample_id_dict[readset]
-            num_of_reps = len(self.sample_id_to_readset_list_dict[sample_id])
-            if num_of_reps == 1:
-                # No tech reps
-                new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]))
-            else:
-                # Should be techreps
-                if sample_id not in logged_dict:
-                    tech_rep = 0
-                    logged_dict[sample_id] = 0
-                else:
-                    tech_rep = logged_dict[sample_id] + 1
-                    logged_dict[sample_id] += 1
-                new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]) + f'R{tech_rep}')
+        # # We want the labels to reflect whether they are tech reps or not. We will add an R
+        # # at the end of the label and a number to signify
+        # # There is no easy way to convert the readset labels to the location format
+        # # to include tech rep identifier.
+        # # Work through a subset of the sample-id to readset dict
+        # # and use this to convert eh label names
+        # new_lab_list = []
+        # logged_dict = {}
+        # for readset in [tick_lab._text for tick_lab in self.dendro_ax.get_xticklabels()]:
+        #     sample_id = self.readset_to_sample_id_dict[readset]
+        #     num_of_reps = len(self.sample_id_to_readset_list_dict[sample_id])
+        #     if num_of_reps == 1:
+        #         # No tech reps
+        #         new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]))
+        #     else:
+        #         # Should be techreps
+        #         if sample_id not in logged_dict:
+        #             tech_rep = 0
+        #             logged_dict[sample_id] = 0
+        #         else:
+        #             tech_rep = logged_dict[sample_id] + 1
+        #             logged_dict[sample_id] += 1
+        #         new_lab_list.append(''.join(self.sample_provenance_df.at[sample_id, 'SAMPLING DESIGN LABEL'].split('-')[1:]) + f'R{tech_rep}')
                 
-        # lab_list = [''.join(self.sample_provenance_df.at[self.readset_to_sample_id_dict[tick_lab._text], 'SAMPLING DESIGN LABEL'].split('-')[1:]) for tick_lab in self.dendro_ax.get_xticklabels()]
-        self.dendro_ax.set_xticklabels(new_lab_list, verticalalignment='bottom')
+        # # lab_list = [''.join(self.sample_provenance_df.at[self.readset_to_sample_id_dict[tick_lab._text], 'SAMPLING DESIGN LABEL'].split('-')[1:]) for tick_lab in self.dendro_ax.get_xticklabels()]
+        # self.dendro_ax.set_xticklabels(new_lab_list, verticalalignment='bottom')
+        self.dendro_ax.set_xticks([])
         foo = 'bar'
         plt.tight_layout()
         
@@ -1411,6 +1416,7 @@ class CheckPwrRai(EighteenSBase):
         print('saving .png')
         
         plt.savefig(self.fig_path, dpi=1200)
+        plt.savefig(self.fig_path.replace('.png', '.svg'))
         print(f'fig_path: {self.fig_path}')
         print('done')
     
@@ -1436,23 +1442,75 @@ class CheckPwrRai(EighteenSBase):
         # tot_width = num_samples + (num_svg_cats * 2)
         # For each sample, we will want to plot the sequences in the order of total abundance
         self.abundance_df = self.abundance_df.reindex(self.abundance_df.sum().sort_values(ascending=False).index, axis=1)
+        # For the grant we need to quickly make a new abundance dict
+        # from the original abundance_dict consolidated_host_seqs_abund_dict.p.bz
+        all_seq_abund_dict = {}
+        for sample in self.abundance_df.index:
+            a_dict = compress_pickle.load(os.path.join(self.qc_dir, sample, 'consolidated_host_seqs_abund_dict.p.bz'))
+            all_seq_abund_dict[sample] = a_dict
+        
+        all_seq_abund_df = pd.DataFrame.from_dict(all_seq_abund_dict, orient="index")
+        all_seq_abund_df[pd.isna(all_seq_abund_df)] = 0
+        all_seq_abund_df = all_seq_abund_df.reindex(all_seq_abund_df.sum().sort_values(ascending=False).index, axis=1)
+
         seq_c_list, grey_list = self._get_colour_lists()
         # seq_c_list = get_colour_list()
         # assert(len(list(self.abundance_df)) < len(seq_c_list))
         # seq_c_dict = {seq:c for seq, c in zip(list(self.abundance_df), seq_c_list[:len(list(self.abundance_df))])}
         seq_c_dict = {seq: seq_c_list[i] if i < len(seq_c_list) else grey_list[i % len(grey_list)] for i, seq in enumerate(list(self.abundance_df))}
+        seq_c_dict_all_seqs = {seq: seq_c_list[i] if i < len(seq_c_list) else grey_list[i % len(grey_list)] for i, seq in enumerate(list(all_seq_abund_df))}
         # now go on a per svg cat, per sample, per seq basis to create the rectangles and add them to a patches list
         rect_patch_list = []
         rect_c_list = []
         
+        # all seqs
         for sample, x_loc in self.sample_xcoord_dict.items():
+            # For the purpose of the grant proposal it will be good to have the majority sequence in as well.
             bottom = 0
-            abund_series = self.abundance_df.loc[sample]
+            abund_series = all_seq_abund_df.loc[sample]
             abund_series = abund_series[abund_series>0]
             abund_series = abund_series / sum(abund_series)
             for seq, abund in abund_series.items():
-                rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=seq_c_dict[seq]))
-                rect_c_list.append(seq_c_dict[seq])
+                rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=seq_c_dict_all_seqs[seq]))
+                rect_c_list.append(seq_c_dict_all_seqs[seq])
+                bottom += abund
+
+        # Here we have the rectangle patches done
+        this_cmap = ListedColormap(rect_c_list)
+        
+        # Here we have a list of Rectangle patches
+        # Create the PatchCollection object from the patches_list
+        patches_collection = PatchCollection(rect_patch_list, cmap=this_cmap)
+        patches_collection.set_array(np.arange(len(rect_patch_list)))
+        # if n_subplots is only 1 then we can refer directly to the axarr object
+        # else we will need ot reference the correct set of axes with i
+        # Add the pathces to the axes
+        self.all_seqs_ax.set_xlim(self.dendro_ax.get_xlim())
+        self.all_seqs_ax.set_ylim(0,1)
+        self.all_seqs_ax.spines['right'].set_visible(False)
+        self.all_seqs_ax.spines['top'].set_visible(False)
+        self.all_seqs_ax.spines['bottom'].set_visible(False)
+        self.all_seqs_ax.spines['left'].set_visible(False)
+        self.all_seqs_ax.set_xticks([])
+        self.all_seqs_ax.set_yticks([])
+        self.all_seqs_ax.add_collection(patches_collection)
+        self.all_seqs_ax.autoscale_view()
+        self.all_seqs_ax.set_ylabel('host 18S sequences', fontsize='small')
+        
+        rect_patch_list = []
+        rect_c_list = []
+
+        # minor seqs
+        for sample, x_loc in self.sample_xcoord_dict.items():
+            # For the purpose of the grant proposal it will be good to have the majority sequence in as well.
+            bottom = 0
+            abund_series = self.abundance_df.loc[sample]
+            
+            abund_series = abund_series[abund_series>0]
+            abund_series = abund_series / sum(abund_series)
+            for seq, abund in abund_series.items():
+                rect_patch_list.append(Rectangle((x_loc-5, bottom), 10, abund, color=seq_c_dict_all_seqs[seq]))
+                rect_c_list.append(seq_c_dict_all_seqs[seq])
                 bottom += abund
 
         # Here we have the rectangle patches done
@@ -1549,13 +1607,21 @@ class CheckPwrRai(EighteenSBase):
 
     def _plot_row(self, labels, pcoa_df, pc2_ax_kmeans_cats, pc3_ax_kmeans_cats, pc2_ax_snp_cats, pc3_ax_snp_cats, norm_m):
         colour_dict_kmeans = {}
+        kmeans_c_dict = {0: '#010ca6', 1: 'y', 2: 'c'}
         kmeans_c_cycler = cycler(color=['#010ca6', 'y', 'c', 'pink'])
         pc2_ax_kmeans_cats.set_prop_cycle(kmeans_c_cycler)
         pc3_ax_kmeans_cats.set_prop_cycle(kmeans_c_cycler)
+        # for sample in pcoa_df.index()
+        for sample in pcoa_df.index:
+            sample_id = self.meta_info_df.at[sample, 'sample-id']
+            kmeans = labels[sample]
+            snp = self.snp_classification.at[sample_id, 'label']
+            pc3_ax_kmeans_cats.scatter(pcoa_df.at[sample, 'PC1'], pcoa_df.at[sample, 'PC2'], marker=f'${snp}$', c=kmeans_c_dict[kmeans])
+        
         for k in labels.unique():
             samples_pwr = labels[labels==k].index
             scat = pc2_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'], label=f'kmeans_{k}')
-            pc3_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC3'])
+            # pc3_ax_kmeans_cats.scatter(pcoa_df.loc[samples_pwr, 'PC1'], pcoa_df.loc[samples_pwr, 'PC2'], marker=f'${k}$')
             colour_dict_kmeans[k] = scat._facecolors
         handles, leg_labels = pc2_ax_kmeans_cats.get_legend_handles_labels()
         # sort both labels and handles by labels
