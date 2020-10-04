@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+"""
+20201004 This script is used for producing the tables that will be part of the zenodo release of the 18S data.
+"""
 import os
 import compress_pickle
 import sys
