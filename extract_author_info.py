@@ -14,6 +14,9 @@ import difflib
 from collections import defaultdict
 import requests
 import json
+import argparse
+from argparse import RawDescriptionHelpFormatter
+import ntpath
 
 # For getting the superscript and subscript numbers
 # https://stackoverflow.com/questions/8651361/how-do-you-print-superscript-in-python
@@ -29,10 +32,29 @@ class AuthorInfoExtraction:
         If fixes is true then we will make our best attempt at fixing the affiliation mess by implementing
         clustering of affiliations and checking for string similarity
         """
+        self.parser = argparse.ArgumentParser(
+            description='A script for producing an ordered author and affiliation '
+                        'list from the TARA-PACIFIC_authors-lists template using the Zenodo API '
+                        '(https://developers.zenodo.org/) and for creating a new Zenodo submission. '
+                        'By default, the following defaults will be used for the meta data:\n'
+                        '\taccess_right: restricted;\n'
+                        '\tlicense: CC-BY-4.0;\n'
+                        '\taccess_conditions: Any Tara Pacific Expedition participant may request access.;\n'
+                        '\tcommunities: tarapacific;\n'
+                        '\tversion: 1;\n'
+                        '\tlanguage: eng;\n',
+            epilog='For support, email: didillysquat@gmail.com', formatter_class=RawDescriptionHelpFormatter)
+        self._define_args()
+        self.args = self.parser.parse_args()
         self.fixes = fixes
-        self.excel_path = sys.argv[1]
-        self.target_sheet_name = sys.argv[2]
-        self.output_dir = sys.argv[3]
+        self.excel_path = self.args.excel_path
+        self.target_sheet_name = self.args.target_sheet_name
+        self.output_dir = self.args.output_dir_path
+        if not os.path.isdir(self.output_dir):
+            raise RuntimeError(f'{self.output_dir} is not a recognized directory')
+        self.submission = self.args.submission
+        if self.submission: # Whether to do a submission
+            self._setup_submission_vars()
         self.author_categories = ['First author(s)', 'Contributing authors list #1',
                                   'Contributing authors list #2', 'Consortium Coordinators', 'Scientific Directors',
                                   'Contributing authors list #3']
@@ -54,9 +76,72 @@ class AuthorInfoExtraction:
 
         self.creator_array = self._make_creator_array()
 
+    def _setup_submission_vars(self):
+        self.data_file_path_list = self.args.data_file_paths.split(',')
+        if not self.data_file_path_list:
+            raise RuntimeError('No data files supplied. Please supply at least one file to upload.')
+        no_file = []
+        for data_file in self.data_file_path_list:
+            if not os.path.isfile(data_file):
+                no_file.append(data_file)
+        if no_file:
+            file_list = '\n'.join([f'\t{file}' for file in no_file])
+            raise RuntimeError(f'The following files for upload could not be found {file_list}')
+        self.meta_title = self.args.meta_title
+        if not self.meta_title:
+            raise RuntimeError('Please provide a valid title')
+        self.meta_description = self.args.meta_description
+        if os.path.isfile(self.meta_description):
+            # This points to a file and the description should be the contents of the file
+            with open(self.meta_description, 'r') as f:
+                self.meta_description = '\n'.join([line.rstrip() for line in f])
         # personal access token is required for making uploads and publishing on Zenodo using their API
-        with open(os.path.join(os.path.dirname(sys.argv[0]), 'personal_access_token.txt'), 'r') as f:
+        with open(self.args.access_token_path, 'r') as f:
             self.access_token = f.readline().rstrip()
+
+    def _define_args(self):
+        self.parser.add_argument(
+            '--excel_path',
+            help='The full path to the TARA-PACIFIC_authors_list.xlsx',
+            required=True
+        )
+        self.parser.add_argument(
+            '--target_sheet_name',
+            help='The name of the excel sheet in the TARA-PACIFIC_authors_list.xlsx '
+                 'that the author list should be generated for.', required=True
+        )
+        self.parser.add_argument(
+            '--output_dir_path',
+            help='Full path to the directory where output files will be written', required=True
+        )
+
+        # Required if doing a submission
+        self.parser.add_argument(
+            '--submission',
+            action='store_true',
+            help='If this is passed, a submission to Zenodo will be created.\n'
+                 'If not passed, only the author and affiliation lists will be output.', required=False
+        )
+        self.parser.add_argument(
+            '--access_token_path',
+            help='Full path the file where the Zenodo access path is written.\n', required=False
+        )
+        self.parser.add_argument(
+            '--data_file_paths',
+            help='Comma seperated paths to the datafiles that should be uploaded as part of the Zenodo submission',
+            required=False
+        )
+        self.parser.add_argument(
+            '--meta_title',
+            help='The title of the submission',
+            required=False
+        )
+        self.parser.add_argument(
+            '--meta_description',
+            help='The description for the submission. This can either be a string or a path to a plain text file. '
+                 'If a path to a plain text file is given, the contents of that file will be used as the description.',
+            required=False
+        )
 
     def _make_creator_array(self):
         """
@@ -82,57 +167,71 @@ class AuthorInfoExtraction:
         Use the class objects to create the Zenodo submission using their API documented here:
         https://developers.zenodo.org/#quickstart-upload
         """
-        filename = 'TARA_PACIFIC_METAB_ITS2_v1.zip'
-        path = '/Users/humebc/Google_Drive/projects/tara/its2_for_zenodo/TARA_PACIFIC_METAB_ITS2_v1.zip'
+        print('Starting Zenodo submission\n')
+        file_name_list = []
+        for file_path in self.data_file_path_list:
+            file_name_list.append(ntpath.basename(file_path))
+
         params = {'access_token': self.access_token}
         headers = {"Content-Type": "application/json"}
 
         # Create a blank deposition
+        # TODO check to see that there isn't already a deposition in
+        #  progress so that the user doesn't keep making new ones
+        print('Creating a new deposition')
         r = requests.post('https://zenodo.org/api/deposit/depositions', params = {'access_token': self.access_token}, json={})
         status_code = r.status_code
         r_json = r.json()
         bucket_url = r.json()["links"]["bucket"]
         deposition_id = r.json()['id']
+        print(f'Successful. Deposition ID is {deposition_id}')
+
 
         # Add a file to the deposition
         # We pass the file object (fp) directly to the request as the 'data' to be uploaded.
         # The target URL is a combination of the buckets link with the desired filename seperated by a slash.
-        with open(path, "rb") as fp:
-            r = requests.put(
-                "%s/%s" % (bucket_url, filename),
-                data=fp,
-                # No headers included in the request, since it's a raw byte request
-                params=params,
-            )
-        r_json = r.json()
+        print('\nUploading files:')
+        for path, filename in zip(self.data_file_path_list, file_name_list):
+            print(f'\t{path}')
+            with open(path, "rb") as fp:
+                r = requests.put(
+                    "%s/%s" % (bucket_url, filename),
+                    data=fp,
+                    # No headers included in the request, since it's a raw byte request
+                    params=params,
+                )
+            r_json = r.json()
+        print('Upload complete\n')
 
         # Now add datda to the deposition
         data = {
             'metadata': {
-                'title': 'TARA Pacific ITS2 Symbiodiniaceae data release version 1',
+                'title': self.meta_title,
                 'upload_type': 'dataset',
-                'description': 'This data is the result of the primary analysis of the Symbiodiniaceae ITS2 rDNA gene '
-                               'sequencing data collected from all islands as part of the Tara Pacific expedition.'
-                               'The analysis was conducted using SymPortal.',
-                'access_right': 'embargoed',
+                'description': self.meta_description,
+                'access_right': 'restricted',
                 'license': 'CC-BY-4.0',
-                'embargo_date' : '2025-10-01',
+                'access_conditions' : 'Any Tara Pacific Expedition participant may request access.',
                 'communities' : [{'identifier': 'tarapacific'}],
                 'version' : '1',
                 'language': 'eng',
                 'creators': self.creator_array
             }
         }
-
+        print('Meta information is:')
+        print(data)
+        print('\n')
+        print('Submitting meta data')
         r = requests.put(f'https://zenodo.org/api/deposit/depositions/{deposition_id}', params = {'access_token': self.access_token}, data = json.dumps(data),
         headers = headers)
-
+        print('Submission of meta data complete\n')
+        print('Your submission has been successfully uploaded.\n'
+              'Please verify and publish it using the Zenodo.org web interface from inside your account.\n'
+              f'Or using this link: {r.json()["links"]["html"]} (you will need to be signed in).')
         # now its ready to be published but we will not do this as part of the script
         # so that the user is forced to check over the submission and verfiy that everything is correct.
 
         foo = 'bar'
-
-
 
     def output_author_info(self):
         # First output the two variations of the author lists
@@ -176,19 +275,27 @@ class AuthorInfoExtraction:
                 for line in affiliations_new_lines:
                     f.write(line)
         else:
-            with open(os.path.join(self.output_dir, f'author_string_w_o_affiliation_numbers_w_o_fixes'), 'w') as f:
+            print('\nAuthor string without affiliation numbers output to:')
+            print(f"\t{os.path.join(self.output_dir, f'author_string_w_o_affiliation_numbers.txt')}")
+            with open(os.path.join(self.output_dir, f'author_string_w_o_affiliation_numbers.txt'), 'w') as f:
                 for line in author_string_w_o_affiliation_numbers:
                     f.write(line)
 
-            with open(os.path.join(self.output_dir, f'author_string_w_affiliation_numbers_w_o_fixes'), 'w') as f:
+            print('\nAuthor string with affiliation numbers output to:')
+            print(f"\t{os.path.join(self.output_dir, f'author_string_w_affiliation_numbers.txt')}")
+            with open(os.path.join(self.output_dir, f'author_string_w_affiliation_numbers.txt'), 'w') as f:
                 for line in author_string_w_affiliation_numbers:
                     f.write(line)
 
-            with open(os.path.join(self.output_dir, f'affiliations_one_line_w_o_fixes'), 'w') as f:
+            print('\nAuthor affiliations on one line output to:')
+            print(f"\t{os.path.join(self.output_dir, f'affiliations_one_line.txt')}")
+            with open(os.path.join(self.output_dir, f'affiliations_one_line.txt'), 'w') as f:
                 for line in affiliations_one_line:
                     f.write(line)
 
-            with open(os.path.join(self.output_dir, f'affiliations_new_lines_w_o_fixes'), 'w') as f:
+            print('\nAuthor affiliations on new lines output to:')
+            print(f"\t{os.path.join(self.output_dir, f'affiliations_new_lines.txt')}")
+            with open(os.path.join(self.output_dir, f'affiliations_new_lines.txt'), 'w') as f:
                 for line in affiliations_new_lines:
                     f.write(line)
 
@@ -358,5 +465,8 @@ class AuthorInfoExtraction:
 
 aie = AuthorInfoExtraction(fixes=False)
 aie.output_author_info()
-# At this point we have all of the objects we need to create the Zenodo submission object.
-aie.do_zenodo_submission()
+if aie.submission:
+    # At this point we have all of the objects we need to create the Zenodo submission object.
+    aie.do_zenodo_submission()
+else:
+    print('\nSkipping Zenodo submission.\nTo do the Zenodo submission pass --submission to this script.')
