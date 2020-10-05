@@ -203,7 +203,7 @@ class GeneralProcessing:
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
         df = df.set_index('readset', drop=True)
         # Here add in the comments for Julie.
-        juli_comment_df = pd.read_csv(os.path.join(self.input_dir, 'comments_from_julie.csv'), index_col=0)
+        juli_comment_df = pd.read_csv(os.path.join(self.input_dir, 'comments_from_genescope.csv'), index_col=0)
         new_df = pd.concat([df, juli_comment_df], axis=1)
         return new_df
 
