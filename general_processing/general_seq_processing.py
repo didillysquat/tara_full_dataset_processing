@@ -31,6 +31,10 @@ NB as a final change to the table stephane has asked that we move from barcode_i
 changing the column name and prepending TARA_ to each of the values.
 
 This script should have been run first and before the processing_18s.py to ensure that the 18S files are downloaded.
+
+20201005 NB preparing the replication tables for publication on Zenodo. Note that there has since been a new provenance table
+made. We also manually made some changes to the tables that are output from this script. As such, if we ever need to remake these
+tables again we will need to update to use the new provenance table.
 """
 import os
 import pickle
@@ -214,7 +218,7 @@ class GeneralProcessing:
         return (auth_lines[0], auth_lines[1])
 
     def start_walking(self):
-        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}X.p.bz')):
+        if os.path.isfile(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz')):
             self.mp_output_list_of_tups = compress_pickle.load(os.path.join(self.cache_dir, f'mp_output_list_of_tups_{self.marker}.p.bz'))
         else:
             soup = BeautifulSoup(requests.get(self.remote_base_dir, auth=self.authorisation_tup, headers=self.headers).text,
@@ -1134,8 +1138,9 @@ def human_readable_size(size, decimal_places=3):
     return f"{size:.{decimal_places}f}{unit}"
 
 dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z").replace(':', '_')
+# Uncomment below as necessary
 # GeneralProcessing(marker='its2', seq_file_download_directory="/home/humebc/phylogeneticSoftware/SymPortal_Data/rawData/20200326_tara_its2_data", date_string=dat_string, download=False).start_walking()
-GeneralProcessing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=False).start_walking()
+# GeneralProcessing(marker='18s', seq_file_download_directory="/home/humebc/projects/tara/18s_data", date_string=dat_string, download=False).start_walking()
 # GeneralProcessing(marker='16s_45', date_string=dat_string).start_walking()
 # GeneralProcessing(marker='16s_full_45', date_string=dat_string).start_walking()
 
