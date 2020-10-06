@@ -12,7 +12,7 @@ So the outputs produced give us these details. The columns are as follows:
 [
             'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
             'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
-            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genescope_comment_1', 'genescope_comment_2'
+            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genoscope_comment_1', 'genoscope_comment_2'
 ]
 The 'use' column was the samples that Chris and I were going to 'recommend' or 'use' based on a strategy of only using one 
 pair of fastq.gz files per sample. This decision was based on looking at the average sizes of the green, yellow and red samples.
@@ -137,7 +137,7 @@ class GeneralProcessing:
         self. output_information_df_cols = [
             'barcode_id', 'readset', 'fwd_read_name', 'rev_read_name', 'use', 'URL', 'is_replicate',
             'access_time', 'replication_category', 'replication_color', 'fwd_read_size_compressed_bytes',
-            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genescope_comment_1', 'genescope_comment_2']
+            'rev_read_size_compressed_bytes', 'pcr_code', 'dna_extraction_code', 'genoscope_comment_1', 'genoscope_comment_2']
         # We can download the files that we are going to keep while we're at it
         # We should save them to a single directory
         self.seq_file_download_directory = seq_file_download_directory
@@ -207,7 +207,7 @@ class GeneralProcessing:
         df = pd.concat([coral_readset_df, sed_readset_df, fish_readset_df, plankton_readset_df])
         df = df.set_index('readset', drop=True)
         # Here add in the comments for Julie.
-        juli_comment_df = pd.read_csv(os.path.join(self.input_dir, 'comments_from_genescope.csv'), index_col=0)
+        juli_comment_df = pd.read_csv(os.path.join(self.input_dir, 'comments_from_genoscope.csv'), index_col=0)
         new_df = pd.concat([df, juli_comment_df], axis=1)
         return new_df
 
@@ -649,12 +649,12 @@ class ReplicationWalkerWorker:
     def _populate_output_information_list(self, barcode_id, fwd_read, readset, rev_read, size_dict, use, is_rep, cat, col, pcr_code, dna_extraction_code):
         # First the output information dict
         dat_string = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f%Z")
-        genescope_comment_1 = self.readset_df.at[readset, 'genescope_comment_1']
-        genescope_comment_2 = self.readset_df.at[readset, 'genescope_comment_2']
+        genoscope_comment_1 = self.readset_df.at[readset, 'genoscope_comment_1']
+        genoscope_comment_2 = self.readset_df.at[readset, 'genoscope_comment_2']
         temp_list = [
             barcode_id, readset, fwd_read, rev_read, use, self.current_remote_dir,
             is_rep, dat_string, cat, col, size_dict[fwd_read], size_dict[rev_read], pcr_code, dna_extraction_code,
-            genescope_comment_1, genescope_comment_2
+            genoscope_comment_1, genoscope_comment_2
         ]
         self.output_information_list.append(temp_list)
 
