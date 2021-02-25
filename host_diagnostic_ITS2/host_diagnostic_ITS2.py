@@ -10,7 +10,15 @@ import re
 from collections import defaultdict
 # NB this had to be installed with pip install venn. Couldn't find a conda install
 from venn import venn
+import matplotlib as mpl
+mpl.use('TkAgg')
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
+from matplotlib import cm
+from sputils.sphierarchical import SPHierarchical
+from sputils.spbars import SPBars
+from matplotlib.patches import Rectangle
+from matplotlib.collections import PatchCollection
 
 class HostDiagnosticZooxs:
     def __init__(self, pre_post='post'):
@@ -18,28 +26,30 @@ class HostDiagnosticZooxs:
         
         # Read in the host group data
         # 'sampling-design_label' 'sample-id_source'
-        self.host_groupings = pd.read_table("/home/humebc/projects/tara/tara_full_dataset_processing/host_diagnostic_ITS2/host_groupings.txt", names=["INDV", "clus", "svd_cluster"])
+        self.host_groupings = pd.read_table("/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/host_groupings.txt", names=["INDV", "clus", "svd_cluster"])
         self.host_groupings.index = self.host_groupings["INDV"]
         self.host_groupings = self.host_groupings["svd_cluster"]
         
         # Read in Guillems golden table
-        poc_golden = pd.read_table("/home/humebc/projects/tara/tara_full_dataset_processing/input/data_available_gold_dataset_11_islands_POC.tsv")
-        poc_golden.index = poc_golden["INDV"]
+        self.poc_golden = pd.read_table("/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/data_available_gold_dataset_11_islands_POC.tsv")
+        self.poc_golden.index = self.poc_golden["INDV"]
         # We want to work with the subset of samples for which there is host grouping info and ITS2 sequences
-        poc_golden = poc_golden[~pd.isnull(poc_golden["dataset_ITS2_sample_id"])]
+        self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["dataset_ITS2_sample_id"])]
+        # Also remove the one sample that there isn't an SVDQ value for
+        self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["SVDQ"])]
         
         if self.pre_post == 'post':
-            self.path_to_zooxs_counts = "/home/humebc/projects/tara/tara_full_dataset_processing/host_diagnostic_ITS2/TARA_PACIFIC_METAB_ITS2_v1/coral/post_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv"
+            self.path_to_zooxs_counts = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/TARA_PACIFIC_METAB_ITS2_v1/coral/post_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv"
             # Get zooxs count data
             self.counts_df = pd.read_csv(self.path_to_zooxs_counts)
             self.counts_df = self.counts_df.iloc[:-1,]
             self.counts_df.index = self.counts_df["sample-id"]
-            self.counts_df_with_host = self.counts_df.loc[[_ for _ in self.counts_df.index if _ in poc_golden["dataset_ITS2_sample_id"].values],]
+            self.counts_df_with_host = self.counts_df.loc[[_ for _ in self.counts_df.index if _ in self.poc_golden["dataset_ITS2_sample_id"].values],]
             # For the count table this will likely leave us with a lot of columns where it is only 0s. we will want to get rid of these
             self.counts_df_with_host = self.counts_df_with_host.loc[:, (self.counts_df_with_host != 0).any(axis=0)]
         
         else:
-            self.path_to_zooxs_counts = "/home/humebc/projects/tara/tara_full_dataset_processing/host_diagnostic_ITS2/TARA_PACIFIC_METAB_ITS2_v1/coral/pre_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_pre_med_seqs_sequences_absolute_abund_v1.csv"
+            self.path_to_zooxs_counts = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/TARA_PACIFIC_METAB_ITS2_v1/coral/pre_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_pre_med_seqs_sequences_absolute_abund_v1.csv"
             with open(self.path_to_zooxs_counts, 'r') as f:
                 header = None
                 rows = []
@@ -48,7 +58,7 @@ class HostDiagnosticZooxs:
                         header = line.rstrip().split(',')
                     else:
                         split_line_list = line.rstrip().split(',')
-                        if split_line_list[1] in poc_golden["dataset_ITS2_sample_id"].values:
+                        if split_line_list[1] in self.poc_golden["dataset_ITS2_sample_id"].values:
                             rows.append(split_line_list)
             self.counts_df_with_host = pd.DataFrame(rows, columns=header)
             self.counts_df_with_host.index = self.counts_df_with_host["sample-id"]
@@ -66,11 +76,11 @@ class HostDiagnosticZooxs:
         self.counts_df_with_host = self.counts_df_with_host.iloc[:,drop_index:]
 
         # Need to convert between didiers naming system and the coral sample-id format
-        didier_to_sp_name_dict = {k:v for k, v in zip(poc_golden["INDV"].values, poc_golden["dataset_ITS2_sample_id"]) if not pd.isnull(v)}
+        didier_to_sp_name_dict = {k:v for k, v in zip(self.poc_golden["INDV"].values, self.poc_golden["dataset_ITS2_sample_id"]) if not pd.isnull(v)}
         self.host_groupings = self.host_groupings.loc[[_ for _ in self.host_groupings.index.values if _ in didier_to_sp_name_dict],]
         self.host_groupings.index = [didier_to_sp_name_dict[_] for _ in self.host_groupings.index.values]
         self.group_to_sample_list_dict = {k: list(self.host_groupings[self.host_groupings==k].index.values) for k in self.host_groupings.unique() if not pd.isnull(k)}
-
+        self.sample_to_host_group_dict = dict(self.host_groupings)
         
     def look_for_diagnostic_sqeuences(self):
         """ 
@@ -149,12 +159,82 @@ class HostDiagnosticZooxs:
         It will probably be useful to do with only those ITS2 samples that have a group annotation available
         and also with all of the samples.
         """
+        # To start with we will do a 1  up one down plot where we have the
+        # hierarchical on top of the 99 ITS2 sequences that have the host data associated with them
+        # on bottom we will plot an annotation of the host group. We will hope to see clustering.
+        # We will need to do this for each of the C and D clades. Start with C as this is the most abundant
+        fig = plt.figure(figsize=(10, 6))
+        # 4 down 1 across
+        gs = gridspec.GridSpec(6, 2)
+        axes = []
+        plot_tyes = ['hier', 'anot']
+        hier_ax = plt.subplot(gs[0:2,:])
+        seq_bars_ax = plt.subplot(gs[2:3, :])
+        prof_bars_ax = plt.subplot(gs[3:4, :])
+        anot_ax = plt.subplot(gs[4:5,:])
+        seq_leg_ax = plt.subplot(gs[5:6, 0])
+        prof_leg_ax = plt.subplot(gs[5:6, 1])
+
+        dist_df_path = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist"
+
+        sph_plot = SPHierarchical(dist_output_path=dist_df_path, no_plotting=True)
+        sample_names_in_current_dist = [sph_plot.obj_uid_to_obj_name_dict[_] for _ in sph_plot.dist_df.index.values]
+        samples_to_keep = [_ for _ in sample_names_in_current_dist if _ in self.counts_df_with_host.index.values]
+        sph_plot = SPHierarchical(
+            dist_output_path=dist_df_path, ax=hier_ax,
+                                  sample_names_included=samples_to_keep)
+        sph_plot.plot()
+
+        spb_plot = SPBars(
+            seq_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.seqs.absolute.abund_and_meta.txt",
+            profile_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.profiles.absolute.abund_and_meta.txt",
+            plot_type='seq_and_profile', legend=True, relative_abundance=True, sample_uids_included=sph_plot.dendrogram_sample_order_uid, bar_ax=seq_bars_ax, seq_leg_ax=seq_leg_ax, profile_leg_ax=prof_leg_ax
+        )
+        spb_plot.plot()
+
+        # Finally we want to plot up some rectanles that will be the host_group annotations
+        svd_cols = {svd: ctup for svd, ctup in zip(list(self.group_to_sample_list_dict.keys()), list(cm.get_cmap('Set1').colors[:5]))}
+        x_pos = 0
+        patch_list = []
+        for sample_name in sph_plot.dendrogram_sample_order_name:
+            svd = self.sample_to_host_group_dict[sample_name]
+            patch_list.append(
+                Rectangle((x_pos, 0), width=1, height=1, facecolor=svd_cols[svd], edgecolor='black')
+            )
+            x_pos += 1
+
+        collection = PatchCollection(patch_list, match_original=True)
+        anot_ax.add_collection(collection)
+        anot_ax.set_xlim(0, len(sph_plot.dendrogram_sample_order_name))
+        anot_ax.set_ylim(0, 1)
+        anot_ax.set_xlabel('SVD category')
+        anot_ax.spines['top'].set_visible(False)
+        anot_ax.spines['bottom'].set_visible(False)
+        anot_ax.spines['right'].set_visible(False)
+        anot_ax.spines['left'].set_visible(False)
+        anot_ax.set_yticks([])
+        anot_ax.set_xticks([])
+
+
+        # Get the sampels to keep from this.
+        foo = 'bar'
+        # sph_plot = SPHierarchical(dist_output_path=dist_df_path, ax=hier_ax,
+        #                           sample_names_included=sample_uids_to_plot)
+
+        # dist_df = pd.read_table(dist_df_path, sep='\t', header=None, index_col=0)
+        # # Drop the symportal uid col
+        # dist_df = dist_df.iloc[:,1:]
+        # dist_df.columns = dist_df.index
+        # samples_to_keep = [_ for _ in dist_df.index.values if _ in self.counts_df_with_host.index.values]
+        # dist_df = dist_df.loc[samples_to_keep,samples_to_keep]
+
+
         foo = 'bar'
 
          
 # The look_for_diagnostic_sequences can be run using pre_post='pre' to use the pre_med seqs.
 # However this still doesn't produce any viable diagnostic sequences and takes a lot longer due to the number of sequnces
-HostDiagnosticZooxs(pre_post='pre').look_for_diagnostic_sqeuences()
+HostDiagnosticZooxs(pre_post='post').investigate_diagnostic_clusters()
 
 """
 Code that I was using to check why there were some ITS2 samples missing with relation to the
