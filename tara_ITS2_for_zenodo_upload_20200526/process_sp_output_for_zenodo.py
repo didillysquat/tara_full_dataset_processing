@@ -306,6 +306,8 @@ class ProcessSPOutputForZenodo:
             new_out_path = os.path.join(self.sub_dir, 'new_out.csv')
             new_out = open(new_out_path, 'w')
             pre_med_abund_path = os.path.join(self.sub_dir, 'pre_med_absolute_abundance_df.csv')
+            # TODO this is not working quite right and is causing sample_uid to be replaced with symportal_datasetsymportal_datasetsample_uid
+            # NB I've tested this sed on a small local file and it is working so I don't know where the symportal_datasetsymportal_datasetsample_uid string is coming from.
             subprocess.run(['sed', '-e', 's/sample_uid/symportal_datasetsample_uid/g', '-e', 's/sample_name/sample-id/g', pre_med_abund_path], stdout=new_out)
             new_out.close()
             os.rename(new_out_path, pre_med_abund_path)
