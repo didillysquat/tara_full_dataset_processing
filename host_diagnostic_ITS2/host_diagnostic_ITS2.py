@@ -19,19 +19,31 @@ from sputils.sphierarchical import SPHierarchical
 from sputils.spbars import SPBars
 from matplotlib.patches import Rectangle
 from matplotlib.collections import PatchCollection
+import pathlib
+import os
 
 class HostDiagnosticZooxs:
-    def __init__(self, pre_post='post'):
+    def __init__(self, pre_post='post', genus='Cladocopium', coral='Pocillopora'):
+        self.base_dir = pathlib.Path(__file__).parent.absolute()
+        self.input_dir = os.path.join(self.base_dir, 'inputs')
+        self.figure_dir = os.path.join(self.base_dir, "figures")
         self.pre_post = pre_post
-        
+        self.genus = genus
+        self.coral = coral
         # Read in the host group data
         # 'sampling-design_label' 'sample-id_source'
-        self.host_groupings = pd.read_table("/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/host_groupings.txt", names=["INDV", "clus", "svd_cluster"])
-        self.host_groupings.index = self.host_groupings["INDV"]
-        self.host_groupings = self.host_groupings["svd_cluster"]
+        if coral == 'Pocillopora':
+            self.host_groupings = pd.read_table(os.path.join(self.input_dir, "host_groupings_POC.txt"), names=["INDV", "clus", "svd_cluster"])
+            self.host_groupings.index = self.host_groupings["INDV"]
+            self.host_groupings = self.host_groupings["svd_cluster"]
+        elif coral == 'Porites':
+            self.host_groupings = pd.read_table(os.path.join(self.input_dir, "host_groupings_POR.txt"),
+                                                names=["INDV", "cluster_snmf", "sub_cluster_snmf", "SVDQuartet"])
+            self.host_groupings.index = self.host_groupings["INDV"]
+            self.host_groupings = self.host_groupings["sub_cluster_snmf"]
         
         # Read in Guillems golden table
-        self.poc_golden = pd.read_table("/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/data_available_gold_dataset_11_islands_POC.tsv")
+        self.poc_golden = pd.read_table(os.path.join(self.input_dir, "data_available_gold_dataset_11_islands_POC.tsv"))
         self.poc_golden.index = self.poc_golden["INDV"]
         # We want to work with the subset of samples for which there is host grouping info and ITS2 sequences
         self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["dataset_ITS2_sample_id"])]
@@ -39,7 +51,7 @@ class HostDiagnosticZooxs:
         self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["SVDQ"])]
         
         if self.pre_post == 'post':
-            self.path_to_zooxs_counts = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/TARA_PACIFIC_METAB_ITS2_v1/coral/post_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv"
+            self.path_to_zooxs_counts = os.path.join(self.input_dir, "TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv")
             # Get zooxs count data
             self.counts_df = pd.read_csv(self.path_to_zooxs_counts)
             self.counts_df = self.counts_df.iloc[:-1,]
@@ -49,7 +61,7 @@ class HostDiagnosticZooxs:
             self.counts_df_with_host = self.counts_df_with_host.loc[:, (self.counts_df_with_host != 0).any(axis=0)]
         
         else:
-            self.path_to_zooxs_counts = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/TARA_PACIFIC_METAB_ITS2_v1/coral/pre_med_seqs/TARA_PACIFIC_METAB_ITS2_coral_pre_med_seqs_sequences_absolute_abund_v1.csv"
+            self.path_to_zooxs_counts = os.path.join(self.input_dir, "TARA_PACIFIC_METAB_ITS2_coral_pre_med_seqs_sequences_absolute_abund_v1.csv.zip")
             with open(self.path_to_zooxs_counts, 'r') as f:
                 header = None
                 rows = []
@@ -154,7 +166,7 @@ class HostDiagnosticZooxs:
         print("Sequences that are unique diagnostic of the host group:")
         print(host_group_to_seq_dd)
         
-    def investigate_diagnostic_clusters(self, clade='C', coral='POC'):
+    def investigate_diagnostic_clusters(self):
         """
         Here we will investigate whether here is some form of structure within the ITS2 samples that would allow us
         to correlate to the species grouping.
@@ -181,7 +193,10 @@ class HostDiagnosticZooxs:
         island_ax = plt.subplot(gs[9:10, :])
         island_leg_ax = plt.subplot(gs[10:11, :])
 
-        dist_df_path = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist"
+        if self.genus == 'Cladocopium':
+            dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist")
+        elif self.genus == 'Durusdinium':
+            dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_D_sqrt.dist")
 
         sph_plot = SPHierarchical(dist_output_path=dist_df_path, no_plotting=True)
         sample_names_in_current_dist = [sph_plot.obj_uid_to_obj_name_dict[_] for _ in sph_plot.dist_df.index.values]
@@ -193,29 +208,28 @@ class HostDiagnosticZooxs:
         hier_ax.spines['right'].set_visible(False)
         hier_ax.spines['top'].set_visible(False)
         hier_ax.set_ylabel('Dissimilarity')
-        if coral == 'POC' and clade == 'C':
-            hier_ax.set_title('Pocillopora - Cladocopium')
+        hier_ax.set_title(f'{self.coral} - {self.genus}')
 
         spb_plot = SPBars(
-            seq_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.seqs.absolute.abund_and_meta.txt",
-            profile_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.profiles.absolute.abund_and_meta.txt",
-            plot_type='seq_only', legend=True, relative_abundance=True, sample_uids_included=sph_plot.dendrogram_sample_order_uid, bar_ax=seq_bars_ax, seq_leg_ax=seq_leg_ax, limit_genera=['C']
+            seq_count_table_path=os.path.join(self.input_dir, "98_20200331_DBV_2020-05-19_01-11-37.777185.seqs.absolute.abund_and_meta.txt"),
+            profile_count_table_path=os.path.join(self.input_dir, "98_20200331_DBV_2020-05-19_01-11-37.777185.profiles.absolute.abund_and_meta.txt"),
+            plot_type='seq_only', legend=True, relative_abundance=True, sample_uids_included=sph_plot.dendrogram_sample_order_uid, bar_ax=seq_bars_ax, seq_leg_ax=seq_leg_ax, limit_genera=[f'{self.genus[0]}']
         )
         spb_plot.plot()
         self._turn_off_spine_and_ticks(seq_bars_ax)
         seq_bars_ax.set_ylabel("ITS2 seqs")
 
-
         # Finally we want to plot up some rectanles that will be the host_group annotations
         # And the island annotations
-
-
         self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_leg_ax, sample_to_annotation_dict=self.sample_to_host_group_dict, sph_plot=sph_plot)
         anot_ax.set_ylabel("Host group")
         self._plot_annotations_and_legends(anot_ax=island_ax, color_map_name='Set3', leg_ax=island_leg_ax,
                                            sample_to_annotation_dict=self.sample_to_island_dict, sph_plot=sph_plot)
         island_ax.set_ylabel("Island")
-        plt.savefig(f"/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/host_diagnostic_ITS2/host_diagnostic_{coral}_{clade}.png", dpi=600)
+        plt.savefig(os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}.png"), dpi=600)
+        plt.savefig(
+            os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}.svg"),
+            dpi=600)
         foo = 'bar'
 
     def _plot_annotations_and_legends(self, anot_ax, color_map_name, leg_ax, sample_to_annotation_dict, sph_plot):
@@ -260,7 +274,7 @@ class HostDiagnosticZooxs:
 
 # The look_for_diagnostic_sequences can be run using pre_post='pre' to use the pre_med seqs.
 # However this still doesn't produce any viable diagnostic sequences and takes a lot longer due to the number of sequnces
-HostDiagnosticZooxs(pre_post='post').investigate_diagnostic_clusters()
+HostDiagnosticZooxs(pre_post='post', genus='Cladocopium', coral='Pocillopora').investigate_diagnostic_clusters()
 
 """
 Code that I was using to check why there were some ITS2 samples missing with relation to the
