@@ -41,22 +41,32 @@ class HostDiagnosticZooxs:
                                                 names=["INDV", "cluster_snmf", "sub_cluster_snmf", "SVDQuartet"])
             self.host_groupings.index = self.host_groupings["INDV"]
             self.host_groupings = self.host_groupings["sub_cluster_snmf"]
+            self.host_groupings = self.host_groupings[~pd.isnull(self.host_groupings)]
         
         # Read in Guillems golden table
-        self.poc_golden = pd.read_table(os.path.join(self.input_dir, "data_available_gold_dataset_11_islands_POC.tsv"))
-        self.poc_golden.index = self.poc_golden["INDV"]
-        # We want to work with the subset of samples for which there is host grouping info and ITS2 sequences
-        self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["dataset_ITS2_sample_id"])]
-        # Also remove the one sample that there isn't an SVDQ value for
-        self.poc_golden = self.poc_golden[~pd.isnull(self.poc_golden["SVDQ"])]
-        
+        if coral == 'Pocillopora':
+            self.golden_table = pd.read_table(os.path.join(self.input_dir, "data_available_gold_dataset_11_islands_POC.tsv"))
+            self.golden_table.index = self.golden_table["INDV"]
+            # We want to work with the subset of samples for which there is host grouping info and ITS2 sequences
+            self.golden_table = self.golden_table[~pd.isnull(self.golden_table["dataset_ITS2_sample_id"])]
+            # Also remove the one sample that there isn't an SVDQ value for
+            self.golden_table = self.golden_table[~pd.isnull(self.golden_table["SVDQ"])]
+        elif coral == 'Porites':
+            self.golden_table = pd.read_table(
+                os.path.join(self.input_dir, "data_available_gold_dataset_11_islands_POR.tsv"))
+            self.golden_table.index = self.golden_table["Ind"]
+            # We want to work with the subset of samples for which there is host grouping info and ITS2 sequences
+            self.golden_table = self.golden_table[~pd.isnull(self.golden_table["dataset_ITS2_sample_id"])]
+            # Also remove any samples that there isn't an sub_cluster_snmf value for
+            self.golden_table = self.golden_table[~pd.isnull(self.golden_table["sub_cluster_snmf"])]
+
         if self.pre_post == 'post':
             self.path_to_zooxs_counts = os.path.join(self.input_dir, "TARA_PACIFIC_METAB_ITS2_coral_post_med_seqs_sequences_absolute_abund_and_meta_v1.csv")
             # Get zooxs count data
             self.counts_df = pd.read_csv(self.path_to_zooxs_counts)
             self.counts_df = self.counts_df.iloc[:-1,]
             self.counts_df.index = self.counts_df["sample-id"]
-            self.counts_df_with_host = self.counts_df.loc[[_ for _ in self.counts_df.index if _ in self.poc_golden["dataset_ITS2_sample_id"].values],]
+            self.counts_df_with_host = self.counts_df.loc[[_ for _ in self.counts_df.index if _ in self.golden_table["dataset_ITS2_sample_id"].values],]
             # For the count table this will likely leave us with a lot of columns where it is only 0s. we will want to get rid of these
             self.counts_df_with_host = self.counts_df_with_host.loc[:, (self.counts_df_with_host != 0).any(axis=0)]
         
@@ -70,7 +80,7 @@ class HostDiagnosticZooxs:
                         header = line.rstrip().split(',')
                     else:
                         split_line_list = line.rstrip().split(',')
-                        if split_line_list[1] in self.poc_golden["dataset_ITS2_sample_id"].values:
+                        if split_line_list[1] in self.golden_table["dataset_ITS2_sample_id"].values:
                             rows.append(split_line_list)
             self.counts_df_with_host = pd.DataFrame(rows, columns=header)
             self.counts_df_with_host.index = self.counts_df_with_host["sample-id"]
@@ -88,7 +98,7 @@ class HostDiagnosticZooxs:
         self.counts_df_with_host = self.counts_df_with_host.iloc[:,drop_index:]
 
         # Need to convert between didiers naming system and the coral sample-id format
-        didier_to_sp_name_dict = {k:v for k, v in zip(self.poc_golden["INDV"].values, self.poc_golden["dataset_ITS2_sample_id"]) if not pd.isnull(v)}
+        didier_to_sp_name_dict = {k:v for k, v in zip(self.golden_table.index.values, self.golden_table["dataset_ITS2_sample_id"]) if not pd.isnull(v)}
         self.host_groupings = self.host_groupings.loc[[_ for _ in self.host_groupings.index.values if _ in didier_to_sp_name_dict],]
         self.sample_to_island_dict = {}
         for did_name in self.host_groupings.index:
@@ -180,19 +190,34 @@ class HostDiagnosticZooxs:
         # hierarchical on top of the 99 ITS2 sequences that have the host data associated with them
         # on bottom we will plot an annotation of the host group. We will hope to see clustering.
         # We will need to do this for each of the C and D clades. Start with C as this is the most abundant
-        fig = plt.figure(figsize=(11, 6))
-        # 4 down 1 across
-        gs = gridspec.GridSpec(11, 2)
-        axes = []
-        plot_tyes = ['hier', 'anot']
-        hier_ax = plt.subplot(gs[0:4,:])
-        seq_bars_ax = plt.subplot(gs[4:6, :])
-        seq_leg_ax = plt.subplot(gs[6:7, :])
-        anot_ax = plt.subplot(gs[7:8,:])
-        anot_leg_ax = plt.subplot(gs[8:9, :])
-        island_ax = plt.subplot(gs[9:10, :])
-        island_leg_ax = plt.subplot(gs[10:11, :])
-
+        if self.coral == 'Pocillopora':
+            fig = plt.figure(figsize=(11, 6))
+            # 4 down 1 across
+            gs = gridspec.GridSpec(11, 2)
+            axes = []
+            plot_tyes = ['hier', 'anot']
+            hier_ax = plt.subplot(gs[0:4,:])
+            seq_bars_ax = plt.subplot(gs[4:6, :])
+            seq_leg_ax = plt.subplot(gs[6:7, :])
+            anot_ax = plt.subplot(gs[7:8,:])
+            anot_leg_ax = plt.subplot(gs[8:9, :])
+            island_ax = plt.subplot(gs[9:10, :])
+            island_leg_ax = plt.subplot(gs[10:11, :])
+        elif self.coral == "Porites":
+            fig = plt.figure(figsize=(11, 6))
+            # 4 down 1 across
+            gs = gridspec.GridSpec(13, 2)
+            axes = []
+            plot_tyes = ['hier', 'anot']
+            hier_ax = plt.subplot(gs[0:4, :])
+            seq_bars_ax = plt.subplot(gs[4:6, :])
+            seq_leg_ax = plt.subplot(gs[6:7, :])
+            anot_ax = plt.subplot(gs[7:8, :])
+            anot_leg_ax = plt.subplot(gs[8:9, :])
+            anot_sub_ax = plt.subplot(gs[9:10, :])
+            anot_sub_leg_ax = plt.subplot(gs[10:11, :])
+            island_ax = plt.subplot(gs[11:12, :])
+            island_leg_ax = plt.subplot(gs[12:13, :])
         if self.genus == 'Cladocopium':
             dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist")
         elif self.genus == 'Durusdinium':
@@ -217,12 +242,22 @@ class HostDiagnosticZooxs:
         )
         spb_plot.plot()
         self._turn_off_spine_and_ticks(seq_bars_ax)
-        seq_bars_ax.set_ylabel("ITS2 seqs")
+        seq_bars_ax.set_ylabel("ITS2\nseqs")
 
         # Finally we want to plot up some rectanles that will be the host_group annotations
         # And the island annotations
-        self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_leg_ax, sample_to_annotation_dict=self.sample_to_host_group_dict, sph_plot=sph_plot)
-        anot_ax.set_ylabel("Host group")
+        # Problem TARA_CO-0000697 anot_sub_ax
+        if self.coral == 'Porites':
+            self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Dark2', leg_ax=anot_leg_ax,
+                                               sample_to_annotation_dict={s: g[0] for s, g in self.sample_to_host_group_dict.items()}, sph_plot=sph_plot)
+            anot_ax.set_ylabel("HostGroup")
+            self._plot_annotations_and_legends(anot_ax=anot_sub_ax, color_map_name='Set1', leg_ax=anot_sub_leg_ax, sample_to_annotation_dict=self.sample_to_host_group_dict, sph_plot=sph_plot)
+            anot_sub_ax.set_ylabel("HostGroup\nsub")
+        elif self.coral == 'Pocillopora':
+            self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_sub_ax,
+                                               sample_to_annotation_dict=self.sample_to_host_group_dict,
+                                               sph_plot=sph_plot)
+            anot_ax.set_ylabel("Host group")
         self._plot_annotations_and_legends(anot_ax=island_ax, color_map_name='Set3', leg_ax=island_leg_ax,
                                            sample_to_annotation_dict=self.sample_to_island_dict, sph_plot=sph_plot)
         island_ax.set_ylabel("Island")
@@ -274,7 +309,11 @@ class HostDiagnosticZooxs:
 
 # The look_for_diagnostic_sequences can be run using pre_post='pre' to use the pre_med seqs.
 # However this still doesn't produce any viable diagnostic sequences and takes a lot longer due to the number of sequnces
-HostDiagnosticZooxs(pre_post='post', genus='Cladocopium', coral='Pocillopora').investigate_diagnostic_clusters()
+# NB there is no Durusdinium (roughly speaking) in the Porites so it won't plot.
+
+hdz = HostDiagnosticZooxs(pre_post='post', genus='Cladocopium', coral='Porites')
+hdz.look_for_diagnostic_sqeuences()
+# hdz.investigate_diagnostic_clusters()
 
 """
 Code that I was using to check why there were some ITS2 samples missing with relation to the
