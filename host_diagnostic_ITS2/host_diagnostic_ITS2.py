@@ -23,13 +23,14 @@ import pathlib
 import os
 
 class HostDiagnosticZooxs:
-    def __init__(self, pre_post='post', genus='Cladocopium', coral='Pocillopora'):
+    def __init__(self, pre_post='post', genus='Cladocopium', coral='Pocillopora', dist_method='braycurtis'):
         self.base_dir = pathlib.Path(__file__).parent.absolute()
         self.input_dir = os.path.join(self.base_dir, 'inputs')
         self.figure_dir = os.path.join(self.base_dir, "figures")
         self.pre_post = pre_post
         self.genus = genus
         self.coral = coral
+        self.dist_method = dist_method
         # Read in the host group data
         # 'sampling-design_label' 'sample-id_source'
         if coral == 'Pocillopora':
@@ -219,10 +220,17 @@ class HostDiagnosticZooxs:
             island_ax = plt.subplot(gs[11:12, :])
             island_leg_ax = plt.subplot(gs[12:13, :])
         if self.genus == 'Cladocopium':
-            dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist")
+            if self.dist_method == 'braycurtis':
+                dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist")
+            elif self.dist_method == 'unifrac':
+                dist_df_path = os.path.join(self.input_dir,
+                                            "2020-05-19_01-11-37.777185_unifrac_btwn_sample_distances_C_sqrt.dist")
         elif self.genus == 'Durusdinium':
-            dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_D_sqrt.dist")
-
+            if self.dist_method == 'braycurtis':
+                dist_df_path = os.path.join(self.input_dir, "2020-05-19_01-11-37.777185.braycurtis_sample_distances_D_sqrt.dist")
+            elif self.dist_method == 'unifrac':
+                dist_df_path = os.path.join(self.input_dir,
+                                            "2020-05-19_01-11-37.777185_unifrac_btwn_sample_distances_D_sqrt.dist")
         sph_plot = SPHierarchical(dist_output_path=dist_df_path, no_plotting=True)
         sample_names_in_current_dist = [sph_plot.obj_uid_to_obj_name_dict[_] for _ in sph_plot.dist_df.index.values]
         samples_to_keep = [_ for _ in sample_names_in_current_dist if _ in self.counts_df_with_host.index.values]
@@ -233,7 +241,7 @@ class HostDiagnosticZooxs:
         hier_ax.spines['right'].set_visible(False)
         hier_ax.spines['top'].set_visible(False)
         hier_ax.set_ylabel('Dissimilarity')
-        hier_ax.set_title(f'{self.coral} - {self.genus}')
+        hier_ax.set_title(f'{self.coral} - {self.genus} - {self.dist_method}')
 
         spb_plot = SPBars(
             seq_count_table_path=os.path.join(self.input_dir, "98_20200331_DBV_2020-05-19_01-11-37.777185.seqs.absolute.abund_and_meta.txt"),
@@ -254,16 +262,16 @@ class HostDiagnosticZooxs:
             self._plot_annotations_and_legends(anot_ax=anot_sub_ax, color_map_name='Set1', leg_ax=anot_sub_leg_ax, sample_to_annotation_dict=self.sample_to_host_group_dict, sph_plot=sph_plot)
             anot_sub_ax.set_ylabel("HostGroup\nsub")
         elif self.coral == 'Pocillopora':
-            self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_sub_ax,
+            self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_leg_ax,
                                                sample_to_annotation_dict=self.sample_to_host_group_dict,
                                                sph_plot=sph_plot)
             anot_ax.set_ylabel("Host group")
         self._plot_annotations_and_legends(anot_ax=island_ax, color_map_name='Set3', leg_ax=island_leg_ax,
                                            sample_to_annotation_dict=self.sample_to_island_dict, sph_plot=sph_plot)
         island_ax.set_ylabel("Island")
-        plt.savefig(os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}.png"), dpi=600)
+        plt.savefig(os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}_{self.dist_method}.png"), dpi=600)
         plt.savefig(
-            os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}.svg"),
+            os.path.join(self.figure_dir, f"host_diagnostic_{self.coral}_{self.genus}_{self.dist_method}.svg"),
             dpi=600)
         foo = 'bar'
 
@@ -311,9 +319,15 @@ class HostDiagnosticZooxs:
 # However this still doesn't produce any viable diagnostic sequences and takes a lot longer due to the number of sequnces
 # NB there is no Durusdinium (roughly speaking) in the Porites so it won't plot.
 
-hdz = HostDiagnosticZooxs(pre_post='post', genus='Cladocopium', coral='Porites')
-hdz.look_for_diagnostic_sqeuences()
-# hdz.investigate_diagnostic_clusters()
+for dist_method in ['braycurtis', 'unifrac']:
+    for coral in ['Pocillopora', 'Porites']:
+        for genus in ['Cladocopium', 'Durusdinium']:
+            if coral == 'Porites' and genus == 'Durusdinium':
+                continue
+            else:
+                hdz = HostDiagnosticZooxs(pre_post='post', genus=genus, coral=coral, dist_method=dist_method)
+                hdz.investigate_diagnostic_clusters()
+
 
 """
 Code that I was using to check why there were some ITS2 samples missing with relation to the
