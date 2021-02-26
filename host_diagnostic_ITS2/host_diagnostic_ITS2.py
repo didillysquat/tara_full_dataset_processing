@@ -78,6 +78,11 @@ class HostDiagnosticZooxs:
         # Need to convert between didiers naming system and the coral sample-id format
         didier_to_sp_name_dict = {k:v for k, v in zip(self.poc_golden["INDV"].values, self.poc_golden["dataset_ITS2_sample_id"]) if not pd.isnull(v)}
         self.host_groupings = self.host_groupings.loc[[_ for _ in self.host_groupings.index.values if _ in didier_to_sp_name_dict],]
+        self.sample_to_island_dict = {}
+        for did_name in self.host_groupings.index:
+            sp_name = didier_to_sp_name_dict[did_name]
+            island = f"Island {did_name[1:3]}"
+            self.sample_to_island_dict[sp_name] = island
         self.host_groupings.index = [didier_to_sp_name_dict[_] for _ in self.host_groupings.index.values]
         self.group_to_sample_list_dict = {k: list(self.host_groupings[self.host_groupings==k].index.values) for k in self.host_groupings.unique() if not pd.isnull(k)}
         self.sample_to_host_group_dict = dict(self.host_groupings)
@@ -149,7 +154,7 @@ class HostDiagnosticZooxs:
         print("Sequences that are unique diagnostic of the host group:")
         print(host_group_to_seq_dd)
         
-    def investigate_diagnostic_clusters(self):
+    def investigate_diagnostic_clusters(self, clade='C', coral='POC'):
         """
         Here we will investigate whether here is some form of structure within the ITS2 samples that would allow us
         to correlate to the species grouping.
@@ -163,17 +168,18 @@ class HostDiagnosticZooxs:
         # hierarchical on top of the 99 ITS2 sequences that have the host data associated with them
         # on bottom we will plot an annotation of the host group. We will hope to see clustering.
         # We will need to do this for each of the C and D clades. Start with C as this is the most abundant
-        fig = plt.figure(figsize=(10, 6))
+        fig = plt.figure(figsize=(11, 6))
         # 4 down 1 across
-        gs = gridspec.GridSpec(6, 2)
+        gs = gridspec.GridSpec(11, 2)
         axes = []
         plot_tyes = ['hier', 'anot']
-        hier_ax = plt.subplot(gs[0:2,:])
-        seq_bars_ax = plt.subplot(gs[2:3, :])
-        prof_bars_ax = plt.subplot(gs[3:4, :])
-        anot_ax = plt.subplot(gs[4:5,:])
-        seq_leg_ax = plt.subplot(gs[5:6, 0])
-        prof_leg_ax = plt.subplot(gs[5:6, 1])
+        hier_ax = plt.subplot(gs[0:4,:])
+        seq_bars_ax = plt.subplot(gs[4:6, :])
+        seq_leg_ax = plt.subplot(gs[6:7, :])
+        anot_ax = plt.subplot(gs[7:8,:])
+        anot_leg_ax = plt.subplot(gs[8:9, :])
+        island_ax = plt.subplot(gs[9:10, :])
+        island_leg_ax = plt.subplot(gs[10:11, :])
 
         dist_df_path = "/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/2020-05-19_01-11-37.777185.braycurtis_sample_distances_C_sqrt.dist"
 
@@ -184,54 +190,74 @@ class HostDiagnosticZooxs:
             dist_output_path=dist_df_path, ax=hier_ax,
                                   sample_names_included=samples_to_keep)
         sph_plot.plot()
+        hier_ax.spines['right'].set_visible(False)
+        hier_ax.spines['top'].set_visible(False)
+        hier_ax.set_ylabel('Dissimilarity')
+        if coral == 'POC' and clade == 'C':
+            hier_ax.set_title('Pocillopora - Cladocopium')
 
         spb_plot = SPBars(
             seq_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.seqs.absolute.abund_and_meta.txt",
             profile_count_table_path="/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/mac_local_inputs/98_20200331_DBV_2020-05-19_01-11-37.777185.profiles.absolute.abund_and_meta.txt",
-            plot_type='seq_and_profile', legend=True, relative_abundance=True, sample_uids_included=sph_plot.dendrogram_sample_order_uid, bar_ax=seq_bars_ax, seq_leg_ax=seq_leg_ax, profile_leg_ax=prof_leg_ax
+            plot_type='seq_only', legend=True, relative_abundance=True, sample_uids_included=sph_plot.dendrogram_sample_order_uid, bar_ax=seq_bars_ax, seq_leg_ax=seq_leg_ax, limit_genera=['C']
         )
         spb_plot.plot()
+        self._turn_off_spine_and_ticks(seq_bars_ax)
+        seq_bars_ax.set_ylabel("ITS2 seqs")
+
 
         # Finally we want to plot up some rectanles that will be the host_group annotations
-        svd_cols = {svd: ctup for svd, ctup in zip(list(self.group_to_sample_list_dict.keys()), list(cm.get_cmap('Set1').colors[:5]))}
+        # And the island annotations
+
+
+        self._plot_annotations_and_legends(anot_ax=anot_ax, color_map_name='Set1', leg_ax=anot_leg_ax, sample_to_annotation_dict=self.sample_to_host_group_dict, sph_plot=sph_plot)
+        anot_ax.set_ylabel("Host group")
+        self._plot_annotations_and_legends(anot_ax=island_ax, color_map_name='Set3', leg_ax=island_leg_ax,
+                                           sample_to_annotation_dict=self.sample_to_island_dict, sph_plot=sph_plot)
+        island_ax.set_ylabel("Island")
+        plt.savefig(f"/Users/benjaminhume/Documents/projects/tara/tara_full_dataset_processing/host_diagnostic_ITS2/host_diagnostic_{coral}_{clade}.png", dpi=600)
+        foo = 'bar'
+
+    def _plot_annotations_and_legends(self, anot_ax, color_map_name, leg_ax, sample_to_annotation_dict, sph_plot):
+        cat_cols = {svd: ctup for svd, ctup in
+                    zip(list(set(sample_to_annotation_dict.values())),
+                        list(cm.get_cmap(color_map_name).colors[:len(set(sample_to_annotation_dict.values()))]))}
+        # Plot the annotations
         x_pos = 0
         patch_list = []
         for sample_name in sph_plot.dendrogram_sample_order_name:
-            svd = self.sample_to_host_group_dict[sample_name]
+            cat = sample_to_annotation_dict[sample_name]
             patch_list.append(
-                Rectangle((x_pos, 0), width=1, height=1, facecolor=svd_cols[svd], edgecolor='black')
+                Rectangle((x_pos, 0), width=1, height=1, facecolor=cat_cols[cat], edgecolor='black')
             )
             x_pos += 1
-
         collection = PatchCollection(patch_list, match_original=True)
         anot_ax.add_collection(collection)
         anot_ax.set_xlim(0, len(sph_plot.dendrogram_sample_order_name))
         anot_ax.set_ylim(0, 1)
-        anot_ax.set_xlabel('SVD category')
-        anot_ax.spines['top'].set_visible(False)
-        anot_ax.spines['bottom'].set_visible(False)
-        anot_ax.spines['right'].set_visible(False)
-        anot_ax.spines['left'].set_visible(False)
-        anot_ax.set_yticks([])
-        anot_ax.set_xticks([])
+        self._turn_off_spine_and_ticks(anot_ax)
+        # Plot the annotation legends
+        x_pos = 0.5
+        patch_list = []
+        for cat in sorted(list(cat_cols.keys())):
+            col = cat_cols[cat]
+            patch_list.append(Rectangle((x_pos-0.1, 0), height=0.2, width=0.2, facecolor=col))
+            leg_ax.text(x=x_pos, y=0.7, ha='center', va='center', s=cat)
+            x_pos += 1
+        leg_ax.add_collection(PatchCollection(patch_list, match_original=True))
+        leg_ax.set_xlim(0, len(cat_cols))
+        leg_ax.set_ylim(0, 1)
+        self._turn_off_spine_and_ticks(leg_ax)
+
+    def _turn_off_spine_and_ticks(self, ax):
+        ax.spines['top'].set_visible(False)
+        ax.spines['bottom'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+        ax.spines['left'].set_visible(False)
+        ax.set_yticks([])
+        ax.set_xticks([])
 
 
-        # Get the sampels to keep from this.
-        foo = 'bar'
-        # sph_plot = SPHierarchical(dist_output_path=dist_df_path, ax=hier_ax,
-        #                           sample_names_included=sample_uids_to_plot)
-
-        # dist_df = pd.read_table(dist_df_path, sep='\t', header=None, index_col=0)
-        # # Drop the symportal uid col
-        # dist_df = dist_df.iloc[:,1:]
-        # dist_df.columns = dist_df.index
-        # samples_to_keep = [_ for _ in dist_df.index.values if _ in self.counts_df_with_host.index.values]
-        # dist_df = dist_df.loc[samples_to_keep,samples_to_keep]
-
-
-        foo = 'bar'
-
-         
 # The look_for_diagnostic_sequences can be run using pre_post='pre' to use the pre_med seqs.
 # However this still doesn't produce any viable diagnostic sequences and takes a lot longer due to the number of sequnces
 HostDiagnosticZooxs(pre_post='post').investigate_diagnostic_clusters()
