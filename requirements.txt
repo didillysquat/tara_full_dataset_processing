@@ -25,7 +25,7 @@ mccabe==0.6.1
 msgpack==0.6.2
 natsort==6.0.0
 networkx==2.3
-numpy==1.17.2
+numpy==1.22.0
 pandas==0.25.1
 parso==0.5.1
 pexpect==4.7.0
