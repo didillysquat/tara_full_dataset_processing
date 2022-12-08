@@ -4,7 +4,7 @@ beautifulsoup4==4.8.2
 biopython==1.74
 bs4==0.0.1
 CacheControl==0.12.5
-certifi==2019.11.28
+certifi==2022.12.7
 chardet==3.0.4
 compress-pickle==1.1.1
 cycler==0.10.0
